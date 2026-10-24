@@ -26,24 +26,43 @@ const DEFAULT_SETTINGS: Record<string, string> = {
 };
 
 const DEMO_PROPERTIES: Array<[string, string, string, string, string, string, string]> = [
-  ["Oakwood Estate", "single_family", "210 Oakwood Ln", "Austin", "TX", "78704", "emerald"],
-  ["Honeybee Hideaway", "single_family", "88 Bramble Ct", "Austin", "TX", "78704", "amber"],
-  ["308 Mission Apartments", "multi_family", "308 Mission St", "Austin", "TX", "78702", "sky"],
+  ["Annapolis Harbor House", "single_family", "210 Harbor View Dr", "Annapolis", "MD", "21401", "sky"],
+  ["Fells Point Rowhome", "townhouse", "88 Thames St", "Baltimore", "MD", "21231", "amber"],
+  ["Canton Square Apartments", "multi_family", "1400 S Clinton St", "Baltimore", "MD", "21224", "violet"],
+  ["Silver Spring Commons", "multi_family", "8600 Colesville Rd", "Silver Spring", "MD", "20910", "teal"],
+  ["Frederick Market Lofts", "condo", "44 N Market St", "Frederick", "MD", "21701", "rose"],
+  ["Columbia Lakeside Duplex", "multi_family", "6200 Cedar Ln", "Columbia", "MD", "21044", "emerald"],
+  ["Bethesda Row Retail", "commercial", "4800 Bethesda Ave", "Bethesda", "MD", "20814", "orange"],
 ];
 
 /** property index (into DEMO_PROPERTIES), name, beds, baths, sqft, rent, status */
 const DEMO_UNITS: Array<[number, string, number, number, number, number, string]> = [
-  [0, "Main house", 3, 2, 1450, 2300, "occupied"],
-  [1, "Main house", 2, 1, 980, 1700, "occupied"],
-  [2, "Unit 1", 1, 1, 620, 1450, "occupied"],
-  [2, "Unit 2", 1, 1, 620, 1450, "vacant"],
-  [2, "Unit 3", 2, 1, 850, 1850, "occupied"],
+  [0, "Main house", 3, 2, 1680, 2800, "occupied"],
+  [1, "Main house", 3, 2.5, 1420, 2400, "occupied"],
+  [2, "Unit 1A", 1, 1, 640, 1650, "occupied"],
+  [2, "Unit 1B", 1, 1, 680, 1700, "vacant"],
+  [2, "Unit 2A", 2, 1, 890, 2100, "occupied"],
+  [2, "Unit 2B", 2, 2, 980, 2300, "turnover"],
+  [3, "Unit 101", 1, 1, 700, 1800, "occupied"],
+  [3, "Unit 204", 2, 1, 920, 2200, "occupied"],
+  [3, "Unit 305", 2, 2, 1050, 2450, "vacant"],
+  [4, "Loft 3", 1, 1, 780, 1900, "occupied"],
+  [4, "Loft 7", 2, 2, 1100, 2600, "occupied"],
+  [5, "Unit A", 3, 2, 1500, 2700, "occupied"],
+  [5, "Unit B", 3, 2, 1520, 2750, "vacant"],
+  [6, "Suite 100", 0, 1, 1200, 3200, "occupied"],
+  [6, "Suite 110", 0, 1, 900, 2600, "occupied"],
+  [6, "Suite 120", 0, 2, 1600, 3400, "vacant"],
+  [6, "Suite 200", 0, 1, 1400, 3100, "occupied"],
+  [6, "Suite 210", 0, 1, 800, 2400, "occupied"],
+  [6, "Suite 220", 0, 2, 1800, 3300, "turnover"],
+  [6, "Suite 300", 0, 1, 1100, 2900, "occupied"],
 ];
 
 const DEMO_VENDORS: Array<[string, string, string, string]> = [
-  ["Emerald Pool Service", "general", "512-555-0144", "emerald"],
-  ["Hill Country Plumbing", "plumber", "512-555-0188", "sky"],
-  ["Bright Spark Electric", "electrician", "512-555-0102", "amber"],
+  ["Chesapeake Plumbing", "plumber", "410-555-0142", "sky"],
+  ["Beltway Electric", "electrician", "301-555-0176", "amber"],
+  ["Harbor HVAC", "hvac", "443-555-0190", "teal"],
 ];
 
 let seeded = false; // per-isolate fast path; the COUNT re-checks are cheap
