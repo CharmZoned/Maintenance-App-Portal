@@ -71,11 +71,17 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
             icon={<Receipt className="h-4 w-4" />}
           />
           <KpiCard
-            label="Open work orders"
+            label="Open requests"
             value={String(summary.open_work_orders)}
-            sub={summary.urgent_work_orders ? `${summary.urgent_work_orders} urgent` : "Nothing urgent"}
+            sub={
+              [
+                summary.urgent_work_orders ? `${summary.urgent_work_orders} urgent` : null,
+                summary.on_hold_requests ? `${summary.on_hold_requests} on hold` : null,
+                summary.unassigned_requests ? `${summary.unassigned_requests} unassigned` : null,
+              ].filter(Boolean).join(" · ") || "Nothing urgent"
+            }
             icon={<Wrench className="h-4 w-4" />}
-            tone={summary.urgent_work_orders > 0 ? "warn" : "default"}
+            tone={summary.urgent_work_orders > 0 || (summary.unassigned_requests ?? 0) > 0 ? "warn" : "default"}
           />
         </section>
 
@@ -134,7 +140,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
         <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="p-5">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Open work orders</h2>
+              <h2 className="text-sm font-semibold">Open maintenance requests</h2>
               <button
                 type="button"
                 onClick={() => navigate("/maintenance")}
@@ -143,8 +149,18 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
                 View all
               </button>
             </div>
+            {((summary.on_hold_requests ?? 0) > 0 || (summary.unassigned_requests ?? 0) > 0) && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {(summary.on_hold_requests ?? 0) > 0 && (
+                  <Badge variant="neutral">{summary.on_hold_requests} on hold</Badge>
+                )}
+                {(summary.unassigned_requests ?? 0) > 0 && (
+                  <Badge variant="warning">{summary.unassigned_requests} unassigned</Badge>
+                )}
+              </div>
+            )}
             {summary.recent_work_orders.length === 0 ? (
-              <Empty icon={<CheckCircle2 className="h-5 w-5" />} title="All caught up" message="No open work orders right now." />
+              <Empty icon={<CheckCircle2 className="h-5 w-5" />} title="All caught up" message="No open maintenance requests right now." />
             ) : (
               <ul className="divide-y">
                 {summary.recent_work_orders.map((w) => (
@@ -152,7 +168,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{w.title}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {[w.property_name, w.unit_name].filter(Boolean).join(" · ") || "Unassigned"}
+                        {[w.request_number, w.property_name, w.unit_name].filter(Boolean).join(" · ") || "No location"}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
@@ -314,29 +330,29 @@ function Empty({
 
 function PriorityBadge({ priority }: { priority: string }) {
   const map: Record<string, string> = {
-    urgent: "bg-destructive-tint text-destructive",
-    high: "bg-warning-tint text-warning",
-    normal: "bg-info-tint text-info",
-    low: "bg-muted text-muted-foreground",
+    Urgent: "bg-destructive-tint text-destructive",
+    High: "bg-warning-tint text-warning",
+    Normal: "bg-info-tint text-info",
+    Low: "bg-muted text-muted-foreground",
   };
   return (
     <span className={cn(
-      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-      map[priority] ?? map.normal,
+      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+      map[priority] ?? map.Normal,
     )}>
-      {priority === "urgent" && <CircleAlert className="h-3 w-3" />}
+      {priority === "Urgent" && <CircleAlert className="h-3 w-3" />}
       {priority}
     </span>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    open: "secondary",
-    assigned: "default",
-    in_progress: "default",
-    completed: "outline",
-    cancelled: "outline",
+  const map: Record<string, "info" | "brand" | "warning" | "neutral" | "success"> = {
+    Open: "info",
+    Scheduled: "brand",
+    "In Progress": "warning",
+    "On Hold": "neutral",
+    Closed: "success",
   };
-  return <Badge variant={(map[status] ?? "secondary") as never} className="capitalize">{status.replace("_", " ")}</Badge>;
+  return <Badge variant={map[status] ?? "neutral"}>{status}</Badge>;
 }

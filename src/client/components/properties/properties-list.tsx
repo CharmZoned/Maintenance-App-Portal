@@ -2,19 +2,13 @@ import { useState } from "react";
 import { Building2, MapPin, Plus } from "lucide-react";
 import { useApp } from "@/context";
 import { cn, colorClasses } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
+import { TestDataBadge } from "@/components/test-data-badge";
 import type { Property } from "@/types";
 import { PageShell } from "@/components/page-shell";
-
-const TYPE_LABEL: Record<string, string> = {
-  single_family: "Single-family",
-  multi_family: "Multi-family",
-  condo: "Condo",
-  townhouse: "Townhouse",
-  commercial: "Commercial",
-};
 
 export function PropertiesList({ navigate }: { navigate: (to: string) => void }) {
   const { properties } = useApp();
@@ -68,16 +62,31 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
                       <Building2 className="size-5" />
                     </div>
                     <span className="chip">
-                      {TYPE_LABEL[p.type] ?? p.type}
+                      {p.property_type}
                     </span>
                   </div>
-                  <h3 className="font-semibold tracking-tight">{p.name}</h3>
-                  {(p.address || p.city) && (
-                    <p className="mt-1 flex items-center gap-1 truncate text-sm text-muted-foreground">
-                      <MapPin className="h-3 w-3 shrink-0" />
-                      {[p.address, p.city, p.state].filter(Boolean).join(", ")}
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate font-semibold tracking-tight">{p.property_name || p.street_address}</h3>
+                    <TestDataBadge show={p.is_test_data} />
+                  </div>
+                  <p className="mt-1 flex items-center gap-1 truncate text-sm text-muted-foreground">
+                    <MapPin className="h-3 w-3 shrink-0" />
+                    {[p.street_address, p.city, [p.state, p.zip].filter(Boolean).join(" ")].filter(Boolean).join(", ")}
+                  </p>
+                  {(p.landlord_first_name || p.landlord_last_name) && (
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      Landlord: {[p.landlord_first_name, p.landlord_last_name].filter(Boolean).join(" ")}
+                      {p.landlord_company_name ? ` · ${p.landlord_company_name}` : ""}
                     </p>
                   )}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Badge variant={p.management_status === "Active" ? "success" : p.management_status === "Partially Managed" ? "warning" : "neutral"}>
+                      {p.management_status}
+                    </Badge>
+                    <Badge variant={p.occupancy_status === "Fully Occupied" ? "info" : "neutral"}>
+                      {p.occupancy_status}
+                    </Badge>
+                  </div>
                   <div className="mt-4 grid grid-cols-3 gap-3 border-t pt-4 text-sm">
                     <Stat label="Units" value={p.unit_count ?? 0} />
                     <Stat label="Occupied" value={`${p.occupied_count ?? 0}/${p.unit_count ?? 0}`} />

@@ -7,13 +7,18 @@ import type {
   Lease,
   RentCharge,
   Vendor,
-  WorkOrder,
+  Staff,
+  Landlord,
+  MaintenanceRequest,
+  Inquiry,
   NewProperty,
   NewUnit,
   NewTenant,
   NewLease,
-  NewWorkOrder,
+  NewMaintenanceRequest,
   NewVendor,
+  NewStaff,
+  NewLandlord,
 } from "../types";
 
 export interface AppSettings {
@@ -46,20 +51,24 @@ function parseSettings(raw: Record<string, string>): AppSettings {
 export function useAppState() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [landlords, setLandlords] = useState<Landlord[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Lookup loaders ─────────────────────────────────────────────────
-
   const refreshLookups = useCallback(async () => {
-    const [props, vens, st] = await Promise.all([
+    const [props, vens, lands, staffRows, st] = await Promise.all([
       api<{ properties: Property[] }>("GET", "/api/properties"),
-      api<{ vendors: Vendor[] }>("GET", "/api/vendors").catch(() => ({ vendors: [] })),
+      api<{ vendors: Vendor[] }>("GET", "/api/vendors").catch(() => ({ vendors: [] as Vendor[] })),
+      api<{ landlords: Landlord[] }>("GET", "/api/landlords").catch(() => ({ landlords: [] as Landlord[] })),
+      api<{ staff: Staff[] }>("GET", "/api/staff").catch(() => ({ staff: [] as Staff[] })),
       api<{ settings: Record<string, string> }>("GET", "/api/settings").catch(() => ({ settings: {} })),
     ]);
     setProperties(props.properties);
     setVendors(vens.vendors);
+    setLandlords(lands.landlords);
+    setStaff(staffRows.staff);
     setSettings(parseSettings(st.settings));
   }, []);
 
@@ -72,7 +81,6 @@ export function useAppState() {
     setSettings(parseSettings(res.settings));
   }, []);
 
-  // Initial load.
   useEffect(() => {
     (async () => {
       try {
@@ -86,8 +94,25 @@ export function useAppState() {
     })();
   }, [refreshLookups]);
 
-  // Property mutations ─────────────────────────────────────────────
+  // Landlords
+  const createLandlord = useCallback(async (data: NewLandlord) => {
+    const res = await api<{ landlord: Landlord }>("POST", "/api/landlords", data);
+    await refreshLookups();
+    return res.landlord;
+  }, [refreshLookups]);
 
+  const updateLandlord = useCallback(async (id: number, patch: Partial<NewLandlord>) => {
+    const res = await api<{ landlord: Landlord }>("PUT", `/api/landlords/${id}`, patch);
+    await refreshLookups();
+    return res.landlord;
+  }, [refreshLookups]);
+
+  const deleteLandlord = useCallback(async (id: number) => {
+    await api("DELETE", `/api/landlords/${id}`);
+    await refreshLookups();
+  }, [refreshLookups]);
+
+  // Properties
   const createProperty = useCallback(async (data: NewProperty) => {
     const res = await api<{ property: Property }>("POST", "/api/properties", data);
     await refreshLookups();
@@ -105,8 +130,7 @@ export function useAppState() {
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Unit mutations ─────────────────────────────────────────────────
-
+  // Units
   const listUnits = useCallback(async (propertyId?: number): Promise<Unit[]> => {
     const path = propertyId ? `/api/units?property_id=${propertyId}` : "/api/units";
     const data = await api<{ units: Unit[] }>("GET", path);
@@ -130,8 +154,7 @@ export function useAppState() {
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Tenant mutations ───────────────────────────────────────────────
-
+  // Tenants
   const listTenants = useCallback(async (q?: string): Promise<Tenant[]> => {
     const path = q ? `/api/tenants?q=${encodeURIComponent(q)}` : "/api/tenants";
     const data = await api<{ tenants: Tenant[] }>("GET", path);
@@ -152,8 +175,7 @@ export function useAppState() {
     await api("DELETE", `/api/tenants/${id}`);
   }, []);
 
-  // Lease mutations ────────────────────────────────────────────────
-
+  // Leases
   const listLeases = useCallback(async (params?: { tenant_id?: number; unit_id?: number; status?: string }): Promise<Lease[]> => {
     const qs = new URLSearchParams();
     if (params?.tenant_id) qs.set("tenant_id", String(params.tenant_id));
@@ -181,8 +203,7 @@ export function useAppState() {
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Rent / payments ────────────────────────────────────────────────
-
+  // Rent
   const listCharges = useCallback(async (period?: string): Promise<RentCharge[]> => {
     const path = period ? `/api/rent-charges?period=${encodeURIComponent(period)}` : "/api/rent-charges";
     const data = await api<{ charges: RentCharge[] }>("GET", path);
@@ -190,8 +211,7 @@ export function useAppState() {
   }, []);
 
   const generateCharges = useCallback(async (period: string) => {
-    const data = await api<{ created: number; period: string }>("POST", "/api/rent-charges/generate", { period });
-    return data;
+    return api<{ created: number; period: string }>("POST", "/api/rent-charges/generate", { period });
   }, []);
 
   const recordPayment = useCallback(async (input: {
@@ -206,8 +226,7 @@ export function useAppState() {
     return res.charge;
   }, []);
 
-  // Vendor mutations ───────────────────────────────────────────────
-
+  // Vendors
   const createVendor = useCallback(async (data: NewVendor) => {
     const res = await api<{ vendor: Vendor }>("POST", "/api/vendors", data);
     await refreshLookups();
@@ -225,52 +244,82 @@ export function useAppState() {
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Work order mutations ───────────────────────────────────────────
+  // Staff
+  const createStaff = useCallback(async (data: NewStaff) => {
+    const res = await api<{ staff: Staff }>("POST", "/api/staff", data);
+    await refreshLookups();
+    return res.staff;
+  }, [refreshLookups]);
 
-  const listWorkOrders = useCallback(async (params?: { status?: string; property_id?: number }): Promise<WorkOrder[]> => {
+  const updateStaff = useCallback(async (id: number, patch: Partial<NewStaff>) => {
+    const res = await api<{ staff: Staff }>("PUT", `/api/staff/${id}`, patch);
+    await refreshLookups();
+    return res.staff;
+  }, [refreshLookups]);
+
+  const deleteStaff = useCallback(async (id: number) => {
+    await api("DELETE", `/api/staff/${id}`);
+    await refreshLookups();
+  }, [refreshLookups]);
+
+  // Maintenance
+  const listMaintenanceRequests = useCallback(async (params?: { status?: string; property_id?: number }): Promise<MaintenanceRequest[]> => {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
     if (params?.property_id) qs.set("property_id", String(params.property_id));
-    const path = qs.toString() ? `/api/work-orders?${qs.toString()}` : "/api/work-orders";
-    const data = await api<{ work_orders: WorkOrder[] }>("GET", path);
-    return data.work_orders;
+    const path = qs.toString() ? `/api/maintenance-requests?${qs.toString()}` : "/api/maintenance-requests";
+    const data = await api<{ maintenance_requests: MaintenanceRequest[] }>("GET", path);
+    return data.maintenance_requests;
   }, []);
 
-  const createWorkOrder = useCallback(async (data: NewWorkOrder) => {
-    const res = await api<{ work_order: WorkOrder }>("POST", "/api/work-orders", data);
-    return res.work_order;
+  /** @deprecated */
+  const listWorkOrders = listMaintenanceRequests;
+
+  const createMaintenanceRequest = useCallback(async (data: NewMaintenanceRequest) => {
+    const res = await api<{ maintenance_request: MaintenanceRequest }>("POST", "/api/maintenance-requests", data);
+    return res.maintenance_request;
   }, []);
 
-  const updateWorkOrder = useCallback(async (id: number, patch: Partial<NewWorkOrder>) => {
-    const res = await api<{ work_order: WorkOrder }>("PUT", `/api/work-orders/${id}`, patch);
-    return res.work_order;
+  const updateMaintenanceRequest = useCallback(async (id: number, patch: Partial<NewMaintenanceRequest>) => {
+    const res = await api<{ maintenance_request: MaintenanceRequest }>("PUT", `/api/maintenance-requests/${id}`, patch);
+    return res.maintenance_request;
   }, []);
 
-  const deleteWorkOrder = useCallback(async (id: number) => {
-    await api("DELETE", `/api/work-orders/${id}`);
+  const deleteMaintenanceRequest = useCallback(async (id: number) => {
+    await api("DELETE", `/api/maintenance-requests/${id}`);
+  }, []);
+
+  const createWorkOrder = createMaintenanceRequest;
+  const updateWorkOrder = updateMaintenanceRequest;
+  const deleteWorkOrder = deleteMaintenanceRequest;
+
+  // Inquiries
+  const listInquiries = useCallback(async (): Promise<Inquiry[]> => {
+    const data = await api<{ inquiries: Inquiry[] }>("GET", "/api/inquiries");
+    return data.inquiries;
+  }, []);
+
+  const updateInquiryStatus = useCallback(async (id: string, status: string) => {
+    const res = await api<{ inquiry: Inquiry }>("PUT", `/api/inquiries/${id}`, { status });
+    return res.inquiry;
   }, []);
 
   return {
-    // data
-    properties, vendors, settings,
+    properties, vendors, landlords, staff, settings,
     loading, error, setError,
-    // refresh
     refreshLookups,
-    // settings
     updateSettings,
-    // properties / units
+    createLandlord, updateLandlord, deleteLandlord,
     createProperty, updateProperty, deleteProperty,
     listUnits, createUnit, updateUnit, deleteUnit,
-    // tenants
     listTenants, createTenant, updateTenant, deleteTenant,
-    // leases
     listLeases, createLease, updateLease, deleteLease,
-    // rent
     listCharges, generateCharges, recordPayment,
-    // vendors
     createVendor, updateVendor, deleteVendor,
-    // work orders
+    createStaff, updateStaff, deleteStaff,
+    listMaintenanceRequests, createMaintenanceRequest, updateMaintenanceRequest, deleteMaintenanceRequest,
     listWorkOrders, createWorkOrder, updateWorkOrder, deleteWorkOrder,
+    listInquiries, updateInquiryStatus,
   };
 }
 

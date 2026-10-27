@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TenantDialog } from "./tenant-dialog";
 import type { Lease, Tenant } from "@/types";
+import { TestDataBadge } from "@/components/test-data-badge";
 import { PageShell } from "@/components/page-shell";
 
 export function TenantPage({ id, navigate }: { id: number; navigate: (to: string) => void }) {
@@ -72,10 +73,13 @@ export function TenantPage({ id, navigate }: { id: number; navigate: (to: string
               <User className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">{tenant.first_name} {tenant.last_name}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">{tenant.first_name} {tenant.last_name}</h1>
+                <TestDataBadge show={tenant.is_test_data} />
+              </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
                 {tenant.email && <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {tenant.email}</span>}
-                {tenant.phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {tenant.phone}</span>}
+                {tenant.mobile_phone && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {tenant.mobile_phone}</span>}
               </div>
             </div>
           </div>
@@ -101,6 +105,14 @@ export function TenantPage({ id, navigate }: { id: number; navigate: (to: string
         <Card className="p-5">
           <h2 className="mb-3 text-[1.0625rem] font-semibold leading-tight">About</h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <Field label="Unit">
+              {tenant.active_unit_name
+                ? [tenant.active_property_name, tenant.active_unit_name].filter(Boolean).join(" · ")
+                : "—"}
+            </Field>
+            <Field label="Primary on lease">{tenant.primary_on_lease ? "Yes" : "No"}</Field>
+            <Field label="Invite to app">{tenant.invite_to_app ? "Yes" : "No"}</Field>
+            <Field label="Source ID">{tenant.source_id ? <span className="font-mono text-xs">{tenant.source_id}</span> : "—"}</Field>
             <Field label="Date of birth">{tenant.date_of_birth ? formatDate(tenant.date_of_birth) : "—"}</Field>
             <Field label="Emergency contact">{tenant.emergency_contact || "—"}</Field>
             <Field label="Employer">{tenant.employer || "—"}</Field>

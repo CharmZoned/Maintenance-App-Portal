@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TenantDialog } from "./tenant-dialog";
 import type { Tenant } from "@/types";
+import { Badge } from "@/components/ui/badge";
+import { TestDataBadge } from "@/components/test-data-badge";
 import { PageShell } from "@/components/page-shell";
 
 export function TenantsList({ navigate }: { navigate: (to: string) => void }) {
@@ -34,7 +36,7 @@ export function TenantsList({ navigate }: { navigate: (to: string) => void }) {
     if (!q.trim()) return tenants;
     const needle = q.toLowerCase();
     return tenants.filter((t) =>
-      `${t.first_name} ${t.last_name} ${t.email ?? ""} ${t.phone ?? ""} ${t.active_property_name ?? ""} ${t.active_unit_name ?? ""}`.toLowerCase().includes(needle),
+      `${t.first_name} ${t.last_name} ${t.email ?? ""} ${t.mobile_phone ?? ""} ${t.active_property_name ?? ""} ${t.active_unit_name ?? ""}`.toLowerCase().includes(needle),
     );
   }, [tenants, q]);
 
@@ -83,14 +85,18 @@ export function TenantsList({ navigate }: { navigate: (to: string) => void }) {
                   <TableHead>Name</TableHead>
                   <TableHead>Active unit</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>Phone</TableHead>
+                  <TableHead>Mobile phone</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((t) => (
                   <TableRow key={t.id} className="cursor-pointer" onClick={() => navigate(`/tenants/${t.id}`)}>
                     <TableCell className="font-medium">
-                      {t.first_name} {t.last_name}
+                      <span className="inline-flex items-center gap-2">
+                        {t.first_name} {t.last_name}
+                        {!t.primary_on_lease && <Badge variant="neutral">Occupant</Badge>}
+                        <TestDataBadge show={t.is_test_data} />
+                      </span>
                     </TableCell>
                     <TableCell>
                       {t.active_unit_name ? (
@@ -110,9 +116,9 @@ export function TenantsList({ navigate }: { navigate: (to: string) => void }) {
                       ) : <span className="text-xs text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
-                      {t.phone ? (
+                      {t.mobile_phone ? (
                         <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                          <Phone className="h-3 w-3" /> {t.phone}
+                          <Phone className="h-3 w-3" /> {t.mobile_phone}
                         </span>
                       ) : <span className="text-xs text-muted-foreground">—</span>}
                     </TableCell>

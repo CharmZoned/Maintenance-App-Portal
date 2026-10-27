@@ -136,7 +136,7 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
         const data = await api<{ units: Unit[] }>("GET", "/api/units");
         const map = new Map<number, string>();
         for (const u of data.units) {
-          map.set(u.id, `${u.property_name ?? "—"} · ${u.name}`);
+          map.set(u.id, `${u.property_name ?? "—"} · ${u.unit_label}`);
         }
         setUnitLabels(map);
       } catch {
@@ -161,7 +161,7 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
                 <SelectContent>
                   {units.map((u) => (
                     <SelectItem key={u.id} value={String(u.id)}>
-                      {unitLabels.get(u.id) ?? `${u.property_name ?? "—"} · ${u.name}`}
+                      {unitLabels.get(u.id) ?? `${u.property_name ?? "—"} · ${u.unit_label}`}
                     </SelectItem>
                   ))}
                 </SelectContent>

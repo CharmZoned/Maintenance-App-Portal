@@ -8,35 +8,26 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
 import { UnitDialog } from "./unit-dialog";
-import { WorkOrderDialog } from "../maintenance/work-order-dialog";
-import type { Property, Unit, WorkOrder } from "@/types";
+import { MaintenanceRequestDialog } from "../maintenance/maintenance-request-dialog";
+import { TestDataBadge } from "@/components/test-data-badge";
+import type { MaintenanceRequest, Property, Unit } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
-const TYPE_LABEL: Record<string, string> = {
-  single_family: "Single-family",
-  multi_family: "Multi-family",
-  condo: "Condo",
-  townhouse: "Townhouse",
-  commercial: "Commercial",
-};
-
 const STATUS_TONE: Record<string, string> = {
-  vacant: "bg-warning-tint text-warning",
-  occupied: "bg-success-tint text-success",
-  turnover: "bg-info-tint text-info",
-  unavailable: "bg-muted text-muted-foreground",
+  Vacant: "bg-warning-tint text-warning",
+  Occupied: "bg-success-tint text-success",
 };
 
 export function PropertyPage({ id, navigate }: { id: number; navigate: (to: string) => void }) {
   const app = useApp();
   const [property, setProperty] = useState<Property | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [requests, setRequests] = useState<MaintenanceRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingProperty, setEditingProperty] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | undefined>(undefined);
   const [unitDialogOpen, setUnitDialogOpen] = useState(false);
-  const [woDialogOpen, setWoDialogOpen] = useState(false);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
 
   async function load() {
     try {
@@ -44,11 +35,11 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
       const [{ property: p }, ulist, wlist] = await Promise.all([
         api<{ property: Property }>("GET", `/api/properties/${id}`),
         app.listUnits(id),
-        app.listWorkOrders({ property_id: id }),
+        app.listMaintenanceRequests({ property_id: id }),
       ]);
       setProperty(p);
       setUnits(ulist);
-      setWorkOrders(wlist);
+      setRequests(wlist);
     } catch (err) {
       app.setError((err as Error).message);
     } finally {
@@ -78,9 +69,9 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   }
 
   const palette = colorClasses(property.color);
-  const occupied = units.filter((u) => u.status === "occupied").length;
+  const occupied = units.filter((u) => u.status === "Occupied").length;
   const totalRent = units.reduce((sum, u) => sum + (u.market_rent ?? 0), 0);
-  const openWorkOrders = workOrders.filter((w) => w.status !== "completed" && w.status !== "cancelled");
+  const openRequests = requests.filter((w) => w.status !== "Closed");
 
   return (
     <PageShell
@@ -103,17 +94,23 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">{property.name}</h1>
-                <span className="rounded-full border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  {TYPE_LABEL[property.type] ?? property.type}
-                </span>
+                <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">{property.property_name || property.street_address}</h1>
+                <span className="chip">{property.property_type}</span>
+                <TestDataBadge show={property.is_test_data} />
               </div>
-              {(property.address || property.city) && (
-                <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-                  <MapPin className="h-3 w-3" />
-                  {[property.address, property.city, property.state, property.zip].filter(Boolean).join(", ")}
-                </p>
-              )}
+              <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
+                <MapPin className="h-3 w-3" />
+                {[property.street_address, property.city, property.state, property.zip].filter(Boolean).join(", ")}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Badge variant={property.management_status === "Active" ? "success" : property.management_status === "Partially Managed" ? "warning" : "neutral"}>
+                  {property.management_status}
+                </Badge>
+                <Badge variant="neutral">{property.occupancy_status}</Badge>
+                {property.source_id && (
+                  <span className="text-xs text-muted-foreground">Source ID <span className="font-mono">{property.source_id}</span></span>
+                )}
+              </div>
             </div>
           </div>
           <Button variant="outline" onClick={() => setEditingProperty(true)}>
@@ -121,11 +118,30 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
           </Button>
         </header>
 
+        <Card className="p-5">
+          <h2 className="mb-3 text-[1.0625rem] font-semibold leading-tight">Details</h2>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Detail label="Landlord">
+              {[property.landlord_first_name, property.landlord_last_name].filter(Boolean).join(" ") || "—"}
+              {property.landlord_company_name ? ` · ${property.landlord_company_name}` : ""}
+            </Detail>
+            <Detail label="Landlord email">{property.landlord_email || "—"}</Detail>
+            <Detail label="Year built">{property.year_built ?? "—"}</Detail>
+            <Detail label="Management end date">{property.management_end_date ? formatDate(property.management_end_date) : "—"}</Detail>
+          </div>
+          {property.notes && (
+            <>
+              <div className="mt-4 text-[0.9375rem] font-semibold leading-tight">Notes</div>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{property.notes}</p>
+            </>
+          )}
+        </Card>
+
         <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <SummaryCard label="Units" value={String(units.length)} />
           <SummaryCard label="Occupied" value={`${occupied}/${units.length}`} />
           <SummaryCard label="Market rent" value={formatMoney(totalRent, app.settings.currency)} />
-          <SummaryCard label="Open work orders" value={String(openWorkOrders.length)} tone={openWorkOrders.length > 0 ? "warn" : "default"} />
+          <SummaryCard label="Open requests" value={String(openRequests.length)} tone={openRequests.length > 0 ? "warn" : "default"} />
         </section>
 
         <section>
@@ -145,23 +161,32 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                 <Card key={u.id} className="cursor-pointer p-4 transition-colors duration-150 hover:bg-muted" onClick={() => { setEditingUnit(u); setUnitDialogOpen(true); }}>
                   <div className="flex items-start justify-between">
                     <div>
-                      <h3 className="font-semibold">{u.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold">{u.unit_label}</h3>
+                        <TestDataBadge show={u.is_test_data} />
+                      </div>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} sqft` : ""}
+                        {u.bedrooms ?? "—"} bd · {u.bathrooms ?? "—"} ba{u.sqft ? ` · ${u.sqft} sqft` : ""}
                       </p>
                     </div>
-                    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
+                    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold", STATUS_TONE[u.status])}>
                       {u.status}
                     </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Badge variant={u.readiness_status === "Ready" ? "success" : "warning"}>{u.readiness_status}</Badge>
+                    {u.management_status !== "Active" && <Badge variant="neutral">{u.management_status}</Badge>}
+                    {u.currently_being_marketed && <Badge variant="info">Marketed</Badge>}
                   </div>
                   <div className="mt-3 flex items-end justify-between border-t pt-3">
                     <div>
                       <div className="stat-label">Market rent</div>
                       <div className="text-sm font-semibold tabular-nums">{formatMoney(u.market_rent, app.settings.currency)}</div>
                     </div>
-                    {u.active_tenant_name && (
-                      <div className="text-right text-xs text-muted-foreground">{u.active_tenant_name}</div>
-                    )}
+                    <div className="text-right text-xs text-muted-foreground">
+                      {u.active_tenant_name && <div>{u.active_tenant_name}</div>}
+                      {u.expected_move_out_date && <div>Move-out {formatDate(u.expected_move_out_date)}</div>}
+                    </div>
                   </div>
                 </Card>
               ))}
@@ -171,29 +196,29 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
 
         <section>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[1.0625rem] font-semibold leading-tight">Work orders</h2>
-            <Button size="sm" variant="outline" onClick={() => setWoDialogOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> New work order
+            <h2 className="text-[1.0625rem] font-semibold leading-tight">Maintenance requests</h2>
+            <Button size="sm" variant="outline" onClick={() => setRequestDialogOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" /> New request
             </Button>
           </div>
-          {workOrders.length === 0 ? (
-            <Card className="p-8 text-center text-sm text-muted-foreground">No work orders for this property.</Card>
+          {requests.length === 0 ? (
+            <Card className="p-8 text-center text-sm text-muted-foreground">No maintenance requests for this property.</Card>
           ) : (
             <Card className="divide-y">
-              {workOrders.map((w) => (
+              {requests.map((w) => (
                 <div key={w.id} className="flex items-center justify-between gap-4 p-4">
                   <div className="flex min-w-0 items-start gap-3">
                     <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{w.title}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {[w.unit_name, w.vendor_name, formatDate(w.created_at)].filter(Boolean).join(" · ")}
+                        {[w.request_number, w.category, w.unit_name, w.vendor_name, formatDate(w.created_at)].filter(Boolean).join(" · ")}
                       </p>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Badge variant="neutral" className="capitalize">{w.priority}</Badge>
-                    <Badge variant="secondary" className="capitalize">{w.status.replace("_", " ")}</Badge>
+                    <Badge variant="neutral">{w.priority}</Badge>
+                    <Badge variant="secondary">{w.status}</Badge>
                   </div>
                 </div>
               ))}
@@ -212,12 +237,21 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
         propertyId={property.id}
         unit={editingUnit}
       />
-      <WorkOrderDialog
-        open={woDialogOpen}
-        onOpenChange={(o) => { setWoDialogOpen(o); if (!o) load(); }}
+      <MaintenanceRequestDialog
+        open={requestDialogOpen}
+        onOpenChange={(o) => { setRequestDialogOpen(o); if (!o) load(); }}
         defaults={{ property_id: property.id }}
       />
     </PageShell>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="section-label">{label}</div>
+      <div className="mt-0.5 text-sm font-medium">{children}</div>
+    </div>
   );
 }
 

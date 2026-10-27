@@ -1,22 +1,16 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { initDB, query, get, run } from "./db";
+import { initDB, query, get, run, type DbEnv } from "./db";
 
-type Env = { Bindings: { DB: D1Database } };
+type Env = { Bindings: DbEnv };
 
 const app = new Hono<Env>();
 
 app.use("*", async (c, next) => {
   initDB(c.env);
-  await ensureSeeded();
+  await ensureSettings();
   await next();
 });
-
-// ── First-run data ─────────────────────────────────────────────────
-// A deploy applies `schema.sql` as DDL only — a seed INSERT there fails the
-// whole build — so the defaults and the sample portfolio are written here,
-// once, when their tables are still empty. A re-deploy never resurrects a
-// row the user deleted, because the table is no longer empty.
 
 const DEFAULT_SETTINGS: Record<string, string> = {
   default_rent_due_day: "1",
@@ -25,93 +19,24 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   currency: "USD",
 };
 
-const DEMO_PROPERTIES: Array<[string, string, string, string, string, string, string]> = [
-  ["Annapolis Harbor House", "single_family", "210 Harbor View Dr", "Annapolis", "MD", "21401", "sky"],
-  ["Fells Point Rowhome", "townhouse", "88 Thames St", "Baltimore", "MD", "21231", "amber"],
-  ["Canton Square Apartments", "multi_family", "1400 S Clinton St", "Baltimore", "MD", "21224", "violet"],
-  ["Silver Spring Commons", "multi_family", "8600 Colesville Rd", "Silver Spring", "MD", "20910", "teal"],
-  ["Frederick Market Lofts", "condo", "44 N Market St", "Frederick", "MD", "21701", "rose"],
-  ["Columbia Lakeside Duplex", "multi_family", "6200 Cedar Ln", "Columbia", "MD", "21044", "emerald"],
-  ["Bethesda Row Retail", "commercial", "4800 Bethesda Ave", "Bethesda", "MD", "20814", "orange"],
-];
+let settingsReady = false;
 
-/** property index (into DEMO_PROPERTIES), name, beds, baths, sqft, rent, status */
-const DEMO_UNITS: Array<[number, string, number, number, number, number, string]> = [
-  [0, "Main house", 3, 2, 1680, 2800, "occupied"],
-  [1, "Main house", 3, 2.5, 1420, 2400, "occupied"],
-  [2, "Unit 1A", 1, 1, 640, 1650, "occupied"],
-  [2, "Unit 1B", 1, 1, 680, 1700, "vacant"],
-  [2, "Unit 2A", 2, 1, 890, 2100, "occupied"],
-  [2, "Unit 2B", 2, 2, 980, 2300, "turnover"],
-  [3, "Unit 101", 1, 1, 700, 1800, "occupied"],
-  [3, "Unit 204", 2, 1, 920, 2200, "occupied"],
-  [3, "Unit 305", 2, 2, 1050, 2450, "vacant"],
-  [4, "Loft 3", 1, 1, 780, 1900, "occupied"],
-  [4, "Loft 7", 2, 2, 1100, 2600, "occupied"],
-  [5, "Unit A", 3, 2, 1500, 2700, "occupied"],
-  [5, "Unit B", 3, 2, 1520, 2750, "vacant"],
-  [6, "Suite 100", 0, 1, 1200, 3200, "occupied"],
-  [6, "Suite 110", 0, 1, 900, 2600, "occupied"],
-  [6, "Suite 120", 0, 2, 1600, 3400, "vacant"],
-  [6, "Suite 200", 0, 1, 1400, 3100, "occupied"],
-  [6, "Suite 210", 0, 1, 800, 2400, "occupied"],
-  [6, "Suite 220", 0, 2, 1800, 3300, "turnover"],
-  [6, "Suite 300", 0, 1, 1100, 2900, "occupied"],
-];
-
-const DEMO_VENDORS: Array<[string, string, string, string]> = [
-  ["Chesapeake Plumbing", "plumber", "410-555-0142", "sky"],
-  ["Beltway Electric", "electrician", "301-555-0176", "amber"],
-  ["Harbor HVAC", "hvac", "443-555-0190", "teal"],
-];
-
-let seeded = false; // per-isolate fast path; the COUNT re-checks are cheap
-
-async function ensureSeeded(): Promise<void> {
-  if (seeded) return;
-  seeded = true;
+/** Seed default Settings keys only — never auto-insert portfolio rows into shared Supabase. */
+async function ensureSettings(): Promise<void> {
+  if (settingsReady) return;
+  settingsReady = true;
   try {
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-      await run("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", [key, value]);
-    }
-
-    const props = await get<{ n: number }>("SELECT COUNT(*) AS n FROM properties");
-    if ((props?.n ?? 0) === 0) {
-      const ids: number[] = [];
-      for (const p of DEMO_PROPERTIES) {
-        await run(
-          "INSERT INTO properties (name, type, address, city, state, zip, color) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          p,
-        );
-        const row = await get<{ id: number }>("SELECT id FROM properties ORDER BY id DESC LIMIT 1");
-        ids.push(row?.id ?? 0);
-      }
-      const units = await get<{ n: number }>("SELECT COUNT(*) AS n FROM units");
-      if ((units?.n ?? 0) === 0) {
-        for (const [pi, name, beds, baths, sqft, rent, status] of DEMO_UNITS) {
-          if (!ids[pi]) continue;
-          await run(
-            "INSERT INTO units (property_id, name, bedrooms, bathrooms, sqft, market_rent, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [ids[pi], name, beds, baths, sqft, rent, status],
-          );
-        }
-      }
-    }
-
-    const vendors = await get<{ n: number }>("SELECT COUNT(*) AS n FROM vendors");
-    if ((vendors?.n ?? 0) === 0) {
-      for (const v of DEMO_VENDORS) {
-        await run("INSERT INTO vendors (name, category, phone, color) VALUES (?, ?, ?, ?)", v);
-      }
+      await run(
+        `INSERT INTO "Settings" (key, value) VALUES (?, ?)
+         ON CONFLICT (key) DO NOTHING`,
+        [key, value],
+      );
     }
   } catch {
-    // A cold database mid-migration, or a table this build has not created
-    // yet: the next request retries. Never fail a request over sample data.
-    seeded = false;
+    settingsReady = false;
   }
 }
-
-// ── Helpers ────────────────────────────────────────────────────────
 
 const intParam = (raw: string | undefined): number | null => {
   if (!raw) return null;
@@ -135,31 +60,134 @@ function buildUpdate(fields: Record<string, unknown>): { sets: string[]; params:
   const sets: string[] = [];
   const params: unknown[] = [];
   for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined) { sets.push(`${k} = ?`); params.push(v); }
+    if (v !== undefined) {
+      sets.push(`"${k}" = ?`);
+      params.push(v);
+    }
   }
   return { sets, params };
 }
 
+const PROPERTY_TYPES = [
+  "Single-family", "Multi-family", "Condo", "Townhouse",
+  "Apartment building", "Commercial", "Other",
+] as const;
+
+const UNIT_STATUSES = ["Occupied", "Vacant"] as const;
+const READINESS = ["Ready", "Turnover Needed", "Turnover In Progress", "Rehab Needed", "Rehab In Progress"] as const;
+const MGMT = ["Active", "No Longer Managed"] as const;
+const PROP_MGMT = ["Active", "Partially Managed", "No Longer Managed"] as const;
+const CONTACT = ["Email", "Phone", "Either"] as const;
+const MR_PRIORITY = ["Low", "Normal", "High", "Urgent"] as const;
+const MR_STATUS = ["Open", "Scheduled", "In Progress", "On Hold", "Closed"] as const;
+const MR_CATEGORY = [
+  "Plumbing", "Electrical", "Heating / AC", "Appliance", "Pest control",
+  "Locks / keys / doors", "Windows", "Roof / leaks", "Mold / water damage",
+  "Exterior / yard", "General repair", "Other",
+] as const;
+
+// ── Landlords ──────────────────────────────────────────────────────
+
+const LandlordInput = z.object({
+  first_name: z.string().min(1),
+  last_name: z.string().min(1),
+  company_name: z.string().optional().nullable(),
+  email: z.string().email(),
+  mobile_phone: z.string().optional().nullable(),
+  preferred_contact: z.enum(CONTACT).optional().nullable(),
+  notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
+  source_id: z.string().optional(),
+});
+
+app.get("/api/landlords", async (c) => {
+  const rows = await query(
+    `SELECT l.*,
+       (SELECT COUNT(*)::int FROM "Properties" p WHERE p.landlord_id = l.id) AS property_count
+     FROM "Landlords" l
+     ORDER BY l.last_name, l.first_name`,
+  );
+  return c.json({ landlords: rows });
+});
+
+app.get("/api/landlords/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const row = await get(`SELECT * FROM "Landlords" WHERE id = ?`, [id]);
+  if (!row) return c.json({ error: "Not found" }, 404);
+  const properties = await query(`SELECT * FROM "Properties" WHERE landlord_id = ? ORDER BY property_name`, [id]);
+  return c.json({ landlord: row, properties });
+});
+
+app.post("/api/landlords", async (c) => {
+  const parsed = await parseJson(c, LandlordInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+  const result = await run(
+    `INSERT INTO "Landlords" (first_name, last_name, company_name, email, mobile_phone, preferred_contact, notes, is_test_data, source_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'app-' || gen_random_uuid()::text))`,
+    [
+      d.first_name, d.last_name, d.company_name ?? null, d.email,
+      d.mobile_phone ?? null, d.preferred_contact ?? null, d.notes ?? null,
+      d.is_test_data ?? false, d.source_id ?? null,
+    ],
+  );
+  const row = await get(`SELECT * FROM "Landlords" WHERE id = ?`, [result.lastInsertRowid]);
+  return c.json({ landlord: row }, 201);
+});
+
+app.put("/api/landlords/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const parsed = await parseJson(c, LandlordInput.partial());
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
+  if (!sets.length) return c.json({ error: "No fields" }, 400);
+  params.push(id);
+  const r = await run(`UPDATE "Landlords" SET ${sets.join(", ")} WHERE id = ?`, params);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  const row = await get(`SELECT * FROM "Landlords" WHERE id = ?`, [id]);
+  return c.json({ landlord: row });
+});
+
+app.delete("/api/landlords/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const r = await run(`DELETE FROM "Landlords" WHERE id = ?`, [id]);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true });
+});
+
 // ── Properties ─────────────────────────────────────────────────────
 
 const PropertyInput = z.object({
-  name: z.string().min(1),
-  type: z.enum(["single_family", "multi_family", "condo", "townhouse", "commercial"]).optional(),
-  address: z.string().optional().nullable(),
-  city: z.string().optional().nullable(),
-  state: z.string().optional().nullable(),
-  zip: z.string().optional().nullable(),
-  year_built: z.number().int().optional().nullable(),
+  property_name: z.string().min(1).optional().nullable(),
+  street_address: z.string().min(1),
+  city: z.string().min(1),
+  state: z.string().regex(/^[A-Z]{2}$/),
+  zip: z.string().regex(/^[0-9]{5}$/),
+  property_type: z.enum(PROPERTY_TYPES),
+  landlord_id: z.number().int(),
   notes: z.string().optional().nullable(),
+  management_status: z.enum(PROP_MGMT).optional(),
+  management_end_date: z.string().optional().nullable(),
+  year_built: z.number().int().optional().nullable(),
   color: z.string().optional(),
+  is_test_data: z.boolean().optional(),
+  source_id: z.string().optional(),
 });
 
 app.get("/api/properties", async (c) => {
   const rows = await query(
     `SELECT p.*,
-       (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id) as unit_count,
-       (SELECT COUNT(*) FROM units u WHERE u.property_id = p.id AND u.status = 'occupied') as occupied_count
-     FROM properties p ORDER BY p.name`,
+       l.first_name AS landlord_first_name,
+       l.last_name AS landlord_last_name,
+       l.company_name AS landlord_company_name,
+       (SELECT COUNT(*)::int FROM "Units" u WHERE u.property_id = p.id) AS unit_count,
+       (SELECT COUNT(*)::int FROM "Units" u WHERE u.property_id = p.id AND u.status = 'Occupied') AS occupied_count
+     FROM "Properties" p
+     LEFT JOIN "Landlords" l ON l.id = p.landlord_id
+     ORDER BY COALESCE(p.property_name, p.street_address)`,
   );
   return c.json({ properties: rows });
 });
@@ -167,7 +195,17 @@ app.get("/api/properties", async (c) => {
 app.get("/api/properties/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get("SELECT * FROM properties WHERE id = ?", [id]);
+  const row = await get(
+    `SELECT p.*,
+       l.first_name AS landlord_first_name,
+       l.last_name AS landlord_last_name,
+       l.company_name AS landlord_company_name,
+       l.email AS landlord_email
+     FROM "Properties" p
+     LEFT JOIN "Landlords" l ON l.id = p.landlord_id
+     WHERE p.id = ?`,
+    [id],
+  );
   if (!row) return c.json({ error: "Not found" }, 404);
   return c.json({ property: row });
 });
@@ -177,11 +215,17 @@ app.post("/api/properties", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO properties (name, type, address, city, state, zip, year_built, notes, color)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.name, d.type ?? "single_family", d.address ?? null, d.city ?? null, d.state ?? null, d.zip ?? null, d.year_built ?? null, d.notes ?? null, d.color ?? "sky"],
+    `INSERT INTO "Properties" (
+       property_name, street_address, city, state, zip, property_type, landlord_id,
+       notes, management_status, management_end_date, year_built, color, is_test_data, source_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'app-' || gen_random_uuid()::text))`,
+    [
+      d.property_name ?? null, d.street_address, d.city, d.state, d.zip, d.property_type, d.landlord_id,
+      d.notes ?? null, d.management_status ?? "Active", d.management_end_date ?? null,
+      d.year_built ?? null, d.color ?? "sky", d.is_test_data ?? false, d.source_id ?? null,
+    ],
   );
-  const row = await get("SELECT * FROM properties WHERE id = ?", [result.lastInsertRowid]);
+  const row = await get(`SELECT * FROM "Properties" WHERE id = ?`, [result.lastInsertRowid]);
   return c.json({ property: row }, 201);
 });
 
@@ -190,19 +234,22 @@ app.put("/api/properties/:id", async (c) => {
   if (!id) return c.json({ error: "Invalid ID" }, 400);
   const parsed = await parseJson(c, PropertyInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  // occupancy_status is trigger-maintained — never accept from client
+  const data = { ...parsed.data } as Record<string, unknown>;
+  delete data.occupancy_status;
+  const { sets, params } = buildUpdate(data);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE properties SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "Properties" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
-  const row = await get("SELECT * FROM properties WHERE id = ?", [id]);
+  const row = await get(`SELECT * FROM "Properties" WHERE id = ?`, [id]);
   return c.json({ property: row });
 });
 
 app.delete("/api/properties/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM properties WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "Properties" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
@@ -211,25 +258,34 @@ app.delete("/api/properties/:id", async (c) => {
 
 const UnitInput = z.object({
   property_id: z.number().int(),
-  name: z.string().min(1),
-  bedrooms: z.number().min(0).optional(),
-  bathrooms: z.number().min(0).optional(),
+  unit_label: z.string().min(1),
+  bedrooms: z.number().int().min(0).optional().nullable(),
+  bathrooms: z.number().min(0).optional().nullable(),
   sqft: z.number().int().optional().nullable(),
   market_rent: z.number().min(0).optional(),
-  status: z.enum(["vacant", "occupied", "turnover", "unavailable"]).optional(),
+  status: z.enum(UNIT_STATUSES).optional(),
+  readiness_status: z.enum(READINESS).optional(),
+  currently_being_marketed: z.boolean().optional(),
+  management_status: z.enum(MGMT).optional(),
+  management_end_date: z.string().optional().nullable(),
+  expected_move_out_date: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
+  source_id: z.string().optional(),
 });
 
 const UNIT_SELECT = `
   SELECT u.*,
-    p.name as property_name,
-    p.color as property_color,
-    p.address as property_address,
-    p.city as property_city,
-    (SELECT l.id FROM leases l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_lease_id,
-    (SELECT t.first_name || ' ' || t.last_name FROM leases l LEFT JOIN tenants t ON t.id = l.primary_tenant_id WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) as active_tenant_name
-  FROM units u
-  LEFT JOIN properties p ON p.id = u.property_id
+    p.property_name,
+    p.color AS property_color,
+    p.street_address AS property_address,
+    p.city AS property_city,
+    (SELECT l.id FROM "Leases" l WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) AS active_lease_id,
+    (SELECT t.first_name || ' ' || t.last_name FROM "Leases" l
+       LEFT JOIN "Tenants" t ON t.id = l.primary_tenant_id
+       WHERE l.unit_id = u.id AND l.status = 'active' ORDER BY l.start_date DESC LIMIT 1) AS active_tenant_name
+  FROM "Units" u
+  LEFT JOIN "Properties" p ON p.id = u.property_id
 `;
 
 app.get("/api/units", async (c) => {
@@ -239,7 +295,7 @@ app.get("/api/units", async (c) => {
   const params: unknown[] = [];
   if (propertyId) { where.push("u.property_id = ?"); params.push(propertyId); }
   if (status) { where.push("u.status = ?"); params.push(status); }
-  const sql = `${UNIT_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY p.name, u.name`;
+  const sql = `${UNIT_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY p.property_name, u.unit_label`;
   const rows = await query(sql, params);
   return c.json({ units: rows });
 });
@@ -257,9 +313,18 @@ app.post("/api/units", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO units (property_id, name, bedrooms, bathrooms, sqft, market_rent, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.property_id, d.name, d.bedrooms ?? 1, d.bathrooms ?? 1, d.sqft ?? null, d.market_rent ?? 0, d.status ?? "vacant", d.notes ?? null],
+    `INSERT INTO "Units" (
+       property_id, unit_label, bedrooms, bathrooms, sqft, market_rent, status,
+       readiness_status, currently_being_marketed, management_status,
+       management_end_date, expected_move_out_date, notes, is_test_data, source_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'app-' || gen_random_uuid()::text))`,
+    [
+      d.property_id, d.unit_label, d.bedrooms ?? null, d.bathrooms ?? null,
+      d.sqft ?? null, d.market_rent ?? 0, d.status ?? "Vacant",
+      d.readiness_status ?? "Ready", d.currently_being_marketed ?? false,
+      d.management_status ?? "Active", d.management_end_date ?? null,
+      d.expected_move_out_date ?? null, d.notes ?? null, d.is_test_data ?? false, d.source_id ?? null,
+    ],
   );
   const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [result.lastInsertRowid]);
   return c.json({ unit: row }, 201);
@@ -270,10 +335,12 @@ app.put("/api/units/:id", async (c) => {
   if (!id) return c.json({ error: "Invalid ID" }, 400);
   const parsed = await parseJson(c, UnitInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const data = { ...parsed.data } as Record<string, unknown>;
+  delete data.occupancy_status; // generated column
+  const { sets, params } = buildUpdate(data);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE units SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "Units" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   const row = await get(`${UNIT_SELECT} WHERE u.id = ?`, [id]);
   return c.json({ unit: row });
@@ -282,7 +349,7 @@ app.put("/api/units/:id", async (c) => {
 app.delete("/api/units/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM units WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "Units" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
@@ -292,51 +359,50 @@ app.delete("/api/units/:id", async (c) => {
 const TenantInput = z.object({
   first_name: z.string().min(1),
   last_name: z.string().min(1),
-  email: z.string().optional().nullable(),
-  phone: z.string().optional().nullable(),
+  email: z.string().email(),
+  mobile_phone: z.string().optional().nullable(),
+  unit_id: z.number().int(),
+  primary_on_lease: z.boolean(),
+  invite_to_app: z.boolean(),
   date_of_birth: z.string().optional().nullable(),
   emergency_contact: z.string().optional().nullable(),
   employer: z.string().optional().nullable(),
   monthly_income: z.number().optional().nullable(),
   notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
+  source_id: z.string().optional(),
 });
+
+const TENANT_SELECT = `
+  SELECT t.*,
+    u.unit_label AS active_unit_name,
+    u.id AS active_unit_id,
+    p.property_name AS active_property_name
+  FROM "Tenants" t
+  LEFT JOIN "Units" u ON u.id = t.unit_id
+  LEFT JOIN "Properties" p ON p.id = u.property_id
+`;
 
 app.get("/api/tenants", async (c) => {
   const search = c.req.query("q")?.trim();
   if (search) {
     const like = `%${search}%`;
     const rows = await query(
-      `SELECT t.*,
-         (SELECT u.id FROM leases l LEFT JOIN units u ON u.id = l.unit_id
-            WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_id,
-         (SELECT u.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id
-            WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_name,
-         (SELECT p.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id LEFT JOIN properties p ON p.id = u.property_id
-            WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_property_name
-       FROM tenants t
-       WHERE t.last_name LIKE ? OR t.first_name LIKE ? OR t.email LIKE ? OR t.phone LIKE ?
+      `${TENANT_SELECT}
+       WHERE t.last_name ILIKE ? OR t.first_name ILIKE ? OR t.email ILIKE ? OR t.mobile_phone ILIKE ?
        ORDER BY t.last_name, t.first_name LIMIT 200`,
       [like, like, like, like],
     );
     return c.json({ tenants: rows });
   }
-  const rows = await query(
-    `SELECT t.*,
-       (SELECT u.id FROM leases l LEFT JOIN units u ON u.id = l.unit_id
-          WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_id,
-       (SELECT u.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id
-          WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_unit_name,
-       (SELECT p.name FROM leases l LEFT JOIN units u ON u.id = l.unit_id LEFT JOIN properties p ON p.id = u.property_id
-          WHERE l.primary_tenant_id = t.id AND l.status = 'active' LIMIT 1) as active_property_name
-     FROM tenants t ORDER BY t.last_name, t.first_name LIMIT 500`,
-  );
+  const rows = await query(`${TENANT_SELECT} ORDER BY t.last_name, t.first_name LIMIT 500`);
   return c.json({ tenants: rows });
 });
 
 app.get("/api/tenants/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get("SELECT * FROM tenants WHERE id = ?", [id]);
+  const row = await get(`${TENANT_SELECT} WHERE t.id = ?`, [id]);
   if (!row) return c.json({ error: "Not found" }, 404);
   return c.json({ tenant: row });
 });
@@ -346,11 +412,17 @@ app.post("/api/tenants", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO tenants (first_name, last_name, email, phone, date_of_birth, emergency_contact, employer, monthly_income, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.first_name, d.last_name, d.email ?? null, d.phone ?? null, d.date_of_birth ?? null, d.emergency_contact ?? null, d.employer ?? null, d.monthly_income ?? null, d.notes ?? null],
+    `INSERT INTO "Tenants" (
+       first_name, last_name, email, mobile_phone, unit_id, primary_on_lease, invite_to_app,
+       date_of_birth, emergency_contact, employer, monthly_income, notes, is_test_data, source_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'app-' || gen_random_uuid()::text))`,
+    [
+      d.first_name, d.last_name, d.email, d.mobile_phone ?? null, d.unit_id,
+      d.primary_on_lease, d.invite_to_app, d.date_of_birth ?? null, d.emergency_contact ?? null,
+      d.employer ?? null, d.monthly_income ?? null, d.notes ?? null, d.is_test_data ?? false, d.source_id ?? null,
+    ],
   );
-  const row = await get("SELECT * FROM tenants WHERE id = ?", [result.lastInsertRowid]);
+  const row = await get(`${TENANT_SELECT} WHERE t.id = ?`, [result.lastInsertRowid]);
   return c.json({ tenant: row }, 201);
 });
 
@@ -359,19 +431,19 @@ app.put("/api/tenants/:id", async (c) => {
   if (!id) return c.json({ error: "Invalid ID" }, 400);
   const parsed = await parseJson(c, TenantInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE tenants SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "Tenants" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
-  const row = await get("SELECT * FROM tenants WHERE id = ?", [id]);
+  const row = await get(`${TENANT_SELECT} WHERE t.id = ?`, [id]);
   return c.json({ tenant: row });
 });
 
 app.delete("/api/tenants/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM tenants WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "Tenants" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
@@ -389,18 +461,19 @@ const LeaseInput = z.object({
   late_fee: z.number().min(0).optional(),
   status: z.enum(["upcoming", "active", "ended", "cancelled"]).optional(),
   notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
 });
 
 const LEASE_SELECT = `
   SELECT l.*,
-    u.name as unit_name,
-    p.id as property_id, p.name as property_name, p.color as property_color,
-    t.first_name as tenant_first_name, t.last_name as tenant_last_name,
-    t.email as tenant_email, t.phone as tenant_phone
-  FROM leases l
-  LEFT JOIN units u ON u.id = l.unit_id
-  LEFT JOIN properties p ON p.id = u.property_id
-  LEFT JOIN tenants t ON t.id = l.primary_tenant_id
+    u.unit_label AS unit_name,
+    p.id AS property_id, p.property_name, p.color AS property_color,
+    t.first_name AS tenant_first_name, t.last_name AS tenant_last_name,
+    t.email AS tenant_email, t.mobile_phone AS tenant_phone
+  FROM "Leases" l
+  LEFT JOIN "Units" u ON u.id = l.unit_id
+  LEFT JOIN "Properties" p ON p.id = u.property_id
+  LEFT JOIN "Tenants" t ON t.id = l.primary_tenant_id
 `;
 
 app.get("/api/leases", async (c) => {
@@ -430,13 +503,16 @@ app.post("/api/leases", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO leases (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, deposit, rent_due_day, late_fee, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [d.unit_id, d.primary_tenant_id ?? null, d.start_date, d.end_date, d.monthly_rent ?? 0, d.deposit ?? 0, d.rent_due_day ?? 1, d.late_fee ?? 0, d.status ?? "active", d.notes ?? null],
+    `INSERT INTO "Leases" (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, deposit, rent_due_day, late_fee, status, notes, is_test_data)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      d.unit_id, d.primary_tenant_id ?? null, d.start_date, d.end_date,
+      d.monthly_rent ?? 0, d.deposit ?? 0, d.rent_due_day ?? 1, d.late_fee ?? 0,
+      d.status ?? "active", d.notes ?? null, d.is_test_data ?? false,
+    ],
   );
-  // Mark the unit as occupied if the new lease is active.
   if ((d.status ?? "active") === "active") {
-    await run("UPDATE units SET status = 'occupied' WHERE id = ?", [d.unit_id]);
+    await run(`UPDATE "Units" SET status = 'Occupied' WHERE id = ?`, [d.unit_id]);
   }
   const row = await get(`${LEASE_SELECT} WHERE l.id = ?`, [result.lastInsertRowid]);
   return c.json({ lease: row }, 201);
@@ -447,10 +523,10 @@ app.put("/api/leases/:id", async (c) => {
   if (!id) return c.json({ error: "Invalid ID" }, 400);
   const parsed = await parseJson(c, LeaseInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE leases SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "Leases" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   const row = await get(`${LEASE_SELECT} WHERE l.id = ?`, [id]);
   return c.json({ lease: row });
@@ -459,7 +535,7 @@ app.put("/api/leases/:id", async (c) => {
 app.delete("/api/leases/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM leases WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "Leases" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
@@ -472,19 +548,20 @@ const ChargeInput = z.object({
   due_date: z.string(),
   amount: z.number().min(0).optional(),
   notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
 });
 
 const CHARGE_SELECT = `
   SELECT c.*,
-    l.unit_id, l.monthly_rent as lease_rent, l.rent_due_day,
-    u.name as unit_name,
-    p.id as property_id, p.name as property_name, p.color as property_color,
-    t.id as tenant_id, t.first_name as tenant_first_name, t.last_name as tenant_last_name
-  FROM rent_charges c
-  LEFT JOIN leases l ON l.id = c.lease_id
-  LEFT JOIN units u ON u.id = l.unit_id
-  LEFT JOIN properties p ON p.id = u.property_id
-  LEFT JOIN tenants t ON t.id = l.primary_tenant_id
+    l.unit_id, l.monthly_rent AS lease_rent, l.rent_due_day,
+    u.unit_label AS unit_name,
+    p.id AS property_id, p.property_name, p.color AS property_color,
+    t.id AS tenant_id, t.first_name AS tenant_first_name, t.last_name AS tenant_last_name
+  FROM "RentCharges" c
+  LEFT JOIN "Leases" l ON l.id = c.lease_id
+  LEFT JOIN "Units" u ON u.id = l.unit_id
+  LEFT JOIN "Properties" p ON p.id = u.property_id
+  LEFT JOIN "Tenants" t ON t.id = l.primary_tenant_id
 `;
 
 app.get("/api/rent-charges", async (c) => {
@@ -494,7 +571,7 @@ app.get("/api/rent-charges", async (c) => {
   const params: unknown[] = [];
   if (period) { where.push("c.period = ?"); params.push(period); }
   if (status) { where.push("c.status = ?"); params.push(status); }
-  const sql = `${CHARGE_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY c.due_date, p.name, u.name`;
+  const sql = `${CHARGE_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY c.due_date, p.property_name, u.unit_label`;
   const rows = await query(sql, params).catch(() => []);
   return c.json({ charges: rows });
 });
@@ -504,9 +581,10 @@ app.post("/api/rent-charges", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO rent_charges (lease_id, period, due_date, amount, notes) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(lease_id, period) DO NOTHING`,
-    [d.lease_id, d.period, d.due_date, d.amount ?? 0, d.notes ?? null],
+    `INSERT INTO "RentCharges" (lease_id, period, due_date, amount, notes, is_test_data)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (lease_id, period) DO NOTHING`,
+    [d.lease_id, d.period, d.due_date, d.amount ?? 0, d.notes ?? null, d.is_test_data ?? false],
   );
   if (!result.changes) {
     const existing = await get(`${CHARGE_SELECT} WHERE c.lease_id = ? AND c.period = ?`, [d.lease_id, d.period]);
@@ -516,32 +594,30 @@ app.post("/api/rent-charges", async (c) => {
   return c.json({ charge: row }, 201);
 });
 
-// Generate (idempotent) charges for a given period across all active leases.
 app.post("/api/rent-charges/generate", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { period?: string };
   const period = body.period;
   if (!period || !/^\d{4}-\d{2}$/.test(period)) return c.json({ error: "period (YYYY-MM) required" }, 400);
   const leases = await query<{ id: number; monthly_rent: number; rent_due_day: number; start_date: string; end_date: string }>(
-    "SELECT id, monthly_rent, rent_due_day, start_date, end_date FROM leases WHERE status = 'active'",
+    `SELECT id, monthly_rent, rent_due_day, start_date::text, end_date::text FROM "Leases" WHERE status = 'active'`,
   );
   let created = 0;
   for (const l of leases) {
-    // Skip if the lease doesn't cover this period at all.
     const periodStart = `${period}-01`;
     if (l.end_date < periodStart) continue;
-    const day = String(Math.min(28, Math.max(1, l.rent_due_day))).padStart(2, "0");
+    const day = String(Math.min(28, Math.max(1, Number(l.rent_due_day)))).padStart(2, "0");
     const dueDate = `${period}-${day}`;
     const r = await run(
-      `INSERT INTO rent_charges (lease_id, period, due_date, amount) VALUES (?, ?, ?, ?)
-         ON CONFLICT(lease_id, period) DO NOTHING`,
+      `INSERT INTO "RentCharges" (lease_id, period, due_date, amount)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (lease_id, period) DO NOTHING`,
       [l.id, period, dueDate, l.monthly_rent],
     );
     if (r.changes) created++;
   }
-  // Re-mark anything past due as 'overdue'.
   await run(
-    `UPDATE rent_charges SET status = 'overdue'
-     WHERE status IN ('open', 'partial') AND amount_paid < amount AND due_date < date('now')`,
+    `UPDATE "RentCharges" SET status = 'overdue'
+     WHERE status IN ('open', 'partial') AND amount_paid < amount AND due_date < CURRENT_DATE`,
   );
   return c.json({ created, period });
 });
@@ -557,10 +633,10 @@ app.put("/api/rent-charges/:id", async (c) => {
   });
   const parsed = await parseJson(c, Patch);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE rent_charges SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "RentCharges" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   const row = await get(`${CHARGE_SELECT} WHERE c.id = ?`, [id]);
   return c.json({ charge: row });
@@ -569,7 +645,7 @@ app.put("/api/rent-charges/:id", async (c) => {
 app.delete("/api/rent-charges/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM rent_charges WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "RentCharges" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
@@ -581,12 +657,13 @@ const PaymentInput = z.object({
   method: z.enum(["cash", "check", "ach", "credit", "other"]).optional(),
   reference: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
 });
 
 app.get("/api/rent-charges/:id/payments", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const rows = await query("SELECT * FROM payments WHERE charge_id = ? ORDER BY paid_at DESC", [id]);
+  const rows = await query(`SELECT * FROM "Payments" WHERE charge_id = ? ORDER BY paid_at DESC`, [id]);
   return c.json({ payments: rows });
 });
 
@@ -595,17 +672,16 @@ app.post("/api/payments", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   await run(
-    `INSERT INTO payments (charge_id, paid_at, amount, method, reference, notes)
-     VALUES (?, COALESCE(?, datetime('now')), ?, ?, ?, ?)`,
-    [d.charge_id, d.paid_at ?? null, d.amount, d.method ?? "cash", d.reference ?? null, d.notes ?? null],
+    `INSERT INTO "Payments" (charge_id, paid_at, amount, method, reference, notes, is_test_data)
+     VALUES (?, COALESCE(?::timestamptz, now()), ?, ?, ?, ?, ?)`,
+    [d.charge_id, d.paid_at ?? null, d.amount, d.method ?? "cash", d.reference ?? null, d.notes ?? null, d.is_test_data ?? false],
   );
-  // Recompute the charge's amount_paid + status.
-  const charge = await get<{ amount: number }>("SELECT amount FROM rent_charges WHERE id = ?", [d.charge_id]);
+  const charge = await get<{ amount: number }>(`SELECT amount FROM "RentCharges" WHERE id = ?`, [d.charge_id]);
   if (!charge) return c.json({ error: "Charge not found" }, 404);
-  const sumRow = await get<{ total: number }>("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE charge_id = ?", [d.charge_id]);
+  const sumRow = await get<{ total: number }>(`SELECT COALESCE(SUM(amount), 0) AS total FROM "Payments" WHERE charge_id = ?`, [d.charge_id]);
   const paid = Number(sumRow?.total ?? 0);
-  const status = paid >= charge.amount ? "paid" : paid > 0 ? "partial" : "open";
-  await run("UPDATE rent_charges SET amount_paid = ?, status = ? WHERE id = ?", [paid, status, d.charge_id]);
+  const status = paid >= Number(charge.amount) ? "paid" : paid > 0 ? "partial" : "open";
+  await run(`UPDATE "RentCharges" SET amount_paid = ?, status = ? WHERE id = ?`, [paid, status, d.charge_id]);
   const updated = await get(`${CHARGE_SELECT} WHERE c.id = ?`, [d.charge_id]);
   return c.json({ charge: updated }, 201);
 });
@@ -613,15 +689,14 @@ app.post("/api/payments", async (c) => {
 app.delete("/api/payments/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const row = await get<{ charge_id: number }>("SELECT charge_id FROM payments WHERE id = ?", [id]);
+  const row = await get<{ charge_id: number }>(`SELECT charge_id FROM "Payments" WHERE id = ?`, [id]);
   if (!row) return c.json({ error: "Not found" }, 404);
-  await run("DELETE FROM payments WHERE id = ?", [id]);
-  // Recompute the charge.
-  const sumRow = await get<{ total: number }>("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE charge_id = ?", [row.charge_id]);
-  const charge = await get<{ amount: number }>("SELECT amount FROM rent_charges WHERE id = ?", [row.charge_id]);
+  await run(`DELETE FROM "Payments" WHERE id = ?`, [id]);
+  const sumRow = await get<{ total: number }>(`SELECT COALESCE(SUM(amount), 0) AS total FROM "Payments" WHERE charge_id = ?`, [row.charge_id]);
+  const charge = await get<{ amount: number }>(`SELECT amount FROM "RentCharges" WHERE id = ?`, [row.charge_id]);
   const paid = Number(sumRow?.total ?? 0);
-  const status = !charge ? "open" : paid >= charge.amount ? "paid" : paid > 0 ? "partial" : "open";
-  await run("UPDATE rent_charges SET amount_paid = ?, status = ? WHERE id = ?", [paid, status, row.charge_id]);
+  const status = !charge ? "open" : paid >= Number(charge.amount) ? "paid" : paid > 0 ? "partial" : "open";
+  await run(`UPDATE "RentCharges" SET amount_paid = ?, status = ? WHERE id = ?`, [paid, status, row.charge_id]);
   return c.json({ ok: true });
 });
 
@@ -634,10 +709,11 @@ const VendorInput = z.object({
   email: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   color: z.string().optional(),
+  is_test_data: z.boolean().optional(),
 });
 
 app.get("/api/vendors", async (c) => {
-  const rows = await query("SELECT * FROM vendors ORDER BY name");
+  const rows = await query(`SELECT * FROM "Vendors" ORDER BY name`);
   return c.json({ vendors: rows });
 });
 
@@ -646,10 +722,11 @@ app.post("/api/vendors", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    "INSERT INTO vendors (name, category, phone, email, notes, color) VALUES (?, ?, ?, ?, ?, ?)",
-    [d.name, d.category ?? "general", d.phone ?? null, d.email ?? null, d.notes ?? null, d.color ?? "slate"],
+    `INSERT INTO "Vendors" (name, category, phone, email, notes, color, is_test_data)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [d.name, d.category ?? "general", d.phone ?? null, d.email ?? null, d.notes ?? null, d.color ?? "slate", d.is_test_data ?? false],
   );
-  const row = await get("SELECT * FROM vendors WHERE id = ?", [result.lastInsertRowid]);
+  const row = await get(`SELECT * FROM "Vendors" WHERE id = ?`, [result.lastInsertRowid]);
   return c.json({ vendor: row }, 201);
 });
 
@@ -658,106 +735,209 @@ app.put("/api/vendors/:id", async (c) => {
   if (!id) return c.json({ error: "Invalid ID" }, 400);
   const parsed = await parseJson(c, VendorInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE vendors SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "Vendors" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
-  const row = await get("SELECT * FROM vendors WHERE id = ?", [id]);
+  const row = await get(`SELECT * FROM "Vendors" WHERE id = ?`, [id]);
   return c.json({ vendor: row });
 });
 
 app.delete("/api/vendors/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM vendors WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "Vendors" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
 
-// ── Work orders ────────────────────────────────────────────────────
+// ── Staff ──────────────────────────────────────────────────────────
 
-const WorkOrderInput = z.object({
-  property_id: z.number().int().nullable().optional(),
-  unit_id: z.number().int().nullable().optional(),
-  tenant_id: z.number().int().nullable().optional(),
-  vendor_id: z.number().int().nullable().optional(),
-  title: z.string().min(1),
-  description: z.string().optional().nullable(),
-  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
-  status: z.enum(["open", "assigned", "in_progress", "completed", "cancelled"]).optional(),
-  scheduled_at: z.string().optional().nullable(),
-  completed_at: z.string().optional().nullable(),
-  cost: z.number().min(0).optional().nullable(),
-  notes: z.string().optional().nullable(),
+const StaffInput = z.object({
+  first_name: z.string().min(1),
+  last_name: z.string().min(1),
+  email: z.string().email(),
+  job_title: z.string().optional().nullable(),
+  gets_request_alerts: z.boolean().optional(),
+  is_test_data: z.boolean().optional(),
 });
 
-const WO_SELECT = `
-  SELECT w.*,
-    p.name as property_name, p.color as property_color,
-    u.name as unit_name,
-    t.first_name as tenant_first_name, t.last_name as tenant_last_name,
-    v.name as vendor_name, v.color as vendor_color
-  FROM work_orders w
-  LEFT JOIN properties p ON p.id = w.property_id
-  LEFT JOIN units u ON u.id = w.unit_id
-  LEFT JOIN tenants t ON t.id = w.tenant_id
-  LEFT JOIN vendors v ON v.id = w.vendor_id
+app.get("/api/staff", async (c) => {
+  const rows = await query(`SELECT * FROM "Staff" ORDER BY last_name, first_name`);
+  return c.json({ staff: rows });
+});
+
+app.post("/api/staff", async (c) => {
+  const parsed = await parseJson(c, StaffInput);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const d = parsed.data;
+  const result = await run(
+    `INSERT INTO "Staff" (first_name, last_name, email, job_title, gets_request_alerts, is_test_data)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [d.first_name, d.last_name, d.email, d.job_title ?? null, d.gets_request_alerts ?? false, d.is_test_data ?? false],
+  );
+  const row = await get(`SELECT * FROM "Staff" WHERE id = ?`, [result.lastInsertRowid]);
+  return c.json({ staff: row }, 201);
+});
+
+app.put("/api/staff/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const parsed = await parseJson(c, StaffInput.partial());
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
+  if (!sets.length) return c.json({ error: "No fields" }, 400);
+  params.push(id);
+  const r = await run(`UPDATE "Staff" SET ${sets.join(", ")} WHERE id = ?`, params);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  const row = await get(`SELECT * FROM "Staff" WHERE id = ?`, [id]);
+  return c.json({ staff: row });
+});
+
+app.delete("/api/staff/:id", async (c) => {
+  const id = intParam(c.req.param("id"));
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const r = await run(`DELETE FROM "Staff" WHERE id = ?`, [id]);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true });
+});
+
+// ── Maintenance requests (merged work orders) ──────────────────────
+
+const MaintenanceBase = z.object({
+  property_id: z.number().int().nullable().optional(),
+  unit_id: z.number().int().nullable().optional(),
+  submitted_by_tenant_id: z.number().int().nullable().optional(),
+  assigned_staff_id: z.number().int().nullable().optional(),
+  vendor_id: z.number().int().nullable().optional(),
+  title: z.string().min(1),
+  description: z.string().min(1),
+  category: z.enum(MR_CATEGORY),
+  priority: z.enum(MR_PRIORITY).optional(),
+  status: z.enum(MR_STATUS).optional(),
+  scheduled_for: z.string().optional().nullable(),
+  started_at: z.string().optional().nullable(),
+  hold_reason: z.string().optional().nullable(),
+  next_follow_up_date: z.string().optional().nullable(),
+  closed_at: z.string().optional().nullable(),
+  resolution_notes: z.string().optional().nullable(),
+  cost: z.number().min(0).optional().nullable(),
+  notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
+});
+const MaintenanceInput = MaintenanceBase.refine((d) => d.unit_id != null || d.property_id != null, {
+  message: "Either unit_id or property_id is required",
+});
+
+const MR_SELECT_CLEAN = `
+  SELECT m.*,
+    COALESCE(p.property_name, pu.property_name) AS property_name,
+    COALESCE(p.color, pu.color) AS property_color,
+    COALESCE(m.property_id, u.property_id) AS resolved_property_id,
+    u.unit_label AS unit_name,
+    t.first_name AS tenant_first_name, t.last_name AS tenant_last_name,
+    v.name AS vendor_name, v.color AS vendor_color,
+    s.first_name AS staff_first_name, s.last_name AS staff_last_name
+  FROM "MaintenanceRequests" m
+  LEFT JOIN "Units" u ON u.id = m.unit_id
+  LEFT JOIN "Properties" p ON p.id = m.property_id
+  LEFT JOIN "Properties" pu ON pu.id = u.property_id
+  LEFT JOIN "Tenants" t ON t.id = m.submitted_by_tenant_id
+  LEFT JOIN "Vendors" v ON v.id = m.vendor_id
+  LEFT JOIN "Staff" s ON s.id = m.assigned_staff_id
 `;
 
-app.get("/api/work-orders", async (c) => {
+app.get("/api/maintenance-requests", async (c) => {
   const status = c.req.query("status");
   const propertyId = intParam(c.req.query("property_id"));
   const where: string[] = [];
   const params: unknown[] = [];
-  if (status) { where.push("w.status = ?"); params.push(status); }
-  if (propertyId) { where.push("w.property_id = ?"); params.push(propertyId); }
-  const sql = `${WO_SELECT}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY
-    CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
-    w.created_at DESC`;
+  if (status) { where.push("m.status = ?"); params.push(status); }
+  if (propertyId) {
+    where.push("(m.property_id = ? OR u.property_id = ?)");
+    params.push(propertyId, propertyId);
+  }
+  const sql = `${MR_SELECT_CLEAN}${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY
+    CASE m.priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END,
+    m.created_at DESC`;
   const rows = await query(sql, params).catch(() => []);
-  return c.json({ work_orders: rows });
+  return c.json({ maintenance_requests: rows });
 });
 
-app.post("/api/work-orders", async (c) => {
-  const parsed = await parseJson(c, WorkOrderInput);
+// Back-compat alias used by older client code during the cutover
+app.get("/api/work-orders", async (c) => {
+  const url = new URL(c.req.url);
+  url.pathname = "/api/maintenance-requests";
+  return app.fetch(new Request(url.toString(), c.req.raw), c.env);
+});
+
+app.post("/api/maintenance-requests", async (c) => {
+  const parsed = await parseJson(c, MaintenanceInput);
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
+  // request_number is assigned by trigger when null/blank
   const result = await run(
-    `INSERT INTO work_orders (property_id, unit_id, tenant_id, vendor_id, title, description, priority, status, scheduled_at, completed_at, cost, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO "MaintenanceRequests" (
+       request_number, property_id, unit_id, submitted_by_tenant_id, assigned_staff_id, vendor_id,
+       title, description, category, priority, status,
+       scheduled_for, started_at, hold_reason, next_follow_up_date, closed_at,
+       resolution_notes, cost, notes, is_test_data
+     ) VALUES ('', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      d.property_id ?? null, d.unit_id ?? null, d.tenant_id ?? null, d.vendor_id ?? null,
-      d.title, d.description ?? null,
-      d.priority ?? "normal", d.status ?? "open",
-      d.scheduled_at ?? null, d.completed_at ?? null,
-      d.cost ?? null, d.notes ?? null,
+      d.property_id ?? null, d.unit_id ?? null, d.submitted_by_tenant_id ?? null,
+      d.assigned_staff_id ?? null, d.vendor_id ?? null,
+      d.title, d.description, d.category, d.priority ?? "Normal", d.status ?? "Open",
+      d.scheduled_for ?? null, d.started_at ?? null, d.hold_reason ?? null,
+      d.next_follow_up_date ?? null, d.closed_at ?? null,
+      d.resolution_notes ?? null, d.cost ?? null, d.notes ?? null, d.is_test_data ?? false,
     ],
   );
-  const row = await get(`${WO_SELECT} WHERE w.id = ?`, [result.lastInsertRowid]);
-  return c.json({ work_order: row }, 201);
+  const row = await get(`${MR_SELECT_CLEAN} WHERE m.id = ?`, [result.lastInsertRowid]);
+  return c.json({ maintenance_request: row }, 201);
 });
 
-app.put("/api/work-orders/:id", async (c) => {
+app.put("/api/maintenance-requests/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const parsed = await parseJson(c, WorkOrderInput.partial());
+  const parsed = await parseJson(c, MaintenanceBase.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const data = { ...parsed.data } as Record<string, unknown>;
+  delete data.request_number; // immutable
+  const { sets, params } = buildUpdate(data);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE work_orders SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "MaintenanceRequests" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
-  const row = await get(`${WO_SELECT} WHERE w.id = ?`, [id]);
-  return c.json({ work_order: row });
+  const row = await get(`${MR_SELECT_CLEAN} WHERE m.id = ?`, [id]);
+  return c.json({ maintenance_request: row });
 });
 
-app.delete("/api/work-orders/:id", async (c) => {
+app.delete("/api/maintenance-requests/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM work_orders WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "MaintenanceRequests" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
+});
+
+// ── Inquiries ──────────────────────────────────────────────────────
+
+app.get("/api/inquiries", async (c) => {
+  const rows = await query(`SELECT * FROM inquiries ORDER BY created_at DESC LIMIT 500`);
+  return c.json({ inquiries: rows });
+});
+
+app.put("/api/inquiries/:id", async (c) => {
+  const id = c.req.param("id");
+  if (!id) return c.json({ error: "Invalid ID" }, 400);
+  const Patch = z.object({ status: z.string().min(1) });
+  const parsed = await parseJson(c, Patch);
+  if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+  const r = await run(`UPDATE inquiries SET status = ? WHERE id = ?::uuid`, [parsed.data.status, id]);
+  if (!r.changes) return c.json({ error: "Not found" }, 404);
+  const row = await get(`SELECT * FROM inquiries WHERE id = ?::uuid`, [id]);
+  return c.json({ inquiry: row });
 });
 
 // ── Applications ───────────────────────────────────────────────────
@@ -773,14 +953,15 @@ const ApplicationInput = z.object({
   desired_move_in: z.string().optional().nullable(),
   status: z.enum(["new", "screening", "approved", "declined", "withdrawn"]).optional(),
   notes: z.string().optional().nullable(),
+  is_test_data: z.boolean().optional(),
 });
 
 app.get("/api/applications", async (c) => {
   const rows = await query(
-    `SELECT a.*, u.name as unit_name, p.name as property_name
-     FROM applications a
-     LEFT JOIN units u ON u.id = a.unit_id
-     LEFT JOIN properties p ON p.id = u.property_id
+    `SELECT a.*, u.unit_label AS unit_name, p.property_name
+     FROM "Applications" a
+     LEFT JOIN "Units" u ON u.id = a.unit_id
+     LEFT JOIN "Properties" p ON p.id = u.property_id
      ORDER BY a.created_at DESC`,
   ).catch(() => []);
   return c.json({ applications: rows });
@@ -791,17 +972,17 @@ app.post("/api/applications", async (c) => {
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const d = parsed.data;
   const result = await run(
-    `INSERT INTO applications (unit_id, first_name, last_name, email, phone, monthly_income, employer, desired_move_in, status, notes)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO "Applications" (unit_id, first_name, last_name, email, phone, monthly_income, employer, desired_move_in, status, notes, is_test_data)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      d.unit_id ?? null, d.first_name, d.last_name,
-      d.email ?? null, d.phone ?? null, d.monthly_income ?? null, d.employer ?? null,
-      d.desired_move_in ?? null, d.status ?? "new", d.notes ?? null,
+      d.unit_id ?? null, d.first_name, d.last_name, d.email ?? null, d.phone ?? null,
+      d.monthly_income ?? null, d.employer ?? null, d.desired_move_in ?? null,
+      d.status ?? "new", d.notes ?? null, d.is_test_data ?? false,
     ],
   );
   const row = await get(
-    `SELECT a.*, u.name as unit_name, p.name as property_name
-     FROM applications a LEFT JOIN units u ON u.id = a.unit_id LEFT JOIN properties p ON p.id = u.property_id
+    `SELECT a.*, u.unit_label AS unit_name, p.property_name
+     FROM "Applications" a LEFT JOIN "Units" u ON u.id = a.unit_id LEFT JOIN "Properties" p ON p.id = u.property_id
      WHERE a.id = ?`,
     [result.lastInsertRowid],
   );
@@ -813,14 +994,14 @@ app.put("/api/applications/:id", async (c) => {
   if (!id) return c.json({ error: "Invalid ID" }, 400);
   const parsed = await parseJson(c, ApplicationInput.partial());
   if (!parsed.ok) return c.json({ error: parsed.error }, 400);
-  const { sets, params } = buildUpdate(parsed.data);
+  const { sets, params } = buildUpdate(parsed.data as Record<string, unknown>);
   if (!sets.length) return c.json({ error: "No fields" }, 400);
   params.push(id);
-  const r = await run(`UPDATE applications SET ${sets.join(", ")} WHERE id = ?`, params);
+  const r = await run(`UPDATE "Applications" SET ${sets.join(", ")} WHERE id = ?`, params);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   const row = await get(
-    `SELECT a.*, u.name as unit_name, p.name as property_name
-     FROM applications a LEFT JOIN units u ON u.id = a.unit_id LEFT JOIN properties p ON p.id = u.property_id
+    `SELECT a.*, u.unit_label AS unit_name, p.property_name
+     FROM "Applications" a LEFT JOIN "Units" u ON u.id = a.unit_id LEFT JOIN "Properties" p ON p.id = u.property_id
      WHERE a.id = ?`,
     [id],
   );
@@ -830,12 +1011,12 @@ app.put("/api/applications/:id", async (c) => {
 app.delete("/api/applications/:id", async (c) => {
   const id = intParam(c.req.param("id"));
   if (!id) return c.json({ error: "Invalid ID" }, 400);
-  const r = await run("DELETE FROM applications WHERE id = ?", [id]);
+  const r = await run(`DELETE FROM "Applications" WHERE id = ?`, [id]);
   if (!r.changes) return c.json({ error: "Not found" }, 404);
   return c.json({ ok: true });
 });
 
-// ── Dashboard summary ──────────────────────────────────────────────
+// ── Dashboard ──────────────────────────────────────────────────────
 
 app.get("/api/dashboard/summary", async (c) => {
   const today = new Date().toISOString().slice(0, 10);
@@ -847,67 +1028,70 @@ app.get("/api/dashboard/summary", async (c) => {
     query<T>(sql, params).catch(() => [] as T[]);
 
   const [
-    propertyCount,
-    unitCount,
-    occupiedCount,
-    vacantCount,
-    activeLeases,
-    upcomingMoveOuts,
-    monthOutstanding,
-    monthCollected,
-    overdueRow,
-    openWorkOrders,
-    urgentWorkOrders,
-    recentWorkOrders,
-    upcomingExpirations,
+    propertyCount, unitCount, occupiedCount, vacantCount, activeLeases, upcomingMoveOuts,
+    monthOutstanding, monthCollected, overdueRow,
+    openRequests, onHoldRequests, unassignedRequests, urgentRequests,
+    recentRequests, upcomingExpirations,
   ] = await Promise.all([
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM properties", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE status = 'occupied'", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM units WHERE status = 'vacant'", [], { n: 0 }),
-    safeGet<{ n: number }>("SELECT COUNT(*) as n FROM leases WHERE status = 'active'", [], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*)::int AS n FROM "Properties"`, [], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*)::int AS n FROM "Units"`, [], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*)::int AS n FROM "Units" WHERE status = 'Occupied'`, [], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*)::int AS n FROM "Units" WHERE status = 'Vacant'`, [], { n: 0 }),
+    safeGet<{ n: number }>(`SELECT COUNT(*)::int AS n FROM "Leases" WHERE status = 'active'`, [], { n: 0 }),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM leases WHERE status = 'active' AND end_date <= date('now', '+30 days')",
+      `SELECT COUNT(*)::int AS n FROM "Leases" WHERE status = 'active' AND end_date <= (CURRENT_DATE + INTERVAL '30 days')`,
       [], { n: 0 },
     ),
     safeGet<{ total: number }>(
-      "SELECT COALESCE(SUM(amount - amount_paid), 0) as total FROM rent_charges WHERE period = ? AND status != 'waived'",
+      `SELECT COALESCE(SUM(amount - amount_paid), 0) AS total FROM "RentCharges" WHERE period = ? AND status != 'waived'`,
       [periodNow], { total: 0 },
     ),
     safeGet<{ total: number }>(
-      "SELECT COALESCE(SUM(amount_paid), 0) as total FROM rent_charges WHERE period = ?",
+      `SELECT COALESCE(SUM(amount_paid), 0) AS total FROM "RentCharges" WHERE period = ?`,
       [periodNow], { total: 0 },
     ),
     safeGet<{ total: number; n: number }>(
-      "SELECT COALESCE(SUM(amount - amount_paid), 0) as total, COUNT(*) as n FROM rent_charges WHERE due_date < date('now') AND amount_paid < amount AND status != 'waived'",
+      `SELECT COALESCE(SUM(amount - amount_paid), 0) AS total, COUNT(*)::int AS n
+       FROM "RentCharges" WHERE due_date < CURRENT_DATE AND amount_paid < amount AND status != 'waived'`,
       [], { total: 0, n: 0 },
     ),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM work_orders WHERE status NOT IN ('completed', 'cancelled')",
+      `SELECT COUNT(*)::int AS n FROM "MaintenanceRequests" WHERE status NOT IN ('Closed')`,
       [], { n: 0 },
     ),
     safeGet<{ n: number }>(
-      "SELECT COUNT(*) as n FROM work_orders WHERE priority = 'urgent' AND status NOT IN ('completed', 'cancelled')",
+      `SELECT COUNT(*)::int AS n FROM "MaintenanceRequests" WHERE status = 'On Hold'`,
       [], { n: 0 },
     ),
-    safeQuery<{ id: number; title: string; priority: string; status: string; property_name: string | null; unit_name: string | null; created_at: string }>(
-      `SELECT w.id, w.title, w.priority, w.status, p.name as property_name, u.name as unit_name, w.created_at
-       FROM work_orders w
-       LEFT JOIN properties p ON p.id = w.property_id
-       LEFT JOIN units u ON u.id = w.unit_id
-       WHERE w.status NOT IN ('completed', 'cancelled')
-       ORDER BY CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, w.created_at DESC
+    safeGet<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM "MaintenanceRequests" WHERE status NOT IN ('Closed') AND assigned_staff_id IS NULL`,
+      [], { n: 0 },
+    ),
+    safeGet<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM "MaintenanceRequests" WHERE priority = 'Urgent' AND status NOT IN ('Closed')`,
+      [], { n: 0 },
+    ),
+    safeQuery<{ id: number; title: string; priority: string; status: string; property_name: string | null; unit_name: string | null; created_at: string; request_number: string }>(
+      `SELECT m.id, m.title, m.priority, m.status, m.request_number, m.created_at::text,
+         COALESCE(p.property_name, pu.property_name) AS property_name,
+         u.unit_label AS unit_name
+       FROM "MaintenanceRequests" m
+       LEFT JOIN "Units" u ON u.id = m.unit_id
+       LEFT JOIN "Properties" p ON p.id = m.property_id
+       LEFT JOIN "Properties" pu ON pu.id = u.property_id
+       WHERE m.status NOT IN ('Closed')
+       ORDER BY CASE m.priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END, m.created_at DESC
        LIMIT 6`,
     ),
     safeQuery<{ id: number; end_date: string; tenant_first_name: string | null; tenant_last_name: string | null; unit_name: string | null; property_name: string | null }>(
-      `SELECT l.id, l.end_date,
-         t.first_name as tenant_first_name, t.last_name as tenant_last_name,
-         u.name as unit_name, p.name as property_name
-       FROM leases l
-       LEFT JOIN tenants t ON t.id = l.primary_tenant_id
-       LEFT JOIN units u ON u.id = l.unit_id
-       LEFT JOIN properties p ON p.id = u.property_id
-       WHERE l.status = 'active' AND l.end_date <= date('now', '+60 days')
+      `SELECT l.id, l.end_date::text AS end_date,
+         t.first_name AS tenant_first_name, t.last_name AS tenant_last_name,
+         u.unit_label AS unit_name, p.property_name
+       FROM "Leases" l
+       LEFT JOIN "Tenants" t ON t.id = l.primary_tenant_id
+       LEFT JOIN "Units" u ON u.id = l.unit_id
+       LEFT JOIN "Properties" p ON p.id = u.property_id
+       WHERE l.status = 'active' AND l.end_date <= (CURRENT_DATE + INTERVAL '60 days')
        ORDER BY l.end_date ASC LIMIT 6`,
     ),
   ]);
@@ -921,23 +1105,23 @@ app.get("/api/dashboard/summary", async (c) => {
     occupancy_rate: unitCount.n ? Math.round((occupiedCount.n / unitCount.n) * 100) : 0,
     active_leases: activeLeases.n,
     upcoming_move_outs: upcomingMoveOuts.n,
-    month_outstanding: monthOutstanding.total,
-    month_collected: monthCollected.total,
-    overdue_total: overdueRow.total,
+    month_outstanding: Number(monthOutstanding.total),
+    month_collected: Number(monthCollected.total),
+    overdue_total: Number(overdueRow.total),
     overdue_count: overdueRow.n,
-    open_work_orders: openWorkOrders.n,
-    urgent_work_orders: urgentWorkOrders.n,
-    recent_work_orders: recentWorkOrders,
+    open_work_orders: openRequests.n,
+    urgent_work_orders: urgentRequests.n,
+    on_hold_requests: onHoldRequests.n,
+    unassigned_requests: unassignedRequests.n,
+    recent_work_orders: recentRequests,
     upcoming_expirations: upcomingExpirations,
   });
 });
 
-// ── Settings (key/value) ───────────────────────────────────────────
+// ── Settings ───────────────────────────────────────────────────────
 
 app.get("/api/settings", async (c) => {
-  const rows = await query<{ key: string; value: string }>("SELECT key, value FROM settings").catch(() => []);
-  // Defaults first, so a caller always gets a currency and a due day even if
-  // the seed has not run yet (a brand-new database, or a deleted row).
+  const rows = await query<{ key: string; value: string }>(`SELECT key, value FROM "Settings"`).catch(() => []);
   const out: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return c.json({ settings: out });
@@ -950,18 +1134,16 @@ app.put("/api/settings", async (c) => {
   const entries = Object.entries(body as Record<string, unknown>).filter(([, v]) => v !== undefined && v !== null);
   for (const [key, value] of entries) {
     await run(
-      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+      `INSERT INTO "Settings" (key, value, updated_at) VALUES (?, ?, now())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
       [key, String(value)],
     );
   }
-  const rows = await query<{ key: string; value: string }>("SELECT key, value FROM settings");
+  const rows = await query<{ key: string; value: string }>(`SELECT key, value FROM "Settings"`);
   const out: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const r of rows) out[r.key] = r.value;
   return c.json({ settings: out });
 });
-
-// ── Health ─────────────────────────────────────────────────────────
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 

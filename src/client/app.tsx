@@ -12,6 +12,8 @@ import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
+import { LandlordsPage } from "./components/landlords/landlords-page";
+import { InquiriesPage } from "./components/inquiries/inquiries-page";
 import { SettingsPage } from "./components/settings/settings-page";
 
 /**
@@ -29,6 +31,7 @@ const PORTFOLIO: AppNavItem[] = [
   // Not drawn as a row: the app's name opens it (the brand row standalone, the
   // app's own header in the dashboard).
   { id: "dashboard", label: "Dashboard", href: "/dashboard", home: true },
+  { id: "landlords", label: "Landlords", href: "/landlords", icon: "contact", color: "sky" },
   { id: "properties", label: "Properties", href: "/properties", icon: "building-2", color: "green" },
   { id: "tenants", label: "Tenants", href: "/tenants", icon: "users", color: "blue" },
   { id: "leases", label: "Leases", href: "/leases", icon: "clipboard-list", color: "violet" },
@@ -36,6 +39,7 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
+  { id: "inquiries", label: "Inquiries", href: "/inquiries", icon: "inbox", color: "pink" },
 ];
 const ADMIN: AppNavItem[] = [
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
@@ -45,6 +49,7 @@ const ADMIN: AppNavItem[] = [
 function activeFor(route: Route): string {
   if (route.name === "property") return "properties";
   if (route.name === "tenant") return "tenants";
+  if (route.name === "landlord") return "landlords";
   return route.name;
 }
 
@@ -93,6 +98,8 @@ export function App() {
               {route.name === "leases" && <LeasesPage navigate={navigate} />}
               {route.name === "rent" && <RentPage />}
               {route.name === "maintenance" && <MaintenancePage />}
+              {(route.name === "landlords" || route.name === "landlord") && <LandlordsPage />}
+              {route.name === "inquiries" && <InquiriesPage />}
               {route.name === "settings" && <SettingsPage />}
               {route.name === "not-found" && (
                 <Placeholder title="Not found" message="That page doesn't exist." />

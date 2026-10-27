@@ -18,7 +18,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import type { Vendor, VendorCategory } from "@/types";
+import { TestDataBadge } from "@/components/test-data-badge";
+import type { Staff, Vendor, VendorCategory } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
 const COLORS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"];
@@ -37,18 +38,22 @@ export function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      meta="Vendors and rent policy defaults"
+      meta="Vendors, staff, and rent policy defaults"
       width="max-w-5xl"
     >
 
         <Tabs defaultValue="vendors">
           <TabsList>
             <TabsTrigger value="vendors">Vendors</TabsTrigger>
+            <TabsTrigger value="staff">Staff</TabsTrigger>
             <TabsTrigger value="policy">Rent policy</TabsTrigger>
           </TabsList>
 
           <TabsContent value="vendors" className="mt-4">
             <VendorsTab />
+          </TabsContent>
+          <TabsContent value="staff" className="mt-4">
+            <StaffTab />
           </TabsContent>
           <TabsContent value="policy" className="mt-4">
             <PolicyTab />
@@ -87,7 +92,7 @@ function VendorsTab() {
                 <div className="flex items-center gap-3">
                   <span className={cn("h-2.5 w-2.5 rounded-full", palette.dot)} />
                   <div>
-                    <div className="font-medium">{v.name}</div>
+                    <div className="flex items-center gap-2 font-medium">{v.name}<TestDataBadge show={v.is_test_data} /></div>
                     <div className="text-xs text-muted-foreground">
                       {[v.phone, v.email].filter(Boolean).join(" · ") || "—"}
                     </div>
@@ -241,7 +246,177 @@ function VendorDialog({
           open={confirming}
           onOpenChange={setConfirming}
           title={`Delete ${vendor.name}?`}
-          description="Work orders already assigned to them keep the name on record."
+          description="Maintenance requests already assigned to them keep the name on record."
+          onConfirm={remove}
+        />
+      ) : null}
+    </>
+  );
+}
+
+// ── Staff ──────────────────────────────────────────────────────────
+
+function StaffTab() {
+  const app = useApp();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Staff | undefined>(undefined);
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between border-b p-4">
+        <div>
+          <h2 className="text-sm font-semibold">Staff</h2>
+          <p className="text-xs text-muted-foreground">Team members who can be assigned maintenance requests.</p>
+        </div>
+        <Button size="sm" onClick={() => { setEditing(undefined); setOpen(true); }}>
+          <Plus className="mr-1 h-4 w-4" /> Add staff
+        </Button>
+      </div>
+      {app.staff.length === 0 ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">No staff yet.</div>
+      ) : (
+        <ul className="divide-y">
+          {app.staff.map((m) => (
+            <li key={m.id} className="flex items-center justify-between gap-3 p-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 font-medium">
+                  {m.first_name} {m.last_name}
+                  <TestDataBadge show={m.is_test_data} />
+                </div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {[m.job_title, m.email].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {m.gets_request_alerts && <Badge variant="info">Gets alerts</Badge>}
+                <Button size="icon" variant="ghost" onClick={() => { setEditing(m); setOpen(true); }}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <StaffDialog open={open} onOpenChange={setOpen} member={editing} />
+    </Card>
+  );
+}
+
+function StaffDialog({
+  open, onOpenChange, member,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  member?: Staff;
+}) {
+  const app = useApp();
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  const [alerts, setAlerts] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setFirstName(member?.first_name ?? "");
+    setLastName(member?.last_name ?? "");
+    setEmail(member?.email ?? "");
+    setJobTitle(member?.job_title ?? "");
+    setAlerts(member?.gets_request_alerts ?? false);
+  }, [open, member]);
+
+  const canSave = !!firstName.trim() && !!lastName.trim() && !!email.trim();
+
+  async function save() {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const payload = {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        email: email.trim(),
+        job_title: jobTitle.trim() || null,
+        gets_request_alerts: alerts,
+      };
+      if (member) await app.updateStaff(member.id, payload);
+      else await app.createStaff(payload);
+      onOpenChange(false);
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (!member) return;
+    try {
+      await app.deleteStaff(member.id);
+      onOpenChange(false);
+    } catch (err) {
+      app.setError((err as Error).message);
+    }
+  }
+
+  return (
+    <>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{member ? "Edit staff member" : "New staff member"}</DialogTitle>
+        </DialogHeader>
+        <div className="grid gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="st-first">First name</Label>
+              <Input id="st-first" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="st-last">Last name</Label>
+              <Input id="st-last" value={lastName} onChange={(e) => setLastName(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="st-email">Email</Label>
+            <Input id="st-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="st-title">Job title</Label>
+            <Input id="st-title" value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} placeholder="Maintenance coordinator" />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-[var(--brand)]"
+              checked={alerts}
+              onChange={(e) => setAlerts(e.target.checked)}
+            />
+            Gets maintenance request alerts
+          </label>
+          {member?.is_test_data && <TestDataBadge show className="w-fit" />}
+        </div>
+        <DialogFooter>
+          {member && (
+            <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
+              <Trash2 className="mr-1 h-4 w-4" /> Delete
+            </Button>
+          )}
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="button" onClick={save} disabled={saving || !canSave}>
+            {member ? "Save changes" : "Create"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+      {member ? (
+        <ConfirmDelete
+          open={confirming}
+          onOpenChange={setConfirming}
+          title={`Delete ${member.first_name} ${member.last_name}?`}
+          description="Requests assigned to them become unassigned."
           onConfirm={remove}
         />
       ) : null}

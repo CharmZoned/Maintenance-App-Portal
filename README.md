@@ -50,20 +50,31 @@ Rental property management with everything you need to run a portfolio: properti
 
 - React 19 + Vite + TypeScript
 - Tailwind CSS v4 + shadcn/ui (Radix primitives)
-- Hono on Cloudflare Workers (D1-native — same code locally and in production)
+- Hono on Cloudflare Workers, backed by Supabase Postgres (Landlord Gopher)
 - `lucide-react` for icons
 - pushState URL routing
 
 ## Develop
 
+1. Copy `.dev.vars.example` to `.dev.vars` and set `DATABASE_URL` to your
+   Supabase **Transaction pooler** connection string (port `6543`):
+
+   ```
+   postgresql://postgres.bgjkjtfgrfiszbzatriq:[PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+   ```
+
+2. Install and run:
+
 ```bash
 pnpm install
-pnpm dev          # Vite at :5173, Wrangler at :8787 (D1 schema applied automatically)
+pnpm dev          # Vite at :5173, Wrangler at :8787
 pnpm typecheck
 pnpm build
 ```
 
-The dev script applies `src/server/schema.sql` to the local D1 database, then runs Vite and Wrangler in parallel. The schema seeds 3 sample properties, 5 units, and 3 vendors so the app is usable on first boot.
+The API talks to the shared **Landlord Gopher** Supabase Postgres database
+(not local D1). Schema changes live in `supabase/migrations/`. Sample Maryland
+portfolio rows are marked `is_test_data = true`.
 
 ## Deploy
 
@@ -73,29 +84,33 @@ If you have the Clawnify CLI installed:
 clawnify deploy
 ```
 
-Or wire it up to Cloudflare Workers + D1 directly using the bindings in `wrangler.toml` (binding `DB`, database name `open-property-db`).
+Set the production secret with `wrangler secret put DATABASE_URL` (same
+transaction-pooler URL).
 
 ## Project layout
 
 ```
 src/
   server/
-    index.ts        Hono routes for every entity
-    db.ts           D1 adapter (query / get / run)
-    schema.sql      Tables + seed data
+    index.ts        Hono routes for every entity (Postgres / Supabase)
+    db.ts           postgres.js adapter (query / get / run)
   client/
     app.tsx         Shell + routing
     components/
       dashboard/    Portfolio + month-at-a-glance
+      landlords/    Landlord directory
       properties/   List, property detail, property + unit dialogs
       tenants/      List, tenant detail, tenant dialog
       leases/       Leases page + lease dialog
       rent/         Rent ledger + payment dialog
-      maintenance/  Work orders board + work-order dialog
-      settings/     Vendors + rent policy defaults
+      maintenance/  Maintenance requests board + dialog
+      inquiries/    Website lead inbox
+      settings/     Vendors, staff, rent policy defaults
       ui/           Vendored shadcn primitives
     hooks/          use-router, use-app-state
     lib/utils.ts    cn helper, color palette, date / money / period helpers
+supabase/
+  migrations/       DDL applied to Landlord Gopher
 ```
 
 ## What's intentionally not included
