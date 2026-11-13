@@ -32,7 +32,7 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
-  { id: "applications", label: "Applications", href: "/applications", icon: "clipboard-list", color: "blue" },
+  { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
 ];
 const ADMIN_ITEMS: AppNavItem[] = [
   { id: "users", label: "Users", href: "/users", icon: "users", color: "violet" },

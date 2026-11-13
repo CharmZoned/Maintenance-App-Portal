@@ -133,15 +133,28 @@ BEGIN
     RAISE EXCEPTION 'Auth user % not found', p_user_id;
   END IF;
 
-  -- Approving maintenance without staff_id would pass RLS helpers but fail the
-  -- portal gate — refuse so admins link staff (or change role) first.
+  -- Approve never invents an unlinked maintenance row (see also
+  -- 20261113203000_phase2_authz_approve_staff_gate.sql for full gate).
   IF p_status = 'approved' THEN
     SELECT * INTO result FROM public.user_roles WHERE user_id = p_user_id;
-    IF FOUND
-       AND result.role = 'maintenance'::public.app_role
-       AND result.staff_id IS NULL THEN
-      RAISE EXCEPTION 'Link a Staff row before approving a maintenance account';
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Assign a role before approving';
     END IF;
+    IF result.role = 'admin'::public.app_role THEN
+      NULL;
+    ELSIF result.role = 'maintenance'::public.app_role AND result.staff_id IS NOT NULL THEN
+      NULL;
+    ELSE
+      RAISE EXCEPTION
+        'Only admin, or maintenance with a Staff link, can be approved for portal access';
+    END IF;
+
+    UPDATE public.user_roles
+    SET account_status = 'approved'
+    WHERE user_id = p_user_id
+    RETURNING * INTO result;
+
+    RETURN result;
   END IF;
 
   INSERT INTO public.user_roles (user_id, role, account_status)

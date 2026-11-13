@@ -122,6 +122,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `current_tenant_unit_id()` / `current_tenant_property_id()` | Tenant scope |
 | `landlord_owns_unit(unit)` | Landlord ownership |
 | `landlord_can_see_tenant` / `landlord_can_see_staff` | Cross visibility |
+| `is_staff_or_admin()` | Approved **admin**, or approved **maintenance** with non-null `staff_id` (Phase 2 AuthZ harden) |
 | `staff_assigned_to_unit` / `staff_assigned_to_property` | Via open maintenance assignment |
 | `staff_can_see_tenant` / `staff_can_see_landlord` | |
 | `tenant_can_see_landlord` / `tenant_can_see_staff` | |

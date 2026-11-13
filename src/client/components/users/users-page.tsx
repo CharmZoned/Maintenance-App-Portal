@@ -108,6 +108,21 @@ export function UsersPage() {
   }
 
   async function changeRole(user: UserAccountRow, role: AppRole) {
+    if (
+      user.account_status === "approved" &&
+      (role === "landlord" || role === "tenant")
+    ) {
+      setError("Suspend or reject before assigning landlord/tenant.");
+      return;
+    }
+    if (
+      user.account_status === "approved" &&
+      role === "maintenance" &&
+      user.staff_id == null
+    ) {
+      setError("Link a Staff row before keeping an approved maintenance account.");
+      return;
+    }
     setBusyId(user.user_id);
     try {
       await data.adminSetUserRole(user.user_id, role, {
@@ -124,6 +139,10 @@ export function UsersPage() {
   }
 
   async function changeStaffLink(user: UserAccountRow, staffId: string) {
+    if (user.account_status === "approved" && staffId === "none") {
+      setError("Suspend or reject before clearing the Staff link on an approved account.");
+      return;
+    }
     setBusyId(user.user_id);
     try {
       const id = staffId === "none" ? null : Number(staffId);
@@ -299,7 +318,15 @@ export function UsersPage() {
                           <SelectValue placeholder="Staff" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem
+                            value="none"
+                            disabled={user.account_status === "approved"}
+                          >
+                            None
+                            {user.account_status === "approved"
+                              ? " (suspend first)"
+                              : ""}
+                          </SelectItem>
                           {staff.map((s) => (
                             <SelectItem key={s.id} value={String(s.id)}>
                               {s.last_name}, {s.first_name} ({s.email})
