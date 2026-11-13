@@ -1,0 +1,24 @@
+{
+  "requirements": [
+    { "id": "R1", "title": "Accounts and login", "summary": "User accounts, passwords, email verification, password reset, and roles." },
+    { "id": "R2", "title": "Account approval", "summary": "New accounts wait as pending; admins approve, reject, or suspend them." },
+    { "id": "R3", "title": "Properties and units", "summary": "Staff create properties and units and link tenants through a lease; every property has a landlord." },
+    { "id": "R4", "title": "Maintenance requests", "summary": "Tenants submit requests with a category and photos; staff work them through statuses; every change is recorded." },
+    { "id": "R5", "title": "Property documents", "summary": "Staff upload documents to a property or unit; an admin decides who else can see each one." },
+    { "id": "R6", "title": "Notifications", "summary": "Email and push notifications, and messaging. Deferred — nothing built yet." },
+    { "id": "R7", "title": "Permissions", "summary": "Nothing is readable without logging in, and each role sees only its own slice of the data." },
+    { "id": "R8", "title": "Admin web portal", "summary": "Dashboard, user management, rental applications, vendors and settings — limited to the right people." }
+  ],
+  "workflows": [
+    {
+      "id": "WF1",
+      "title": "Maintenance request lifecycle",
+      "summary": "A tenant submits a request, an admin assigns it to a worker, the worker views and works the request, and the tenant sees the outcome."
+    },
+    {
+      "id": "WF2",
+      "title": "New account onboarding",
+      "summary": "A new resident signs up, verifies their email, waits for approval, and gets into the portal once an admin approves them."
+    }
+  ]
+}

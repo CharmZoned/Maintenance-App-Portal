@@ -7,3 +7,6 @@ dist
 .dev.vars
 .env
 .env.local
+
+# test output (results, screenshots, report)
+tests/.results
