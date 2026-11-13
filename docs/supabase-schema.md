@@ -4,6 +4,8 @@
 **URL:** `https://bgjkjtfgrfiszbzatriq.supabase.co`  
 **Verified:** 2026-11-13 via Supabase MCP (live introspection)
 
+**Ops:** Never apply live DDL without a matching file under `supabase/migrations/` on a branch/PR first. Prefer staging. See [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).
+
 Shared with the marketing site (`LandlordGopherWebsite`). Website uses service-role inserts into `inquiries` only — do not add anon policies that expose inquiries.
 
 ---
@@ -107,10 +109,21 @@ Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_in
 
 Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category` (Title Case enum), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
 
-Policies cover select for admin / submitter tenant / assigned staff / owning landlord; insert for admin or scoped tenant; update for admin or assigned maintenance. Photo + comment + storage bucket policies exist.
+**Live ACL baseline** (pre-repo Oct migrations + Phase 3 tighten; full predicate table in [`docs/ops/live-maintenance-acl-baseline.md`](./ops/live-maintenance-acl-baseline.md)):
+
+- SELECT: admin / submitting tenant / assigned staff / landlord owns unit (`maintenance_requests_select`)
+- UPDATE: USING `private.can_update_maintenance_request(id)`; WITH CHECK on the NEW row — admin or assigned maintenance only (`maintenance_requests_update`, LGA-19)
+- Comments SELECT: `can_select_maintenance_request` + visibility rules (`maintenance_comments_select`)
+- Photos / comments mutate via `can_upload_maintenance_photo` / `can_update_maintenance_request` (and tenant comment path)
 
 **Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).  
 **LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).
+
+### `PropertyDocuments`
+
+Property (and optional unit) file metadata. Visibility CHECK: `tenant | staff | landlord` (default `staff`). Path shape `{property_id}/{filename}`.
+
+**Phase 5:** Admin-only visibility mark (trigger + INSERT/UPDATE policies). Hierarchical SELECT via `private.can_select_property_document`. Staff/admin manage via `private.can_manage_property_documents`. FORCE RLS. Storage bucket `property-documents` (private, 20 MB). `unit_id` ON DELETE CASCADE (unit-scoped docs must not widen ACL via SET NULL).
 
 ### `inquiries`
 
@@ -132,6 +145,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `staff_can_see_tenant` / `staff_can_see_landlord` | |
 | `tenant_can_see_landlord` / `tenant_can_see_staff` | |
 | `can_select_maintenance_request` / `can_update_maintenance_request` / `can_upload_maintenance_photo` | Maintenance ACL |
+| `can_select_property_document` / `can_manage_property_documents` | Phase 5 document visibility + staff/admin manage |
+| `protect_property_document_visibility` / `enforce_property_document_unit` | Phase 5 triggers |
 | `handle_new_user` | Auth trigger: match exactly one Landlord/Tenant/Staff → pending role; unmatched → pending `maintenance` (approval queue); ambiguous match → no row |
 | `assign_admin(email)` | SECURITY DEFINER: set user to `admin` (clears link ids), `approved` |
 | `assign_request_number` / `protect_maintenance_request` | Maintenance triggers |
@@ -148,6 +163,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | Bucket | Public | Limit | Notes |
 |--------|--------|-------|-------|
 | `maintenance-photos` | private | 10 MB | Path prefix = request id; policies mirror maintenance ACL |
+| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL |
 
 ---
 
@@ -184,6 +200,7 @@ Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `S
 | (photos) | `MaintenanceRequestPhotos` + storage `maintenance-photos` (`{requestId}/…`) |
 | (comments) | `MaintenanceRequestComments` |
 | (status trail) | `MaintenanceRequestStatusHistory` |
+| (property docs) | `PropertyDocuments` + storage `property-documents` (`{propertyId}/…`) |
 | `settings` table | `Settings` |
 
 ---

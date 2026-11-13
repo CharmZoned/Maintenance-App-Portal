@@ -256,6 +256,25 @@ export interface MaintenanceStatusEvent {
   created_at: string;
 }
 
+export type DocumentVisibility = "tenant" | "staff" | "landlord";
+
+export interface PropertyDocument {
+  id: number;
+  property_id: number;
+  unit_id: number | null;
+  title: string;
+  file_name: string;
+  content_type: string | null;
+  byte_size: number | null;
+  storage_path: string;
+  visibility: DocumentVisibility;
+  uploaded_by_role: string | null;
+  notes: string | null;
+  created_at: string;
+  unit_name?: string | null;
+  property_name?: string | null;
+}
+
 export type ApplicationStatus = "new" | "screening" | "approved" | "declined" | "withdrawn";
 
 export interface Application {
