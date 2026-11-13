@@ -633,10 +633,12 @@ async function syncLeaseTenantLinks(args: {
     await assertLeaseLinkState(leaseId, after);
   }
 
-  // Converge members to the lease unit with no beforeUnit filter; re-check first so a
-  // slower sync cannot overwrite a newer winner's occupants.
+  // Converge members to the lease unit with no beforeUnit filter; re-check before and
+  // after so a slower sync cannot leave occupants on a stale afterUnit if a newer
+  // CAS winner already moved the lease (post-write assert → repairSupersededLeaseSync).
   await assertLeaseLinkState(leaseId, after);
   await setOccupantsUnit(leaseId, afterUnit, afterPrimary);
+  await assertLeaseLinkState(leaseId, after);
 }
 
 /**
