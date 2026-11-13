@@ -182,7 +182,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | Bucket | Public | Limit | Notes |
 |--------|--------|-------|-------|
 | `maintenance-photos` | private | 10 MB | Path prefix = request id; policies mirror maintenance ACL |
-| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL; UPDATE/DELETE require existing `PropertyDocuments.storage_path` (WS-E) |
+| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL; INSERT/UPDATE/DELETE require existing `PropertyDocuments.storage_path` (WS-E; upload inserts metadata first) |
 
 ---
 
