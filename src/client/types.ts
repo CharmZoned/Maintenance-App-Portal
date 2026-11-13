@@ -290,6 +290,7 @@ export interface WorkOrder {
   scheduled_at: string | null;
   completed_at: string | null;
   cost: number | null;
+  /** Internal staff notes (MaintenanceRequestStaffNotes); always null for landlord/tenant. */
   notes: string | null;
   resolution_notes?: string | null;
   hold_reason?: string | null;

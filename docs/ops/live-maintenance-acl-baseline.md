@@ -17,7 +17,8 @@ Verified via Supabase MCP (2026-11-13). Later phase migrations may `CREATE OR RE
 
 ### `can_upload_maintenance_photo(target_request bigint)`
 
-`SECURITY DEFINER` SQL. True if `can_update_maintenance_request(...)`, or **tenant** who submitted the request.
+`SECURITY DEFINER` SQL. True if `can_update_maintenance_request(...)`, or **tenant** who submitted the request.  
+**WS-E:** definition is now in repo migration `20261114030000_harden_landlord_helpers_and_mr_notes.sql` (was live/baseline-only).
 
 ## Policies (live names)
 

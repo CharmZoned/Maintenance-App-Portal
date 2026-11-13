@@ -113,9 +113,9 @@ Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_in
 **Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.  
 **LGA-19:** narrowed to **admin-only** SELECT/INSERT/UPDATE/DELETE (maintenance staff must not read applicant income / PII).
 
-### `MaintenanceRequests` (+ Photos, Comments, StatusHistory)
+### `MaintenanceRequests` (+ Photos, Comments, StatusHistory, StaffNotes)
 
-Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority CHECK: `Low | Normal | High | Urgent` (default `Normal`). Category CHECK: `Plumbing | Electrical | Heating / AC | Appliance | Pest control | Locks / keys / doors | Windows | Roof / leaks | Mold / water damage | Exterior / yard | General repair | Other`. Has `request_number` (trigger `private.assign_request_number`), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields. Companion CHECKs require staff+date for Scheduled, staff+started_at for In Progress, hold_reason+follow-up for On Hold, closed_at+resolution_notes for Closed.
+Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority CHECK: `Low | Normal | High | Urgent` (default `Normal`). Category CHECK: `Plumbing | Electrical | Heating / AC | Appliance | Pest control | Locks / keys / doors | Windows | Roof / leaks | Mold / water damage | Exterior / yard | General repair | Other`. Has `request_number` (trigger `private.assign_request_number`), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, assignment/scheduling fields. Companion CHECKs require staff+date for Scheduled, staff+started_at for In Progress, hold_reason+follow-up for On Hold, closed_at+resolution_notes for Closed.
 
 **Live ACL baseline** (pre-repo Oct migrations + Phase 3 tighten; full predicate table in [`docs/ops/live-maintenance-acl-baseline.md`](./ops/live-maintenance-acl-baseline.md)):
 
@@ -126,7 +126,17 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 - Photos / comments mutate via `can_upload_maintenance_photo` / `can_update_maintenance_request` (and tenant comment path)
 
 **Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).  
-**LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).
+**LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).  
+**WS-E:** internal `notes` moved off the request row (see StaffNotes below). `landlord_owns_unit` / `landlord_can_see_*` use hardened `current_landlord_id()`. `can_upload_maintenance_photo` codified in repo migrations.
+
+### `MaintenanceRequestStaffNotes`
+
+Internal staff notes for a work order (WS-E). PK `maintenance_request_id` → `MaintenanceRequests` ON DELETE CASCADE. Columns: `notes`, `updated_at`.
+
+- SELECT: `can_select_maintenance_request` AND role ∈ {admin, maintenance}
+- INSERT/UPDATE: `can_update_maintenance_request`
+- DELETE: `is_admin()`
+- Landlords/tenants: no access (request row no longer has a `notes` column)
 
 ### `PropertyDocuments`
 
@@ -147,8 +157,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `current_role()` | `app_role` for `auth.uid()` |
 | `current_landlord_id()` / `current_tenant_id()` / `current_staff_id()` | Link ids from `user_roles` |
 | `current_tenant_unit_id()` / `current_tenant_property_id()` | Tenant scope |
-| `landlord_owns_unit(unit)` | Landlord ownership |
-| `landlord_can_see_tenant` / `landlord_can_see_staff` | Cross visibility |
+| `landlord_owns_unit(unit)` | Landlord ownership via `current_landlord_id()` (WS-E) |
+| `landlord_can_see_tenant` / `landlord_can_see_staff` | Cross visibility via `current_landlord_id()` (WS-E) |
 | `is_staff_or_admin()` | Approved **admin**, or approved **maintenance** with non-null `staff_id` (Phase 2 AuthZ harden) |
 | `staff_assigned_to_unit` / `staff_assigned_to_property` | Via open maintenance assignment |
 | `staff_can_see_tenant` / `staff_can_see_landlord` | |
@@ -172,7 +182,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | Bucket | Public | Limit | Notes |
 |--------|--------|-------|-------|
 | `maintenance-photos` | private | 10 MB | Path prefix = request id; policies mirror maintenance ACL |
-| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL |
+| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL; UPDATE/DELETE require existing `PropertyDocuments.storage_path` (WS-E) |
 
 ---
 

@@ -184,7 +184,13 @@ describe("[R7] Permissions", () => {
 
     test("cannot update a request that is not assigned to them", async () => {
       const client = await clientFor("worker2");
-      expectDenied(await client.from("MaintenanceRequests").update({ notes: "mine now" }).eq("id", requestId).select());
+      expectDenied(await client.from("MaintenanceRequests").update({ hold_reason: "mine now" }).eq("id", requestId).select());
+      expectDenied(
+        await client
+          .from("MaintenanceRequestStaffNotes")
+          .upsert({ maintenance_request_id: requestId, notes: "mine now" })
+          .select(),
+      );
     });
 
     test("cannot reassign a request, change its schedule, or rewrite what the tenant reported", async () => {
@@ -237,9 +243,46 @@ describe("[R7] Permissions", () => {
           .insert({ property_name: "New build", street_address: "1 X", city: "Y", state: "MD", zip: "21201", property_type: "Other", landlord_id: world.landlord.id })
           .select(),
       );
-      expectDenied(await client.from("MaintenanceRequests").update({ notes: "landlord edit" }).eq("id", requestId).select());
+      expectDenied(
+        await client.from("MaintenanceRequests").update({ hold_reason: "landlord edit" }).eq("id", requestId).select(),
+      );
       const [row] = await sql<{ property_name: string }>(`select property_name from public."Properties" where id = $1`, [world.property.id]);
       expect(row.property_name).toBe("Maple Court");
+    });
+
+    test("cannot read internal staff notes on work orders via PostgREST", async () => {
+      await sql(
+        `insert into public."MaintenanceRequestStaffNotes" (maintenance_request_id, notes)
+         values ($1, 'Owner dispute — do not share')
+         on conflict (maintenance_request_id) do update set notes = excluded.notes`,
+        [requestId],
+      );
+      const client = await clientFor("landlord");
+      const mr = await client.from("MaintenanceRequests").select("*").eq("id", requestId).single();
+      expect(mr.error).toBeNull();
+      expect(mr.data).not.toHaveProperty("notes");
+      const { data: notes } = await client
+        .from("MaintenanceRequestStaffNotes")
+        .select("notes")
+        .eq("maintenance_request_id", requestId);
+      expect(notes ?? []).toEqual([]);
+      const admin = await clientFor("admin");
+      expect(
+        (await admin.from("MaintenanceRequestStaffNotes").select("notes").eq("maintenance_request_id", requestId)).data,
+      ).toEqual([{ notes: "Owner dispute — do not share" }]);
+    });
+
+    test("pending landlord cannot use a stale landlord_id through ownership helpers", async () => {
+      await sql(`update public.user_roles set account_status = 'pending' where user_id = $1`, [
+        world.users.landlord.id,
+      ]);
+      const client = await clientFor("landlord");
+      expect((await client.from("Properties").select("id")).data ?? []).toEqual([]);
+      expect((await client.from("MaintenanceRequests").select("id")).data ?? []).toEqual([]);
+      expect((await client.from("Units").select("id")).data ?? []).toEqual([]);
+      await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [
+        world.users.landlord.id,
+      ]);
     });
 
     test("sees updates meant for the tenant but not internal staff notes", async () => {

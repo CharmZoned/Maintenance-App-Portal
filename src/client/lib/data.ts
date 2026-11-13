@@ -754,6 +754,32 @@ export async function updateSettings(patch: Record<string, string>): Promise<Rec
 
 // ── Maintenance / work orders ─────────────────────────────────────
 
+/** Staff/admin-only; RLS returns no rows for landlord/tenant (not an error). */
+async function loadStaffNotesByRequestIds(
+  requestIds: number[],
+): Promise<Map<number, string | null>> {
+  const map = new Map<number, string | null>();
+  if (requestIds.length === 0) return map;
+  const { data, error } = await supabase
+    .from("MaintenanceRequestStaffNotes")
+    .select("maintenance_request_id, notes")
+    .in("maintenance_request_id", requestIds);
+  if (error) throwSb(error);
+  for (const row of data ?? []) {
+    map.set(row.maintenance_request_id, row.notes);
+  }
+  return map;
+}
+
+async function upsertStaffNotes(requestId: number, notes: string | null): Promise<void> {
+  const { error } = await supabase.from("MaintenanceRequestStaffNotes").upsert({
+    maintenance_request_id: requestId,
+    notes: notes?.trim() || null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throwSb(error);
+}
+
 export async function listWorkOrders(params?: {
   status?: string;
   property_id?: number;
@@ -770,21 +796,24 @@ export async function listWorkOrders(params?: {
     ...new Set((rows ?? []).map((r) => r.submitted_by_tenant_id).filter(Boolean)),
   ] as number[];
   const vendorIds = [...new Set((rows ?? []).map((r) => r.vendor_id).filter(Boolean))] as number[];
+  const requestIds = (rows ?? []).map((r) => r.id);
 
-  const [{ data: props }, { data: units }, { data: tenants }, { data: vendors }] = await Promise.all([
-    propIds.length
-      ? supabase.from("Properties").select("id, property_name, color").in("id", propIds)
-      : Promise.resolve({ data: [] as { id: number; property_name: string | null; color: string }[] }),
-    unitIds.length
-      ? supabase.from("Units").select("id, unit_label").in("id", unitIds)
-      : Promise.resolve({ data: [] as { id: number; unit_label: string }[] }),
-    tenantIds.length
-      ? supabase.from("Tenants").select("id, first_name, last_name").in("id", tenantIds)
-      : Promise.resolve({ data: [] as { id: number; first_name: string; last_name: string }[] }),
-    vendorIds.length
-      ? supabase.from("Vendors").select("id, name, color").in("id", vendorIds)
-      : Promise.resolve({ data: [] as { id: number; name: string; color: string }[] }),
-  ]);
+  const [{ data: props }, { data: units }, { data: tenants }, { data: vendors }, notesMap] =
+    await Promise.all([
+      propIds.length
+        ? supabase.from("Properties").select("id, property_name, color").in("id", propIds)
+        : Promise.resolve({ data: [] as { id: number; property_name: string | null; color: string }[] }),
+      unitIds.length
+        ? supabase.from("Units").select("id, unit_label").in("id", unitIds)
+        : Promise.resolve({ data: [] as { id: number; unit_label: string }[] }),
+      tenantIds.length
+        ? supabase.from("Tenants").select("id, first_name, last_name").in("id", tenantIds)
+        : Promise.resolve({ data: [] as { id: number; first_name: string; last_name: string }[] }),
+      vendorIds.length
+        ? supabase.from("Vendors").select("id, name, color").in("id", vendorIds)
+        : Promise.resolve({ data: [] as { id: number; name: string; color: string }[] }),
+      loadStaffNotesByRequestIds(requestIds),
+    ]);
 
   const propMap = new Map((props ?? []).map((p) => [p.id, p]));
   const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
@@ -804,6 +833,7 @@ export async function listWorkOrders(params?: {
       tenant_last_name: t?.last_name,
       vendor_name: v?.name,
       vendor_color: v?.color,
+      notes: notesMap.get(r.id) ?? null,
     });
   });
 }
@@ -825,7 +855,6 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
       assigned_staff_id: null,
       scheduled_for: null,
       cost: input.cost ?? null,
-      notes: input.notes ?? null,
       permission_to_enter: input.permission_to_enter ?? false,
       resolution_notes: null,
       hold_reason: null,
@@ -836,8 +865,12 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
     .select("*")
     .single();
   if (error) throwSb(error);
+  const initialNotes = input.notes?.trim() || null;
+  if (initialNotes) {
+    await upsertStaffNotes(data!.id, initialNotes);
+  }
   const list = await listWorkOrders();
-  return list.find((w) => w.id === data!.id) ?? mapWorkOrder(data!);
+  return list.find((w) => w.id === data!.id) ?? mapWorkOrder(data!, { notes: initialNotes });
 }
 
 /** Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment. */
@@ -943,20 +976,34 @@ export async function updateWorkOrder(
       : null;
   }
   if (patch.cost !== undefined) row.cost = patch.cost;
-  if (patch.notes !== undefined) row.notes = patch.notes;
   if (patch.resolution_notes !== undefined) row.resolution_notes = patch.resolution_notes;
   if (patch.hold_reason !== undefined) row.hold_reason = patch.hold_reason;
   if (patch.next_follow_up_date !== undefined) row.next_follow_up_date = patch.next_follow_up_date;
 
-  const { data, error } = await supabase
-    .from("MaintenanceRequests")
-    .update(row as never)
-    .eq("id", id)
-    .select("*")
-    .single();
-  if (error) throwSb(error);
+  // Notes live in MaintenanceRequestStaffNotes — skip empty MR patch (notes-only saves).
+  if (Object.keys(row).length > 0) {
+    const { error } = await supabase
+      .from("MaintenanceRequests")
+      .update(row as never)
+      .eq("id", id)
+      .select("*")
+      .single();
+    if (error) throwSb(error);
+  }
+  if (patch.notes !== undefined) {
+    await upsertStaffNotes(id, patch.notes);
+  }
   const list = await listWorkOrders();
-  return list.find((w) => w.id === id) ?? mapWorkOrder(data!);
+  const found = list.find((w) => w.id === id);
+  if (found) return found;
+  const { data: fallback, error: fbErr } = await supabase
+    .from("MaintenanceRequests")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (fbErr) throwSb(fbErr);
+  const notesMap = await loadStaffNotesByRequestIds([id]);
+  return mapWorkOrder(fallback!, { notes: notesMap.get(id) ?? null });
 }
 
 /** Unit + property label for the signed-in tenant (submit context). */
@@ -1497,13 +1544,7 @@ export async function uploadPropertyDocument(input: {
   const ext = (rawExt ?? "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
   const path = `${input.property_id}/${crypto.randomUUID()}.${ext}`;
 
-  const { error: upErr } = await supabase.storage.from(DOC_BUCKET).upload(path, input.file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: input.file.type || undefined,
-  });
-  if (upErr) throw new Error(upErr.message);
-
+  // Insert metadata first so storage DELETE (path-bound) can roll back if upload fails.
   const { data, error } = await supabase
     .from("PropertyDocuments")
     .insert({
@@ -1521,13 +1562,19 @@ export async function uploadPropertyDocument(input: {
     })
     .select("*")
     .single();
-  if (error) {
-    const { error: rmErr } = await supabase.storage.from(DOC_BUCKET).remove([path]);
-    if (rmErr) {
-      // Prefer the insert error; storage orphan is logged via message append.
-      throw new Error(`${error.message} (also failed to roll back upload: ${rmErr.message})`);
+  if (error) throwSb(error);
+
+  const { error: upErr } = await supabase.storage.from(DOC_BUCKET).upload(path, input.file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: input.file.type || undefined,
+  });
+  if (upErr) {
+    const { error: delErr } = await supabase.from("PropertyDocuments").delete().eq("id", data!.id);
+    if (delErr) {
+      throw new Error(`${upErr.message} (also failed to roll back document row: ${delErr.message})`);
     }
-    throwSb(error);
+    throw new Error(upErr.message);
   }
 
   return mapPropertyDocument(data!);

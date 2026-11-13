@@ -353,6 +353,12 @@ export function mapVendor(row: SbVendor): Vendor {
   };
 }
 
+/**
+ * Map a MaintenanceRequests row to a WorkOrder.
+ * Internal staff notes are not on the MR row — pass `extras.notes` from
+ * MaintenanceRequestStaffNotes (or null for landlord/tenant). Omitting extras.notes
+ * yields `notes: null` (safe default; never invent notes from the request row).
+ */
 export function mapWorkOrder(
   row: SbMr,
   extras?: {
@@ -363,6 +369,8 @@ export function mapWorkOrder(
     tenant_last_name?: string | null;
     vendor_name?: string | null;
     vendor_color?: string | null;
+    /** From MaintenanceRequestStaffNotes; omit/null when caller is not staff/admin. */
+    notes?: string | null;
   },
 ): WorkOrder {
   const statusRaw = lowerStatus(row.status);
@@ -401,7 +409,7 @@ export function mapWorkOrder(
     scheduled_at: row.scheduled_for,
     completed_at: row.closed_at,
     cost: row.cost != null ? Number(row.cost) : null,
-    notes: row.notes,
+    notes: extras?.notes ?? null,
     resolution_notes: row.resolution_notes,
     hold_reason: row.hold_reason,
     next_follow_up_date: row.next_follow_up_date,

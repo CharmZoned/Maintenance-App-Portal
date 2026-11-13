@@ -30,7 +30,6 @@ const mr = (over: Partial<Tables<"MaintenanceRequests">> = {}) =>
     scheduled_for: null,
     closed_at: null,
     cost: null,
-    notes: null,
     resolution_notes: null,
     hold_reason: null,
     next_follow_up_date: null,
