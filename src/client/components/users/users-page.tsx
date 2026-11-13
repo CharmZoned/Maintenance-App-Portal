@@ -37,10 +37,11 @@ function statusVariant(status: AccountStatus): "default" | "secondary" | "destru
   return "outline";
 }
 
-/** Portal staff/admin access needs admin role, or maintenance + staff_id. */
+/** Staff/admin portal or linked tenant shell. */
 function canApproveForPortal(user: UserAccountRow): boolean {
   if (user.role === "admin") return true;
   if (user.role === "maintenance" && user.staff_id != null) return true;
+  if (user.role === "tenant" && user.tenant_id != null) return true;
   return false;
 }
 
@@ -49,16 +50,20 @@ function approveBlockedReason(user: UserAccountRow): string | null {
   if (user.role === "maintenance" && user.staff_id == null) {
     return "Link a Staff row before approving a maintenance account.";
   }
-  if (user.role === "landlord" || user.role === "tenant") {
-    return "Landlord/tenant roles cannot use this staff portal yet — approve only after changing role to admin or maintenance (+ staff).";
+  if (user.role === "tenant" && user.tenant_id == null) {
+    return "Link a Tenant row before approving a tenant account.";
+  }
+  if (user.role === "landlord") {
+    return "Landlord self-serve is not shipped yet — approve only after changing role to admin, maintenance (+ staff), or tenant (+ tenant link).";
   }
   return null;
 }
 
 export function UsersPage() {
-  const { setError, landlords } = useApp();
+  const { setError, landlords, listTenants } = useApp();
   const [rows, setRows] = useState<UserAccountRow[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [tenants, setTenants] = useState<Awaited<ReturnType<typeof listTenants>>>([]);
   const [filter, setFilter] = useState<StatusFilter>("pending");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -70,15 +75,20 @@ export function UsersPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [accounts, staffRows] = await Promise.all([data.listUserAccounts(), data.listStaff()]);
+      const [accounts, staffRows, tenantRows] = await Promise.all([
+        data.listUserAccounts(),
+        data.listStaff(),
+        listTenants(),
+      ]);
       setRows(accounts);
       setStaff(staffRows);
+      setTenants(tenantRows);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [setError]);
+  }, [setError, listTenants]);
 
   useEffect(() => {
     void load();
@@ -108,11 +118,16 @@ export function UsersPage() {
   }
 
   async function changeRole(user: UserAccountRow, role: AppRole) {
+    if (user.account_status === "approved" && role === "landlord") {
+      setError("Suspend or reject before assigning landlord (landlord portal not shipped).");
+      return;
+    }
     if (
       user.account_status === "approved" &&
-      (role === "landlord" || role === "tenant")
+      role === "tenant" &&
+      user.tenant_id == null
     ) {
-      setError("Suspend or reject before assigning landlord/tenant.");
+      setError("Link a Tenant row before keeping an approved tenant account.");
       return;
     }
     if (
@@ -160,6 +175,23 @@ export function UsersPage() {
     try {
       const id = landlordId === "none" ? null : Number(landlordId);
       await data.adminSetUserRole(user.user_id, "landlord", { landlord_id: id });
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function changeTenantLink(user: UserAccountRow, tenantId: string) {
+    if (user.account_status === "approved" && tenantId === "none") {
+      setError("Suspend or reject before clearing the Tenant link on an approved account.");
+      return;
+    }
+    setBusyId(user.user_id);
+    try {
+      const id = tenantId === "none" ? null : Number(tenantId);
+      await data.adminSetUserRole(user.user_id, "tenant", { tenant_id: id });
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -352,6 +384,35 @@ export function UsersPage() {
                           {landlords.map((l) => (
                             <SelectItem key={l.id} value={String(l.id)}>
                               {l.company_name?.trim() || `${l.last_name}, ${l.first_name}`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {user.role === "tenant" && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Tenant link (required for tenant portal)</Label>
+                      <Select
+                        value={user.tenant_id != null ? String(user.tenant_id) : "none"}
+                        onValueChange={(v) => void changeTenantLink(user, v)}
+                        disabled={busy}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Tenant" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem
+                            value="none"
+                            disabled={user.account_status === "approved"}
+                          >
+                            None
+                            {user.account_status === "approved" ? " (suspend first)" : ""}
+                          </SelectItem>
+                          {tenants.map((t) => (
+                            <SelectItem key={t.id} value={String(t.id)}>
+                              {t.last_name}, {t.first_name}
+                              {t.email ? ` (${t.email})` : ""}
                             </SelectItem>
                           ))}
                         </SelectContent>

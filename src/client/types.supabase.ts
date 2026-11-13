@@ -426,6 +426,78 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["Applications"]["Insert"]>;
         Relationships: [];
       };
+      MaintenanceRequestPhotos: {
+        Row: {
+          id: number;
+          created_at: string;
+          maintenance_request_id: number;
+          storage_path: string;
+          uploaded_by_role: AppRole | null;
+          uploaded_by_user_id: string | null;
+          caption: string | null;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          maintenance_request_id: number;
+          storage_path: string;
+          uploaded_by_role?: AppRole | null;
+          uploaded_by_user_id?: string | null;
+          caption?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceRequestPhotos"]["Insert"]>;
+        Relationships: [];
+      };
+      MaintenanceRequestComments: {
+        Row: {
+          id: number;
+          created_at: string;
+          maintenance_request_id: number;
+          author_user_id: string | null;
+          author_role: AppRole | null;
+          author_staff_id: number | null;
+          author_tenant_id: number | null;
+          body: string;
+          visibility: string;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          maintenance_request_id: number;
+          author_user_id?: string | null;
+          author_role?: AppRole | null;
+          author_staff_id?: number | null;
+          author_tenant_id?: number | null;
+          body: string;
+          visibility?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceRequestComments"]["Insert"]>;
+        Relationships: [];
+      };
+      MaintenanceRequestStatusHistory: {
+        Row: {
+          id: number;
+          created_at: string;
+          maintenance_request_id: number;
+          from_status: string | null;
+          to_status: string;
+          changed_by_user_id: string | null;
+          changed_by_role: AppRole | null;
+          note: string | null;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          maintenance_request_id: number;
+          from_status?: string | null;
+          to_status: string;
+          changed_by_user_id?: string | null;
+          changed_by_role?: AppRole | null;
+          note?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceRequestStatusHistory"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

@@ -38,6 +38,12 @@ import type {
   UnitStatus,
   WorkOrderStatus,
   ApplicationStatus,
+  MaintenancePhoto,
+  MaintenanceComment,
+  MaintenanceStatusEvent,
+  CommentVisibility,
+  MaintenanceCategory,
+  WorkOrderPriority,
 } from "../types";
 import type { AccountStatus, AppRole, Tables } from "../types.supabase";
 
@@ -788,17 +794,18 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
     .insert({
       title: input.title,
       description: input.description?.trim() || input.title,
-      category: "General",
+      category: (input.category as string) || "General repair",
       priority: workOrderPriorityToDb(input.priority ?? "normal"),
       status: workOrderStatusToDb(input.status ?? "open"),
       property_id: input.property_id ?? null,
       unit_id: input.unit_id ?? null,
       vendor_id: input.vendor_id ?? null,
       submitted_by_tenant_id: input.tenant_id ?? null,
+      assigned_staff_id: input.assigned_staff_id ?? null,
       scheduled_for: input.scheduled_at ?? null,
       cost: input.cost ?? null,
       notes: input.notes ?? null,
-      permission_to_enter: false,
+      permission_to_enter: input.permission_to_enter ?? false,
     })
     .select("*")
     .single();
@@ -807,20 +814,85 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
   return list.find((w) => w.id === data!.id) ?? mapWorkOrder(data!);
 }
 
+/** Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment. */
+export async function submitTenantMaintenanceRequest(input: {
+  title: string;
+  description: string;
+  category: MaintenanceCategory | string;
+  permission_to_enter: boolean;
+  priority?: WorkOrderPriority;
+}): Promise<WorkOrder> {
+  const { data: role, error: roleErr } = await supabase
+    .from("user_roles")
+    .select("tenant_id, role, account_status")
+    .eq("user_id", (await supabase.auth.getUser()).data.user?.id ?? "")
+    .maybeSingle();
+  if (roleErr) throwSb(roleErr);
+  if (!role || role.role !== "tenant" || role.account_status !== "approved" || role.tenant_id == null) {
+    throw new Error("Only approved tenants can submit maintenance requests.");
+  }
+
+  const { data: tenant, error: tenantErr } = await supabase
+    .from("Tenants")
+    .select("id, unit_id")
+    .eq("id", role.tenant_id)
+    .single();
+  if (tenantErr) throwSb(tenantErr);
+  if (!tenant.unit_id) {
+    throw new Error("Your tenant profile has no unit assigned. Ask staff to link a unit before submitting.");
+  }
+
+  const { data: unit, error: unitErr } = await supabase
+    .from("Units")
+    .select("id, property_id")
+    .eq("id", tenant.unit_id)
+    .single();
+  if (unitErr) throwSb(unitErr);
+
+  const { data, error } = await supabase
+    .from("MaintenanceRequests")
+    .insert({
+      title: input.title.trim(),
+      description: input.description.trim(),
+      category: input.category,
+      priority: workOrderPriorityToDb(input.priority ?? "normal"),
+      status: "Open",
+      property_id: unit.property_id,
+      unit_id: tenant.unit_id,
+      submitted_by_tenant_id: role.tenant_id,
+      permission_to_enter: input.permission_to_enter,
+      assigned_staff_id: null,
+      scheduled_for: null,
+      started_at: null,
+      closed_at: null,
+      hold_reason: null,
+      next_follow_up_date: null,
+      resolution_notes: null,
+      is_test_data: false,
+    })
+    .select("*")
+    .single();
+  if (error) throwSb(error);
+  return mapWorkOrder(data!);
+}
+
 export async function updateWorkOrder(id: number, patch: Partial<NewWorkOrder>): Promise<WorkOrder> {
   const row: Record<string, unknown> = {};
   if (patch.title !== undefined) row.title = patch.title;
   if (patch.description !== undefined) row.description = patch.description?.trim() || patch.title || "";
+  if (patch.category !== undefined) row.category = patch.category;
+  if (patch.permission_to_enter !== undefined) row.permission_to_enter = patch.permission_to_enter;
   if (patch.priority !== undefined) row.priority = workOrderPriorityToDb(patch.priority);
   if (patch.status !== undefined) {
     row.status = workOrderStatusToDb(patch.status);
-    if (patch.status === "completed") row.closed_at = new Date().toISOString();
+    if (patch.status === "closed") row.closed_at = new Date().toISOString();
     if (patch.status === "in_progress") row.started_at = new Date().toISOString();
   }
   if (patch.property_id !== undefined) row.property_id = patch.property_id;
   if (patch.unit_id !== undefined) row.unit_id = patch.unit_id;
   if (patch.vendor_id !== undefined) row.vendor_id = patch.vendor_id;
   if (patch.tenant_id !== undefined) row.submitted_by_tenant_id = patch.tenant_id;
+  if (patch.assigned_staff_id !== undefined) row.assigned_staff_id = patch.assigned_staff_id;
   if (patch.scheduled_at !== undefined) row.scheduled_for = patch.scheduled_at;
   if (patch.cost !== undefined) row.cost = patch.cost;
   if (patch.notes !== undefined) row.notes = patch.notes;
@@ -838,6 +910,170 @@ export async function updateWorkOrder(id: number, patch: Partial<NewWorkOrder>):
 export async function deleteWorkOrder(id: number): Promise<void> {
   const { error } = await supabase.from("MaintenanceRequests").delete().eq("id", id);
   if (error) throwSb(error);
+}
+
+const PHOTO_BUCKET = "maintenance-photos";
+
+export async function listMaintenancePhotos(requestId: number): Promise<MaintenancePhoto[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequestPhotos")
+    .select("*")
+    .eq("maintenance_request_id", requestId)
+    .order("created_at", { ascending: true });
+  if (error) throwSb(error);
+  const rows = data ?? [];
+  const withUrls: MaintenancePhoto[] = [];
+  for (const row of rows) {
+    const { data: signed } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .createSignedUrl(row.storage_path, 3600);
+    withUrls.push({
+      id: row.id,
+      maintenance_request_id: row.maintenance_request_id,
+      storage_path: row.storage_path,
+      caption: row.caption,
+      created_at: row.created_at,
+      uploaded_by_role: row.uploaded_by_role,
+      url: signed?.signedUrl ?? null,
+    });
+  }
+  return withUrls;
+}
+
+export async function uploadMaintenancePhoto(
+  requestId: number,
+  file: File,
+  caption?: string,
+): Promise<MaintenancePhoto> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: roleRow } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const path = `${requestId}/${crypto.randomUUID()}.${ext}`;
+
+  const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (upErr) throw new Error(upErr.message);
+
+  const { data, error } = await supabase
+    .from("MaintenanceRequestPhotos")
+    .insert({
+      maintenance_request_id: requestId,
+      storage_path: path,
+      caption: caption?.trim() || null,
+      uploaded_by_user_id: user.id,
+      uploaded_by_role: roleRow?.role ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+    throwSb(error);
+  }
+
+  const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);
+  return {
+    id: data!.id,
+    maintenance_request_id: data!.maintenance_request_id,
+    storage_path: data!.storage_path,
+    caption: data!.caption,
+    created_at: data!.created_at,
+    uploaded_by_role: data!.uploaded_by_role,
+    url: signed?.signedUrl ?? null,
+  };
+}
+
+export async function listMaintenanceComments(requestId: number): Promise<MaintenanceComment[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequestComments")
+    .select("*")
+    .eq("maintenance_request_id", requestId)
+    .order("created_at", { ascending: true });
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    maintenance_request_id: row.maintenance_request_id,
+    body: row.body,
+    visibility: (row.visibility as CommentVisibility) || "tenant_visible",
+    author_role: row.author_role,
+    author_staff_id: row.author_staff_id,
+    author_tenant_id: row.author_tenant_id,
+    created_at: row.created_at,
+  }));
+}
+
+export async function addMaintenanceComment(
+  requestId: number,
+  body: string,
+  visibility: CommentVisibility = "tenant_visible",
+): Promise<MaintenanceComment> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: roleRow, error: roleErr } = await supabase
+    .from("user_roles")
+    .select("role, staff_id, tenant_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (roleErr) throwSb(roleErr);
+
+  const { data, error } = await supabase
+    .from("MaintenanceRequestComments")
+    .insert({
+      maintenance_request_id: requestId,
+      body: body.trim(),
+      visibility,
+      author_user_id: user.id,
+      author_role: roleRow?.role ?? null,
+      author_staff_id: roleRow?.staff_id ?? null,
+      author_tenant_id: roleRow?.tenant_id ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throwSb(error);
+  return {
+    id: data!.id,
+    maintenance_request_id: data!.maintenance_request_id,
+    body: data!.body,
+    visibility: (data!.visibility as CommentVisibility) || "tenant_visible",
+    author_role: data!.author_role,
+    author_staff_id: data!.author_staff_id,
+    author_tenant_id: data!.author_tenant_id,
+    created_at: data!.created_at,
+  };
+}
+
+export async function listMaintenanceStatusHistory(
+  requestId: number,
+): Promise<MaintenanceStatusEvent[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequestStatusHistory")
+    .select("*")
+    .eq("maintenance_request_id", requestId)
+    .order("created_at", { ascending: true });
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    maintenance_request_id: row.maintenance_request_id,
+    from_status: row.from_status,
+    to_status: row.to_status,
+    changed_by_role: row.changed_by_role,
+    note: row.note,
+    created_at: row.created_at,
+  }));
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────
@@ -867,7 +1103,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     .reduce((s, c) => s + (c.amount - c.amount_paid), 0);
   const month_collected = charges.reduce((s, c) => s + c.amount_paid, 0);
   const overdue = charges.filter((c) => c.status === "overdue" || (c.due_date < todayIso && c.status !== "paid" && c.status !== "waived"));
-  const openWo = workOrders.filter((w) => !["completed", "cancelled"].includes(w.status));
+  const openWo = workOrders.filter((w) => w.status !== "closed");
   const urgentWo = openWo.filter((w) => w.priority === "urgent");
 
   return {

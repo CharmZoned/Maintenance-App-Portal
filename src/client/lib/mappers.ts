@@ -43,12 +43,13 @@ const UNIT_STATUS_TO_DB: Record<UnitStatus, string> = {
   unavailable: "Unavailable",
 };
 
+/** Live CHECK: Open | Scheduled | In Progress | On Hold | Closed */
 const WO_STATUS_TO_DB: Record<WorkOrderStatus, string> = {
   open: "Open",
-  assigned: "Assigned",
+  scheduled: "Scheduled",
   in_progress: "In Progress",
-  completed: "Completed",
-  cancelled: "Cancelled",
+  on_hold: "On Hold",
+  closed: "Closed",
 };
 
 const WO_PRIORITY_TO_DB: Record<WorkOrderPriority, string> = {
@@ -292,11 +293,15 @@ export function mapWorkOrder(
   const priorityRaw = lowerStatus(row.priority);
   const statusMap: Record<string, WorkOrderStatus> = {
     open: "open",
-    assigned: "assigned",
+    scheduled: "scheduled",
     in_progress: "in_progress",
-    completed: "completed",
-    cancelled: "cancelled",
-    canceled: "cancelled",
+    on_hold: "on_hold",
+    closed: "closed",
+    // Legacy D1 aliases (if any old rows / docs)
+    assigned: "scheduled",
+    completed: "closed",
+    cancelled: "closed",
+    canceled: "closed",
   };
   const priorityMap: Record<string, WorkOrderPriority> = {
     low: "low",
@@ -306,14 +311,18 @@ export function mapWorkOrder(
   };
   return {
     id: row.id,
+    request_number: row.request_number,
     property_id: row.property_id,
     unit_id: row.unit_id,
     tenant_id: row.submitted_by_tenant_id,
     vendor_id: row.vendor_id,
     title: row.title,
     description: row.description,
+    category: row.category || "General repair",
     priority: priorityMap[priorityRaw] ?? "normal",
     status: statusMap[statusRaw] ?? "open",
+    permission_to_enter: Boolean(row.permission_to_enter),
+    assigned_staff_id: row.assigned_staff_id,
     scheduled_at: row.scheduled_for,
     completed_at: row.closed_at,
     cost: row.cost != null ? Number(row.cost) : null,

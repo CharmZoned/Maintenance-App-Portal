@@ -79,7 +79,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   const palette = colorClasses(property.color);
   const occupied = units.filter((u) => u.status === "occupied").length;
   const totalRent = units.reduce((sum, u) => sum + (u.market_rent ?? 0), 0);
-  const openWorkOrders = workOrders.filter((w) => w.status !== "completed" && w.status !== "cancelled");
+  const openWorkOrders = workOrders.filter((w) => w.status !== "closed");
 
   return (
     <PageShell
