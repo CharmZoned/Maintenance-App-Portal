@@ -37,9 +37,10 @@ All domain tables below have **RLS enabled**. IDs are `bigint` identity (`GENERA
 | `tenant_id` | bigint nullable | |
 | `staff_id` | bigint nullable | |
 | `created_at` | timestamptz | |
-| `account_status` | text | **Phase 1 migration:** `pending \| approved \| rejected \| suspended`; default `pending`. Bootstrap admins set to `approved`. Phase 1 app gate does not yet enforce pending (Phase 2). |
+| `account_status` | text | `pending \| approved \| rejected \| suspended`; default `pending`. Bootstrap admins set to `approved`. App gate + SQL helpers require `approved`. |
 
-Policies: select own row (`authenticated`); select all for `supabase_auth_admin` (hook).
+Policies: select own row (`authenticated`); select all for `supabase_auth_admin` (hook).  
+**Phase 2:** no client UPDATE policies — admins change status/role via SECURITY DEFINER RPCs `list_user_accounts_for_admin`, `set_account_status`, `admin_set_user_role` (email from `auth.users`).
 
 ### `Landlords`
 
@@ -94,7 +95,11 @@ Key/value: `key` PK, `value`, `updated_at`. Phase 1: admin (and optionally maint
 
 ### `Applications`
 
-Rental applicants (not account approval). RLS on, **no policies** — left for Phase 2 UI. Do not confuse with `account_status`.
+Rental applicants (not account approval). Do not confuse with `user_roles.account_status`.
+
+Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_income`, `employer`, `desired_move_in`, `status` (default `new`: `new|screening|approved|declined|withdrawn`), `notes`, `is_test_data`.
+
+**Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.
 
 ### `MaintenanceRequests` (+ Photos, Comments)
 
@@ -117,12 +122,13 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `current_tenant_unit_id()` / `current_tenant_property_id()` | Tenant scope |
 | `landlord_owns_unit(unit)` | Landlord ownership |
 | `landlord_can_see_tenant` / `landlord_can_see_staff` | Cross visibility |
+| `is_staff_or_admin()` | Approved **admin**, or approved **maintenance** with non-null `staff_id` (Phase 2 AuthZ harden) |
 | `staff_assigned_to_unit` / `staff_assigned_to_property` | Via open maintenance assignment |
 | `staff_can_see_tenant` / `staff_can_see_landlord` | |
 | `tenant_can_see_landlord` / `tenant_can_see_staff` | |
 | `can_select_maintenance_request` / `can_update_maintenance_request` / `can_upload_maintenance_photo` | Maintenance ACL |
-| `handle_new_user` | Auth trigger: if email matches exactly one of Landlord/Tenant/Staff, insert `user_roles` |
-| `assign_admin(email)` | SECURITY DEFINER: set user to `admin` (clears link ids) |
+| `handle_new_user` | Auth trigger: match exactly one Landlord/Tenant/Staff → pending role; unmatched → pending `maintenance` (approval queue); ambiguous match → no row |
+| `assign_admin(email)` | SECURITY DEFINER: set user to `admin` (clears link ids), `approved` |
 | `assign_request_number` / `protect_maintenance_request` | Maintenance triggers |
 | `rent_charge_status_for_paid(amount, paid, due)` | Phase 1.5: derive open/partial/paid/overdue |
 | `public.custom_access_token_hook` | JWT claims |
@@ -148,7 +154,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 
 **Phase 1 addresses:** Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings (+ admin write policies on core portfolio tables).  
 **Phase 1.5:** `FORCE ROW LEVEL SECURITY` on those same Phase 1 tables; `vendors_select` staff/admin-only; payment ledger RPCs.  
-**Intentionally deferred:** `Applications` (Phase 2), `inquiries` (website service-role only).
+**Phase 2 addresses:** `Applications` staff/admin policies + FORCE RLS; account approval RPCs.  
+**Intentionally deferred:** `inquiries` (website service-role only).
 
 Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration).
 
@@ -180,13 +187,17 @@ Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `S
 
 ```sql
 select private.assign_admin('you@example.com');
-
--- Phase 1: mark approved (assign_admin does not set account_status)
-update public.user_roles
-set account_status = 'approved'
-where user_id = (select id from auth.users where lower(email) = lower('you@example.com'));
+-- assign_admin sets role=admin and account_status=approved
 ```
 
-4. Sign in on the portal with that user. Role must be `admin` (or `maintenance` with `staff_id`) to pass the Phase 1 app gate.
+4. Sign in on the portal with that user. Role must be `admin` (or `maintenance` with `staff_id`) to pass the app gate.
 
-**Choice documented:** New rows default to `pending`. Phase 1 follow-up enforces `account_status = 'approved'` in `private.current_role()` / `current_*_id()` / `is_admin()` / `is_staff_or_admin()`, and the portal auth gate blocks non-approved users. Bootstrap via `assign_admin` sets `approved`.
+**Choice documented:** New rows default to `pending`. Helpers + portal gate require `approved`. Bootstrap via `assign_admin` sets `approved`. Phase 2 admins use Users page / `set_account_status` instead of raw SQL for day-to-day approval.
+
+### Phase 2 public RPCs (admin-only)
+
+| Function | Purpose |
+|----------|---------|
+| `list_user_accounts_for_admin()` | Auth users + `user_roles` + email |
+| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended` (upserts if needed) |
+| `admin_set_user_role(user_id, role, landlord_id?, tenant_id?, staff_id?)` | Role + link-id assignment |

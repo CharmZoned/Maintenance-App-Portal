@@ -11,7 +11,7 @@
 | Phase 0–1 | Merged (PR #1) |
 | Cursor review skills | Merged (PR #2) under `.cursor/skills/` |
 | Plan revision (Phase 0–1 done + defer notify) | Open [PR #3](https://github.com/CharmZoned/Maintenance-App-Portal/pull/3) — merges this tracker |
-| Phase 2 feature work | Not started — after LGA-5 closes |
+| Phase 2 feature work | In progress — `cursor/phase2-account-approval-0924` (LGA-7) |
 | Nov 9 WO port | Phase 3 (not a Phase 2 blocker) |
 
 ## Status snapshot
@@ -21,7 +21,7 @@
 | **0** | Planning docs / schema tracker | **Done** (merged via PR #1) |
 | **1** | Auth, RLS, Supabase data cutover, landlords | **Done** (merged via PR #1; optional manual QA + small leftovers remain) |
 | **1.5** | Phase 1 follow-ups (UX AuthZ + lease-dialog) | **Next (small)** — before multi-staff production |
-| **2** | Account approval UI + Applications UI | **Next product phase** |
+| **2** | Account approval UI + Applications UI | **In progress** (LGA-7) |
 | **3** | Tenant maintenance + photos + status history | Planned |
 | **4** | Website CTA + shared Auth links | Planned (can overlap Phase 2 once portal URL is stable) |
 | **5** | Property documents | Planned |

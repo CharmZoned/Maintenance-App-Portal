@@ -15,6 +15,8 @@ import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { LandlordsPage } from "./components/landlords/landlords-page";
+import { ApplicationsPage } from "./components/applications/applications-page";
+import { UsersPage } from "./components/users/users-page";
 import { LoginPage } from "./components/auth/login-page";
 import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
@@ -30,8 +32,10 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
+  { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
 ];
-const ADMIN: AppNavItem[] = [
+const ADMIN_ITEMS: AppNavItem[] = [
+  { id: "users", label: "Users", href: "/users", icon: "users", color: "violet" },
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 
@@ -98,6 +102,7 @@ export function App() {
         configured={auth.configured}
         error={auth.authError}
         onLogin={auth.login}
+        onSignup={auth.signup}
         onForgot={() => setAuthScreen("reset-request")}
       />
     );
@@ -118,7 +123,9 @@ export function App() {
     return (
       <BlockedPage
         title="No role assigned"
-        message="Your account is signed in but has no portal role yet. Ask an admin to run private.assign_admin for your email, or link a Staff row."
+        message="Your account is signed in but has no portal role yet. Ask an admin to assign a role on the Users page, or run private.assign_admin for bootstrap."
+        onRetry={() => void auth.retryRole()}
+        retryLabel="Check again"
         onLogout={() => void auth.logout()}
       />
     );
@@ -126,10 +133,16 @@ export function App() {
 
   if (auth.gate.state === "unapproved") {
     const status = auth.gate.role.account_status;
+    const pendingCopy =
+      status === "pending"
+        ? "Your email is verified (or signup is complete). An admin must approve your account before you can use the portal. After approval, use Check again or sign in again."
+        : `Your account status is “${status}”. Contact an admin if you believe this is a mistake. After they change your status, use Check again.`;
     return (
       <BlockedPage
         title="Account not approved"
-        message={`Your account status is “${status}”. An admin must approve your account before you can use the portal.`}
+        message={pendingCopy}
+        onRetry={() => void auth.retryRole()}
+        retryLabel="Check again"
         onLogout={() => void auth.logout()}
       />
     );
@@ -160,10 +173,11 @@ export function App() {
     );
   }
 
+  const adminNav = isAdmin ? ADMIN_ITEMS : ADMIN_ITEMS.filter((i) => i.id === "settings");
   const groups = [
     { items: PORTFOLIO },
     { label: "Operations", items: OPERATIONS },
-    { label: "Admin", items: ADMIN },
+    { label: "Admin", items: adminNav },
   ];
 
   return (
@@ -203,6 +217,16 @@ export function App() {
               {route.name === "leases" && <LeasesPage navigate={navigate} />}
               {route.name === "rent" && <RentPage />}
               {route.name === "maintenance" && <MaintenancePage />}
+              {route.name === "applications" && <ApplicationsPage />}
+              {route.name === "users" &&
+                (isAdmin ? (
+                  <UsersPage />
+                ) : (
+                  <Placeholder
+                    title="Admins only"
+                    message="The Users approval queue is restricted to admins."
+                  />
+                ))}
               {route.name === "settings" && <SettingsPage />}
               {route.name === "not-found" && (
                 <Placeholder title="Not found" message="That page doesn't exist." />

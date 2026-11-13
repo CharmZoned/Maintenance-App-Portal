@@ -16,6 +16,8 @@ import type {
   WorkOrder,
   WorkOrderPriority,
   WorkOrderStatus,
+  Application,
+  ApplicationStatus,
 } from "../types";
 import type { Tables } from "../types.supabase";
 
@@ -28,6 +30,7 @@ type SbPayment = Tables<"Payments">;
 type SbVendor = Tables<"Vendors">;
 type SbMr = Tables<"MaintenanceRequests">;
 type SbLandlord = Tables<"Landlords">;
+type SbApplication = Tables<"Applications">;
 
 function lowerStatus(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, "_");
@@ -332,6 +335,31 @@ export function workOrderStatusToDb(status: WorkOrderStatus): string {
 
 export function workOrderPriorityToDb(priority: WorkOrderPriority): string {
   return WO_PRIORITY_TO_DB[priority] ?? priority;
+}
+
+const APP_STATUSES: ApplicationStatus[] = ["new", "screening", "approved", "declined", "withdrawn"];
+
+export function mapApplication(
+  row: SbApplication,
+  extras?: { unit_name?: string | null; property_name?: string | null },
+): Application {
+  const raw = (row.status || "new").toLowerCase() as ApplicationStatus;
+  return {
+    id: row.id,
+    unit_id: row.unit_id,
+    first_name: row.first_name,
+    last_name: row.last_name,
+    email: row.email,
+    phone: row.phone,
+    monthly_income: row.monthly_income != null ? Number(row.monthly_income) : null,
+    employer: row.employer,
+    desired_move_in: row.desired_move_in,
+    status: APP_STATUSES.includes(raw) ? raw : "new",
+    notes: row.notes,
+    created_at: row.created_at,
+    unit_name: extras?.unit_name,
+    property_name: extras?.property_name,
+  };
 }
 
 export { UNIT_STATUS_TO_DB };

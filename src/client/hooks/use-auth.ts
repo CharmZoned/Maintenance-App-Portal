@@ -100,6 +100,23 @@ export function useAuth() {
     }
   }, []);
 
+  /** Returns true when email confirmation is required (no session yet). */
+  const signup = useCallback(async (email: string, password: string): Promise<"session" | "confirm"> => {
+    setAuthError(null);
+    const emailRedirectTo = `${window.location.origin}/dashboard`;
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo },
+    });
+    if (error) {
+      setAuthError(error.message);
+      throw error;
+    }
+    if (data.session) return "session";
+    return "confirm";
+  }, []);
+
   const logout = useCallback(async () => {
     setAuthError(null);
     await supabase.auth.signOut();
@@ -134,6 +151,7 @@ export function useAuth() {
     authError,
     setAuthError,
     login,
+    signup,
     logout,
     requestPasswordReset,
     updatePassword,
