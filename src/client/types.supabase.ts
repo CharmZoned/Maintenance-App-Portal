@@ -357,7 +357,6 @@ export interface Database {
           property_id: number | null;
           vendor_id: number | null;
           cost: number | null;
-          notes: string | null;
           location: string | null;
           permission_to_enter: boolean;
           client_submission_id: string | null;
@@ -384,12 +383,25 @@ export interface Database {
           property_id?: number | null;
           vendor_id?: number | null;
           cost?: number | null;
-          notes?: string | null;
           location?: string | null;
           permission_to_enter?: boolean;
           client_submission_id?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["MaintenanceRequests"]["Insert"]>;
+        Relationships: [];
+      };
+      MaintenanceRequestStaffNotes: {
+        Row: {
+          maintenance_request_id: number;
+          notes: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          maintenance_request_id: number;
+          notes?: string | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceRequestStaffNotes"]["Insert"]>;
         Relationships: [];
       };
       Applications: {
