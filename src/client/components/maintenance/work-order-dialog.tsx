@@ -160,7 +160,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   async function refreshMedia(id: number) {
     const [p, c, h] = await Promise.all([listPhotos(id), listComments(id), listHistory(id)]);
     setPhotos(p);
-    // Landlords: hide internal staff comments until RLS column/visibility harden (LGA-19+).
+    // Landlords: tenant_visible only (also enforced by maintenance_comments_select RLS).
     setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
     setHistory(h);
   }

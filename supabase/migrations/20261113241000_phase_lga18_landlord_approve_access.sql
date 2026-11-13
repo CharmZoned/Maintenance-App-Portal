@@ -40,7 +40,31 @@ CREATE POLICY maintenance_requests_update ON public."MaintenanceRequests"
   FOR UPDATE
   TO authenticated
   USING (private.can_update_maintenance_request(id))
-  WITH CHECK (private.can_update_maintenance_request(id));
+  -- NEW-row check (same as #14 20261113252100): the helper SELECTs by id, i.e. the old row.
+  WITH CHECK (
+    (SELECT private.current_role()) = 'admin'::public.app_role
+    OR (
+      (SELECT private.current_role()) = 'maintenance'::public.app_role
+      AND assigned_staff_id = (SELECT private.current_staff_id())
+    )
+  );
+
+-- ── Comments: landlords see tenant_visible only ───────────────────
+-- Live policy let landlord read `internal` staff comments (only admin/maintenance should).
+
+DROP POLICY IF EXISTS maintenance_comments_select ON public."MaintenanceRequestComments";
+CREATE POLICY maintenance_comments_select ON public."MaintenanceRequestComments"
+  FOR SELECT
+  TO authenticated
+  USING (
+    (SELECT private.can_select_maintenance_request(maintenance_request_id))
+    AND (
+      visibility = 'tenant_visible'
+      OR (SELECT private.current_role()) = ANY (
+        ARRAY['admin'::public.app_role, 'maintenance'::public.app_role]
+      )
+    )
+  );
 
 -- ── Harden current_landlord_id (parity with tenant helpers) ───────
 
