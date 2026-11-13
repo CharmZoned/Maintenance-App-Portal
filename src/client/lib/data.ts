@@ -229,6 +229,8 @@ export async function updateProperty(id: number, patch: Partial<NewProperty>): P
 
 export async function deleteProperty(id: number): Promise<void> {
   // Remove storage objects before CASCADE deletes PropertyDocuments rows.
+  // Under path-bound DELETE, remove must succeed while rows still exist; confirm
+  // absence like deletePropertyDocument so a silent no-op cannot leave orphans.
   const { data: docs, error: docsErr } = await supabase
     .from("PropertyDocuments")
     .select("storage_path")
@@ -236,8 +238,23 @@ export async function deleteProperty(id: number): Promise<void> {
   if (docsErr) throwSb(docsErr);
   const paths = (docs ?? []).map((d) => d.storage_path).filter(Boolean);
   if (paths.length > 0) {
-    const { error: rmErr } = await supabase.storage.from("property-documents").remove(paths);
-    if (rmErr) throw new Error(rmErr.message);
+    const { data: removed, error: rmErr } = await supabase.storage
+      .from("property-documents")
+      .remove(paths);
+    const removedSet = new Set((removed ?? []).map((o) => o.name));
+    for (const path of paths) {
+      if (removedSet.has(path)) continue;
+      const presence = await propertyDocumentStoragePresence(path);
+      if (presence === "present") {
+        throw new Error(rmErr?.message || `Failed to remove document from storage: ${path}`);
+      }
+      if (presence === "unknown") {
+        throw new Error(
+          rmErr?.message ||
+            `Could not confirm storage removal for ${path}; property left unchanged.`,
+        );
+      }
+    }
   }
 
   const { error } = await supabase.from("Properties").delete().eq("id", id);
