@@ -590,6 +590,26 @@ function leaseCasFilter(
   return q;
 }
 
+const LEASE_CONCURRENT_MSG = "Lease was modified by another update; please retry";
+
+/** Abort if another update already moved the lease past our expected after-state. */
+async function assertLeaseLinkState(
+  leaseId: number,
+  expected: { unit_id: number; primary_tenant_id: number | null },
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("Leases")
+    .select("unit_id, primary_tenant_id")
+    .eq("id", leaseId)
+    .maybeSingle();
+  if (error) throwSb(error);
+  if (!data) throw new Error("Lease not found");
+  const primary = (data.primary_tenant_id as number | null) ?? null;
+  if (data.unit_id !== expected.unit_id || primary !== expected.primary_tenant_id) {
+    throw new Error(LEASE_CONCURRENT_MSG);
+  }
+}
+
 async function syncLeaseTenantLinks(args: {
   leaseId: number;
   beforeUnit: number;
@@ -598,16 +618,24 @@ async function syncLeaseTenantLinks(args: {
   afterPrimary: number | null;
 }): Promise<void> {
   const { leaseId, beforeUnit, beforePrimary, afterUnit, afterPrimary } = args;
+  const after = { unit_id: afterUnit, primary_tenant_id: afterPrimary };
+
+  // Bail if a newer CAS already superseded us before we write tenants.
+  await assertLeaseLinkState(leaseId, after);
 
   if (beforePrimary != null && beforePrimary !== afterPrimary) {
     await unlinkTenantFromLease(leaseId, beforePrimary, beforeUnit);
+    await assertLeaseLinkState(leaseId, after);
   }
 
   if (afterPrimary != null) {
     await linkPrimaryTenantToLease(leaseId, afterUnit, afterPrimary);
+    await assertLeaseLinkState(leaseId, after);
   }
 
-  // Always converge members to the lease's current unit (safe under concurrent edits).
+  // Converge members to the lease unit with no beforeUnit filter; re-check first so a
+  // slower sync cannot overwrite a newer winner's occupants.
+  await assertLeaseLinkState(leaseId, after);
   await setOccupantsUnit(leaseId, afterUnit, afterPrimary);
 }
 
@@ -730,7 +758,7 @@ export async function updateLease(id: number, patch: Partial<NewLease>): Promise
   if (error) throwSb(error);
   if (!data) {
     if (needsLinkSync) {
-      throw new Error("Lease was modified by another update; please retry");
+      throw new Error(LEASE_CONCURRENT_MSG);
     }
     throw new Error("Lease not found");
   }
