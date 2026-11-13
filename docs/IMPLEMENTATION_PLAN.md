@@ -1,7 +1,18 @@
 # Landlord Gopher — Phased Implementation Plan
 
 **Last revised:** 2026-11-13  
-**Tracker:** Cursor Project task list (this doc is the source of truth for scope; Project tasks mirror phases/requirements below).
+**Tracker:** Cursor Project task list (this doc is the source of truth for scope; Project tasks mirror phases/requirements below).  
+**LGA-5:** Correction plan before Phase 2 — completion checklist in [Coordinator runbook](#lga-5--correction-plan-before-phase-2).
+
+## Branch / merge status
+
+| Item | Status |
+|------|--------|
+| Phase 0–1 | Merged (PR #1) |
+| Cursor review skills | Merged (PR #2) under `.cursor/skills/` |
+| Plan revision (Phase 0–1 done + defer notify) | Open [PR #3](https://github.com/CharmZoned/Maintenance-App-Portal/pull/3) — merges this tracker |
+| Phase 2 feature work | Not started — after LGA-5 closes |
+| Nov 9 WO port | Phase 3 (not a Phase 2 blocker) |
 
 ## Status snapshot
 
@@ -192,15 +203,40 @@ When reopened: Edge Function/email for maintenance create/status change; optiona
 
 ---
 
-## Coordinator runbook (current)
+## LGA-5 — Correction plan before Phase 2
 
-1. ~~Phase 0–1~~ **Done** (merged).
-2. Sync **Cursor Project tasks** to the table above (mark 0/1/R3/R7-core done; defer Phase 6).
-3. Optional **Phase 1.5** follow-up PR, then spawn **Phase 2** agents (P2a → P2b ‖ P2c → P2d).
-4. Optionally start **Phase 4** once a stable portal URL exists.
-5. Continue Phase 3 → 5; leave Phase 6 parked until product asks to reopen.
+**Goal of LGA-5:** Lock product decisions, land the revised tracker on `master`, sync the Cursor Project list — **without** starting Phase 2 feature code.
 
-**Open questions (non-blocking):**
+**Out of LGA-5 (separate tasks):** Phase 1.5 code fixes, Phase 2 Users/Applications UI, Nov 9 WO port, Phase 6 notify/messaging.
+
+### Done already
+
+- [x] Phase 0–1 merged (PR #1)
+- [x] Review skills on `master` (PR #2)
+- [x] Locked decisions: admin-only doc visibility; admin-only Accept & schedule; signup→verify→pending; **defer** email/push/messaging (popups only)
+- [x] Revised `docs/IMPLEMENTATION_PLAN.md` + phase briefs on branch `cursor/revise-implementation-plan-0924`
+- [x] Open [PR #3](https://github.com/CharmZoned/Maintenance-App-Portal/pull/3) (rebase/merge onto current `master` required — was dirty)
+
+### Remaining to close LGA-5
+
+| Step | Who | Action | Exit criteria |
+|------|-----|--------|---------------|
+| **A1** | Agent | Rebase/merge PR #3 onto latest `master`; resolve doc conflicts (keep this revised tracker; drop superseded “messaging Phase 2.5” near-term work) | PR mergeable (not dirty) |
+| **A2** | User | Review + merge [PR #3](https://github.com/CharmZoned/Maintenance-App-Portal/pull/3) | Tracker live on `master` |
+| **A3** | Coordinator | Sync Cursor Project tasks to the mirror table above; mark LGA-5 **Done**; ensure Phase 6 / messaging tasks are Deferred/Canceled | List matches plan |
+| **A4** | Coordinator | Abandon or close stale `cursor/plan-product-gaps-2880` (superseded by PR #3) | One plan branch only |
+| **A5** | Optional | Confirm Phase 2 open questions (signup vs invite; email in Users list without service role) — non-blocking notes in phase-2.md | Written answers or “decide in P2a” |
+
+**LGA-5 DoD:** PR #3 merged; Project list synced; correction decisions reflected in tracker; Phase 2 agents may start (or Phase 1.5 first if multi-staff prod is imminent).
+
+### After LGA-5
+
+1. Optional **Phase 1.5** (isAdmin mutate UI + lease-dialog) — recommended before multi-staff prod; does not block Phase 2 planning acceptance.
+2. Spawn **Phase 2** agents: P2a → P2b ‖ P2c → P2d.
+3. Optionally start **Phase 4** once a stable portal URL exists.
+4. Phase 3 → 5 later; Phase 6 stays parked.
+
+**Open questions (non-blocking for LGA-5):**
 1. Portal host (Cloudflare Pages vs Vercel).
 2. Public signup vs invite-only for staff (Phase 2).
 3. Tenant UI in same SPA vs subdomain (recommend same SPA + role routes).
