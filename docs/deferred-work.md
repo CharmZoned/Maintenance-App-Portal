@@ -25,7 +25,7 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Automated RLS tests for tenant photo isolation + status history append-only | Regression safety | No harness yet (same as payment RPC tests) | When vitest/pgTAP lands |
 | Slim Users tenant-link query (id/name/email only) | Faster Users page | Phase 3 reused full `listTenants` enrich | Next Users UX pass |
 | Split work-order-dialog into staff edit / tenant detail / media panels | Maintainability | Phase 3 shipped one dialog for DoD | Next maintenance UX pass |
-| Landlord documents UI (list/download own property docs) | Completes landlord half of R5 in the portal | LGA-18 thin shell is Properties + Maintenance only; Phase 5 RLS already allows landlord-visible docs | Next landlord portal pass after LGA-19 write ACL |
+| ~~Landlord documents UI (list/download own property docs)~~ | Completes landlord half of R5 in the portal | **Shipped** WS-F — landlord Documents nav + page (list/download); property panel upload/delete gated off for landlord | — |
 | Automated RLS tests for document visibility (tenant/staff/landlord isolation) | Regression safety | No harness yet | When vitest/pgTAP lands |
 | Property-documents MIME allowlist + attachment-only download | Blocks HTML/SVG open-in-tab via signed URL | Phase 5 ship used short TTL + download click; full MIME policy is product polish | Next docs security pass |
 | Bind storage UPDATE/DELETE to existing `PropertyDocuments.storage_path` | Closes staff orphan-upload / overwrite of arbitrary paths in bucket | SELECT already requires readable row; INSERT path-shaped | Next storage ACL harden |

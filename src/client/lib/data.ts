@@ -1547,6 +1547,35 @@ export async function updatePropertyDocumentVisibility(
   return mapPropertyDocument(data!);
 }
 
+type StorageObjectPresence = "present" | "absent" | "unknown";
+
+function isStorageObjectNotFoundError(error: {
+  message?: string;
+  statusCode?: string | number;
+  status?: number;
+} | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  const code = String(error.statusCode ?? error.status ?? "").toLowerCase();
+  // Live Storage often uses 404; the local emulator signs missing objects as 400 not_found.
+  if (code === "404") return true;
+  return /not[_ ]?found|object not found|does not exist/.test(msg);
+}
+
+/**
+ * Probe whether a property-document storage object is still visible to the caller.
+ * Ambiguous sign failures must not be treated as absent (avoids orphaning the file
+ * by deleting metadata after a transient remove+sign outage).
+ */
+async function propertyDocumentStoragePresence(storagePath: string): Promise<StorageObjectPresence> {
+  const { data, error } = await supabase.storage
+    .from(DOC_BUCKET)
+    .createSignedUrl(storagePath, DOC_SIGNED_URL_TTL_SEC);
+  if (data?.signedUrl && error == null) return "present";
+  if (isStorageObjectNotFoundError(error)) return "absent";
+  return "unknown";
+}
+
 export async function deletePropertyDocument(id: number): Promise<void> {
   const { data: doc, error } = await supabase
     .from("PropertyDocuments")
@@ -1562,9 +1591,21 @@ export async function deletePropertyDocument(id: number): Promise<void> {
   const { data: removed, error: rmErr } = await supabase.storage
     .from(DOC_BUCKET)
     .remove([doc.storage_path]);
-  if (rmErr) throw new Error(rmErr.message);
-  if (!removed?.length) {
-    throw new Error("Failed to remove document from storage.");
+  const confirmedRemoved = rmErr == null && (removed?.length ?? 0) > 0;
+  if (!confirmedRemoved) {
+    // Retry-safe: a prior attempt may have removed storage then failed on DB delete.
+    // Only continue when absence is clear. Present → RLS/permission no-op; unknown →
+    // do not delete metadata (could orphan a still-existing object).
+    const presence = await propertyDocumentStoragePresence(doc.storage_path);
+    if (presence === "present") {
+      throw new Error(rmErr?.message || "Failed to remove document from storage.");
+    }
+    if (presence === "unknown") {
+      throw new Error(
+        rmErr?.message ||
+          "Could not confirm document was removed from storage; metadata left unchanged.",
+      );
+    }
   }
 
   const { data: deleted, error: delErr } = await supabase

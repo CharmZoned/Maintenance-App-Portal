@@ -15,6 +15,7 @@ import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { TenantDocumentsPage } from "./components/documents/tenant-documents-page";
+import { LandlordDocumentsPage } from "./components/documents/landlord-documents-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { LandlordsPage } from "./components/landlords/landlords-page";
 import { ApplicationsPage } from "./components/applications/applications-page";
@@ -48,6 +49,7 @@ const TENANT_NAV: AppNavItem[] = [
 const LANDLORD_NAV: AppNavItem[] = [
   { id: "properties", label: "Properties", href: "/properties", home: true, icon: "building-2", color: "green" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
+  { id: "documents", label: "Documents", href: "/documents", icon: "clipboard-list", color: "blue" },
 ];
 
 function activeFor(route: Route): string {
@@ -57,7 +59,12 @@ function activeFor(route: Route): string {
 }
 
 function landlordHomeRoute(route: Route): boolean {
-  return route.name === "properties" || route.name === "property" || route.name === "maintenance";
+  return (
+    route.name === "properties" ||
+    route.name === "property" ||
+    route.name === "maintenance" ||
+    route.name === "documents"
+  );
 }
 
 type AuthScreen = "login" | "reset-request" | "reset-confirm";
@@ -284,10 +291,11 @@ export function App() {
               {route.name === "properties" && <PropertiesList navigate={navigate} />}
               {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
               {route.name === "maintenance" && <MaintenancePage />}
+              {route.name === "documents" && <LandlordDocumentsPage />}
               {!landlordHomeRoute(route) && (
                 <Placeholder
                   title="Landlord portal"
-                  message="Read-only view of your properties and maintenance. Editing is not available yet."
+                  message="Read-only view of your properties, maintenance, and documents. Editing is not available yet."
                 />
               )}
             </>

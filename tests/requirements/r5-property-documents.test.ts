@@ -107,6 +107,28 @@ describe("[R5] Property documents", () => {
       expect((await data.listPropertyDocuments()).some((d) => d.id === doc.id)).toBe(false);
       expect(await stored(), "file must be removed from storage, not left behind").toHaveLength(0);
     });
+
+    test("retry after storage already removed still clears the metadata row", async () => {
+      const doc = await uploadAsAdmin("Retry delete notice");
+      const stored = () =>
+        sql(`select 1 from storage.objects where bucket_id = 'property-documents' and name = $1`, [
+          doc.storage_path,
+        ]);
+      const meta = () => sql(`select 1 from public."PropertyDocuments" where id = $1`, [doc.id]);
+
+      // Simulate a prior attempt that removed storage then failed before DB delete.
+      await sql(`delete from storage.objects where bucket_id = 'property-documents' and name = $1`, [
+        doc.storage_path,
+      ]);
+      expect(await stored()).toHaveLength(0);
+      expect(await meta(), "metadata row must still be present for retry").toHaveLength(1);
+
+      await signInApp("admin");
+      await data.deletePropertyDocument(doc.id);
+
+      expect(await meta(), "retry must clear the stale metadata row").toHaveLength(0);
+      expect((await data.listPropertyDocuments()).some((d) => d.id === doc.id)).toBe(false);
+    });
   });
 
   describe("only an admin decides who can see a document", () => {
@@ -198,6 +220,21 @@ describe("[R5] Property documents", () => {
       expectDenied(await client.from("PropertyDocuments").delete().eq("id", doc.id).select());
       expectDenied(await client.from("PropertyDocuments").update({ title: "Defaced" }).eq("id", doc.id).select());
       expect(await sql(`select 1 from public."PropertyDocuments" where id = $1 and title = 'VIS tenant building-wide'`, [doc.id])).toHaveLength(1);
+    });
+
+    test("a landlord cannot clear metadata via delete retry when storage is already gone", async () => {
+      const doc = await uploadAsAdmin("Landlord retry delete", { visibility: "landlord" });
+      await sql(`delete from storage.objects where bucket_id = 'property-documents' and name = $1`, [
+        doc.storage_path,
+      ]);
+      await signInApp("landlord");
+      await expect(data.deletePropertyDocument(doc.id)).rejects.toThrow(
+        /metadata could not be deleted|Failed to remove document from storage/i,
+      );
+      expect(
+        await sql(`select 1 from public."PropertyDocuments" where id = $1`, [doc.id]),
+        "landlord must not clear the row just because storage was already gone",
+      ).toHaveLength(1);
     });
   });
 });

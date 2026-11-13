@@ -68,15 +68,18 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Tenant portal");
   });
 
-  test("a landlord gets a read-only portal with their properties and maintenance", async ({ page }, testInfo) => {
+  test("a landlord gets a read-only portal with their properties, maintenance, and documents", async ({ page }, testInfo) => {
     await signIn(page, "landlord");
-    // Properties is the home page (the portal title links to it); Maintenance is the only other section.
-    expect(await navLinks(page)).toEqual(["Maintenance"]);
+    // Properties is the home page (the portal title links to it); Maintenance + Documents are the other sections.
+    expect(await navLinks(page)).toEqual(["Maintenance", "Documents"]);
     await expect(page.getByRole("link", { name: "LG Landlord Portal" })).toHaveAttribute("href", "/properties");
     await expect(page.getByText("Read-only")).toBeVisible();
     await expect(page.getByText("Maple Court")).toBeVisible();
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);
     await expect(page.getByRole("button", { name: "New property" })).toHaveCount(0);
+    await page.goto("/documents");
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await shot(page, testInfo, "Landlord portal");
   });
 });
@@ -285,5 +288,26 @@ test.describe("[R5] Property documents — screens", () => {
     await expect(page.getByText("House rules", { exact: true })).toBeVisible();
     await expect(page.getByText("Vendor contracts")).toHaveCount(0);
     await shot(page, testInfo, "Tenant's Documents page");
+  });
+
+  test("a landlord sees landlord/tenant-shared docs and cannot upload", async ({ page }, testInfo) => {
+    await sql(
+      `insert into public."PropertyDocuments" (property_id, title, file_name, storage_path, visibility)
+       values
+         ($1, 'Landlord lease copy', 'lease.pdf', $2, 'landlord'),
+         ($1, 'Staff only binder', 'binder.pdf', $3, 'staff')`,
+      [world.property.id, `${world.property.id}/lease.pdf`, `${world.property.id}/binder.pdf`],
+    );
+    await signIn(page, "landlord");
+    await page.goto("/documents");
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(page.getByText("Landlord lease copy", { exact: true })).toBeVisible();
+    await expect(page.getByText("House rules", { exact: true })).toBeVisible();
+    await expect(page.getByText("Staff only binder")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
+    await page.goto(`/properties/${world.property.id}`);
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
+    await shot(page, testInfo, "Landlord Documents page");
   });
 });
