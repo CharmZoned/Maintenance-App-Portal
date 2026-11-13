@@ -1548,17 +1548,36 @@ export async function updatePropertyDocumentVisibility(
 }
 
 export async function deletePropertyDocument(id: number): Promise<void> {
-  const { data, error } = await supabase
+  const { data: doc, error } = await supabase
     .from("PropertyDocuments")
     .select("storage_path")
     .eq("id", id)
     .maybeSingle();
   if (error) throwSb(error);
-  if (!data) throw new Error("Document not found.");
+  if (!doc) throw new Error("Document not found.");
 
-  const { error: delErr } = await supabase.from("PropertyDocuments").delete().eq("id", id);
-  if (delErr) throwSb(delErr);
-
-  const { error: rmErr } = await supabase.storage.from(DOC_BUCKET).remove([data.storage_path]);
+  // Bucket RLS SELECT joins PropertyDocuments by storage_path — remove the object
+  // while the row still exists, then delete metadata (same storage-then-DB order
+  // as deleteProperty, but required for SELECT RLS rather than CASCADE).
+  const { data: removed, error: rmErr } = await supabase.storage
+    .from(DOC_BUCKET)
+    .remove([doc.storage_path]);
   if (rmErr) throw new Error(rmErr.message);
+  if (!removed?.length) {
+    throw new Error("Failed to remove document from storage.");
+  }
+
+  const { data: deleted, error: delErr } = await supabase
+    .from("PropertyDocuments")
+    .delete()
+    .eq("id", id)
+    .select("id");
+  if (delErr) {
+    throw new Error(
+      `${delErr.message} (storage object already removed; metadata row may remain)`,
+    );
+  }
+  if (!deleted?.length) {
+    throw new Error("Storage object removed but document metadata could not be deleted.");
+  }
 }
