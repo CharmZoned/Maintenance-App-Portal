@@ -84,7 +84,7 @@ Key columns: `first_name`, `last_name`, `email` NOT NULL, `job_title`, `gets_req
 Leases: `unit_id`, `primary_tenant_id`, `start_date`, `end_date`, `monthly_rent`, `deposit`, `rent_due_day`, `late_fee`, `status` (default `active`), `notes`, `is_test_data`.  
 LeaseTenants: composite PK `(lease_id, tenant_id)`.
 
-**App sync (gap R3 / WS-G):** `createLease` / `updateLease` / `deleteLease` in `src/client/lib/data.ts` keep `LeaseTenants` and `Tenants.unit_id` (+ `primary_on_lease`) aligned with the primary tenant; on unit move, other `LeaseTenants` members whose `unit_id` still matches the old unit are moved too. On delete or primary change away, **clear** `unit_id` when it still matches the lease unit (no auto-reassign to another lease). Multi-step FE sync is best-effort (no DB transaction); a single RPC remains optional follow-up.
+**App sync (gap R3 / WS-G):** `createLease` / `updateLease` / `deleteLease` in `src/client/lib/data.ts` keep `LeaseTenants` and `Tenants.unit_id` (+ `primary_on_lease`) aligned with the primary tenant; on unit move, other `LeaseTenants` members whose `unit_id` still matches the old unit are moved too. On delete or primary change away, **clear** `unit_id` when it still matches the lease unit (no auto-reassign to another lease). Multi-step FE sync has no DB transaction; `updateLease` best-effort compensates by restoring the lease row, removing a newly linked primary, moving co-tenants back, and re-linking the previous primary. A single RPC remains optional follow-up.
 
 **Pre-Phase 1:** RLS on, **no policies** (advisor).  
 **Phase 1:** admin/staff/landlord-scoped policies via `private.*` helpers.

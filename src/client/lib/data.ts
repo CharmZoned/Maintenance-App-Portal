@@ -593,6 +593,49 @@ async function syncLeaseTenantLinks(args: {
   }
 }
 
+/**
+ * Best-effort undo after a partial syncLeaseTenantLinks failure (no DB transaction).
+ * Restores the lease row, removes a newly linked primary, moves co-tenants back,
+ * and re-links the previous primary.
+ */
+async function compensateLeaseTenantLinkSync(args: {
+  leaseId: number;
+  beforeUnit: number;
+  beforePrimary: number | null;
+  afterUnit: number;
+  afterPrimary: number | null;
+}): Promise<void> {
+  const { leaseId, beforeUnit, beforePrimary, afterUnit, afterPrimary } = args;
+
+  const { error: leaseErr } = await supabase
+    .from("Leases")
+    .update({
+      unit_id: beforeUnit,
+      primary_tenant_id: beforePrimary,
+    } as never)
+    .eq("id", leaseId);
+  if (leaseErr) throwSb(leaseErr);
+
+  if (afterPrimary != null && afterPrimary !== beforePrimary) {
+    const { error: ltErr } = await supabase
+      .from("LeaseTenants")
+      .delete()
+      .eq("lease_id", leaseId)
+      .eq("tenant_id", afterPrimary);
+    if (ltErr) throwSb(ltErr);
+    await clearTenantUnitsMatching([afterPrimary], afterUnit);
+  }
+
+  if (afterUnit !== beforeUnit) {
+    // Move every remaining member still on afterUnit back (includes same-primary case).
+    await moveOccupantsToUnit(leaseId, afterUnit, beforeUnit, null);
+  }
+
+  if (beforePrimary != null) {
+    await linkPrimaryTenantToLease(leaseId, beforeUnit, beforePrimary);
+  }
+}
+
 export async function createLease(input: NewLease): Promise<Lease> {
   const { data, error } = await supabase
     .from("Leases")
@@ -669,20 +712,17 @@ export async function updateLease(id: number, patch: Partial<NewLease>): Promise
         afterPrimary,
       });
     } catch (syncErr) {
-      // Best-effort compensate: restore lease row + previous primary link (FE has no TX).
-      await supabase
-        .from("Leases")
-        .update({
-          unit_id: before.unit_id,
-          primary_tenant_id: before.primary_tenant_id,
-        } as never)
-        .eq("id", id);
-      if (before.primary_tenant_id != null) {
-        try {
-          await linkPrimaryTenantToLease(id, before.unit_id, before.primary_tenant_id);
-        } catch {
-          /* keep original sync error */
-        }
+      // Best-effort full compensate (FE has no TX): undo new primary + co-tenant moves too.
+      try {
+        await compensateLeaseTenantLinkSync({
+          leaseId: id,
+          beforeUnit: before.unit_id,
+          beforePrimary: before.primary_tenant_id,
+          afterUnit,
+          afterPrimary,
+        });
+      } catch {
+        /* keep original sync error */
       }
       throw syncErr;
     }
