@@ -1,6 +1,6 @@
 # Phase 4 — Website integration
 
-**Status:** Stub — can start once Phase 1 has a stable portal URL + Auth project config (may overlap Phase 2).
+**Status:** Planned — can start once a stable portal URL + Auth project config exist (may overlap Phase 2). Phase 1 foundation is done.
 
 **Goal:** Marketing site links to live portal; shared Auth login works.
 

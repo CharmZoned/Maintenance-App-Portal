@@ -1,8 +1,9 @@
 # Phase 3 — Tenant maintenance + photos (R4, R7)
 
-**Status:** Stub — start after Phase 2 (or after Phase 1 if product prioritizes tenant submit before approval UX).
+**Status:** Planned — start after Phase 2 (or after Phase 1 if product prioritizes tenant submit before approval UX).
 
-**Goal:** Tenant submits maintenance with category + photos; staff updates status with a visible trail; comments respect visibility.
+**Goal:** Tenant submits maintenance with category + photos; staff updates status with a visible trail; comments respect visibility.  
+**Alerts:** No email/push in this phase — use in-app **popups/toasts** for confirmation feedback (Phase 6 deferred).
 
 ## Agents
 

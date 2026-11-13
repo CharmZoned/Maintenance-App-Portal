@@ -1,8 +1,8 @@
 # Phase 2 — Account approval + Applications UI (R2, R8)
 
-**Status:** Planning (this document). Feature implementation starts only after this plan is accepted and Phase 1 MVP is merged (or stacked underneath).  
-**Depends on:** Phase 1 Auth + `user_roles.account_status` + approved-only RLS helpers (branch `cursor/phase0-phase1-mvp-8ed9`).  
-**Out of scope here:** Tenant maintenance submit (Phase 3), website CTA (Phase 4), documents, notifications, full performance rewrite of `data.ts`.
+**Status:** Next product phase (planning ready). Feature work after Phase 1.5 leftovers or in parallel if product accepts residual UX debt.  
+**Depends on:** Phase 1 Auth + `user_roles.account_status` + approved-only RLS helpers (**done** on `master`).  
+**Out of scope here:** Tenant maintenance submit (Phase 3), website CTA (Phase 4), documents (Phase 5), email/push/messaging (Phase 6 **deferred** — use popups/toasts).
 
 ---
 
@@ -12,17 +12,15 @@ Pending users cannot use the portal; admins can **approve / reject / suspend** a
 
 **DoD**
 
-- [ ] Signup (or invite) lands in `account_status = pending`
-- [ ] Pending / rejected / suspended cannot load portfolio data (UI + RLS already partially done in Phase 1 — keep hardened)
+- [ ] Signup (or invite) lands in `account_status = pending` after email verification
+- [ ] Pending / rejected / suspended cannot load portfolio data (UI + RLS — partially done in Phase 1)
 - [ ] Admin Users page can list users by status and change status
 - [ ] Applications list/detail exists and is labeled as rental applicants (not the approval queue)
 - [ ] QA checklist signed off
 
 ---
 
-## Phase 1 leftovers (do before or in a small Phase 1 follow-up PR — not Phase 2 product)
-
-From re-review `@ c6af01a` (`internal/phase1-rereview-c6af01a.md`):
+## Phase 1 leftovers (Phase 1.5 — not Phase 2 product)
 
 | Priority | Item | Notes |
 |----------|------|--------|
@@ -31,10 +29,10 @@ From re-review `@ c6af01a` (`internal/phase1-rereview-c6af01a.md`):
 | Medium | Payment ledger RPC (record + delete) | Atomic `amount_paid` update; reduces RMW race |
 | Medium | `FORCE ROW LEVEL SECURITY` on Phase 1 tables | Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings |
 | Medium | Narrow `vendors_select` for landlords | Currently any landlord |
-| Should | Soft-fail bootstrap / `generateCharges` error swallowing | Surface failures |
+| Should | Soft-fail bootstrap / `generateCharges` error swallowing | Surface failures via popup/toast |
 | Perf | Dashboard / charges N+1 | Defer unless blocking; not Phase 2 DoD |
 
-Track completion in Phase 1 PR or a tiny `cursor/phase1-followups-*` PR — **do not block** Phase 2 planning acceptance on these, but **do** fix High + lease-dialog before multi-staff production.
+Track as Cursor Project task **Phase 1.5**. Fix High + lease-dialog before multi-staff production.
 
 ---
 
@@ -43,10 +41,10 @@ Track completion in Phase 1 PR or a tiny `cursor/phase1-followups-*` PR — **do
 - Column `user_roles.account_status` (`pending|approved|rejected|suspended`), default `pending`
 - `private.assign_admin` sets `approved`
 - App gate: `unapproved` / `forbidden` / `error` / `ready`
-- SQL: `current_role`, `current_*_id`, `is_admin`, `is_staff_or_admin` require `approved`
+- SQL helpers require `approved`
 - Open D1 `/api` retired (410)
 
-Phase 2 adds **admin UX + policies to change status** and **Applications screens**, plus signup → pending path.
+Phase 2 adds **admin UX + policies to change status** and **Applications screens**, plus signup → verify → pending.
 
 ---
 
@@ -54,7 +52,7 @@ Phase 2 adds **admin UX + policies to change status** and **Applications screens
 
 ```mermaid
 flowchart LR
-  P1[Phase1_merged] --> BE2a[BE_P2a_status_policies]
+  P1[Phase1_DONE] --> BE2a[BE_P2a_status_policies]
   BE2a --> FE2b[FE_P2b_Users_approval]
   BE2a --> FE2c[FE_P2c_Applications]
   FE2b --> QA2[QA_P2]
@@ -67,71 +65,48 @@ flowchart LR
 
 ### P2a — BE: Status policies + admin update path
 
-**Tasks**
-
-- [ ] Admin-only policies (or SECURITY DEFINER RPC) to **update** `user_roles.account_status` (and optionally role/link ids)
+- [ ] Admin-only policies (or SECURITY DEFINER RPC) to update `user_roles.account_status`
 - [ ] Ensure non-admins cannot self-approve
-- [ ] Optional RPC `approve_user(user_id)` / `set_account_status(user_id, status)` with audit-friendly comments
-- [ ] Confirm JWT hook / helpers still deny non-approved after status change until refresh (document client re-fetch)
-- [ ] Applications: add **read** (and admin write if needed) RLS policies — table currently RLS-on, no policies
+- [ ] Optional RPC `approve_user` / `set_account_status`
+- [ ] Applications: add read (and admin write) RLS — table currently RLS-on, no policies
 - [ ] Migration under `supabase/migrations/`; update `docs/supabase-schema.md`
-- [ ] Do **not** break `inquiries` (website service-role)
+- [ ] Do **not** break `inquiries`
 
-**Acceptance:** Admin can change status via SQL/RPC; pending JWT still cannot SELECT portfolio rows; Applications selectable by admin.
-
-**Handoff:** Column/RPC contract + typegen updates for FE.
+**Acceptance:** Admin can change status via SQL/RPC; pending JWT cannot SELECT portfolio; Applications selectable by admin.
 
 ### P2b — FE: Users / approval queue
 
-**Tasks**
-
-- [ ] Admin-only nav item **Users** (or Settings subsection)
-- [ ] List Auth-linked rows from `user_roles` (+ email via safe view/RPC if needed — never expose service role in client)
+- [ ] Admin-only nav **Users**
+- [ ] List `user_roles` (+ email via safe view/RPC — never service role in client)
 - [ ] Filters: pending / approved / rejected / suspended
-- [ ] Actions: Approve, Reject, Suspend (and optionally Re-approve)
-- [ ] Signup path: if public signup enabled, land as `pending` with no portfolio access; copy explains wait for approval
-- [ ] After approve, prompt user to refresh session / re-login so JWT + helpers pick up access
+- [ ] Actions: Approve, Reject, Suspend (and optionally Re-approve) with confirm **popups**
+- [ ] Signup → email verify → `pending`; copy explains wait for approval
+- [ ] After approve, prompt refresh / re-login
 
-**Acceptance:** Admin can clear the pending queue; pending user still blocked until approved.
-
-**Does not:** Build landlord/tenant self-serve portals.
+**Acceptance:** Admin clears pending queue; pending user blocked until approved.
 
 ### P2c — FE: Applications (rental applicants)
 
-**Tasks**
-
-- [ ] Nav/page **Applications** clearly labeled "Rental applications" (not account approval)
-- [ ] List/detail for `Applications` table (status, unit, contact, notes)
-- [ ] Staff/admin create/edit/update status as needed for Phase 2 scope
+- [ ] Nav/page **Applications** labeled "Rental applications"
+- [ ] List/detail for `Applications` (status, unit, contact, notes)
+- [ ] Staff/admin create/edit/update status
 - [ ] Empty states; no confusion with Users page
-
-**Acceptance:** Reviewer can tell Applications ≠ Users approval in under 5 seconds.
 
 ### P2d — QA
 
 | # | Check | Expected |
 |---|--------|----------|
-| 1 | New signup / pending user | Blocked UI + empty/denied portfolio queries |
-| 2 | Admin approves | User can reach portfolio after session refresh |
-| 3 | Reject / suspend | Access revoked on next resolve / token refresh |
+| 1 | New signup / pending user | Blocked UI + denied portfolio queries |
+| 2 | Admin approves | User reaches portfolio after session refresh |
+| 3 | Reject / suspend | Access revoked on next resolve |
 | 4 | Non-admin cannot change statuses | RPC/RLS deny |
-| 5 | Applications page | Labeled; CRUD per policies; not mixed with Users |
+| 5 | Applications page | Labeled; not mixed with Users |
 | 6 | Website inquiries | Still works via service role |
 
-Write results back into this file when done.
-
 ---
 
-## Branch / PR recommendation
-
-- Keep Phase 1 MVP on `cursor/phase0-phase1-mvp-8ed9` (user opens/merges via compare).
-- Implement Phase 2 on `cursor/phase2-<topic>-8ed9` **after** Phase 1 merge (or stack on Phase 1 head).
-- This planning doc PR: `cursor/phase2-planning-8ed9` → `master` (docs only).
-
----
-
-## Open questions (non-blocking for writing the plan)
+## Open questions (non-blocking)
 
 1. Public signup vs invite-only Auth for staff?
-2. How to show Auth email in Users list without service role (DB view / Edge Function)?
+2. How to show Auth email in Users list without service role?
 3. Should landlords appear in the same Users queue or only staff/admin applicants?
