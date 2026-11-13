@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Test dashboard · LG Maintenance Portal</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --sunken: #eef0f3; --border: #dfe3e8; --text: #16191d; --muted: #5d6673;
+    --pass: #1a7f4b; --pass-bg: #e3f4ea; --fail: #c0392b; --fail-bg: #fbe9e7; --plan: #6b5fb5; --plan-bg: #ecebf8;
+    --skip: #946200; --skip-bg: #fbf1d6; --accent: #1f5fbf; --shadow: 0 1px 2px rgba(16,24,40,.06);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101215; --surface: #181b20; --sunken: #20242a; --border: #2c323a; --text: #e8eaed; --muted: #9aa3af;
+      --pass: #4ecb8a; --pass-bg: #143524; --fail: #f08576; --fail-bg: #40201c; --plan: #a79df0; --plan-bg: #28264a;
+      --skip: #e0b34a; --skip-bg: #3a2f12; --accent: #7fb0ff; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font: inherit; color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px 80px; }
+  header.top { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--border); }
+  header.top .wrap { padding-bottom: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 60px; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
+  .meta { color: var(--muted); font-size: 12.5px; }
+  .spacer { flex: 1; }
+  .btn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 6px 12px; cursor: pointer; box-shadow: var(--shadow); white-space: nowrap; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.primary { color: #0b1220; } }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.small { padding: 2px 8px; font-size: 12px; border-radius: 6px; }
+  nav.tabs { display: flex; gap: 4px; overflow-x: auto; }
+  nav.tabs button { border: 0; background: none; padding: 10px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+  nav.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .count { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 10px; font-size: 11.5px; font-weight: 600; background: var(--sunken); color: var(--muted); text-align: center; }
+  .count.fail { background: var(--fail-bg); color: var(--fail); }
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 20px 0 10px; }
+  @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
+  .tile .n { font-size: 26px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--muted); font-size: 12.5px; }
+  .tile.pass .n { color: var(--pass); } .tile.fail .n { color: var(--fail); } .tile.plan .n { color: var(--plan); }
+  .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--sunken); }
+  .bar i { display: block; height: 100%; }
+  .bar .p { background: var(--pass); } .bar .f { background: var(--fail); } .bar .t { background: var(--plan); opacity: .55; } .bar .s { background: var(--skip); opacity: .6; }
+  h2 { font-size: 15px; margin: 28px 0 4px; }
+  .lede { color: var(--muted); margin: 0 0 12px; max-width: 72ch; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); margin-bottom: 10px; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 150px 118px 22px; gap: 12px; align-items: center; padding: 12px 14px; cursor: pointer; width: 100%; text-align: left; border: 0; background: none; }
+  .row:hover { background: var(--sunken); }
+  @media (max-width: 720px) { .row { grid-template-columns: 44px minmax(0, 1fr) 22px; } .row .barcell, .row .pillcell { grid-column: 2; } .row .chev { grid-row: 1; grid-column: 3; } }
+  .rid { font-weight: 700; font-family: var(--mono); font-size: 13px; }
+  .rtitle { font-weight: 600; }
+  .rsum { color: var(--muted); font-size: 12.5px; }
+  .nums { color: var(--muted); font-size: 12px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill.passed { background: var(--pass-bg); color: var(--pass); } .pill.failed { background: var(--fail-bg); color: var(--fail); }
+  .pill.todo { background: var(--plan-bg); color: var(--plan); } .pill.skipped, .pill.none { background: var(--skip-bg); color: var(--skip); }
+  .chev { color: var(--muted); transition: transform .15s; } [aria-expanded="true"] .chev { transform: rotate(90deg); }
+  .detail { border-top: 1px solid var(--border); padding: 6px 14px 14px; }
+  .grouphead { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .layer { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; border: 1px solid var(--border); color: var(--muted); text-transform: none; letter-spacing: 0; white-space: nowrap; }
+  ul.tests { list-style: none; margin: 0; padding: 0; }
+  ul.tests > li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; padding: 4px 0; align-items: start; }
+  .ico { width: 16px; height: 16px; border-radius: 50%; margin-top: 3px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; }
+  .ico.passed { background: var(--pass); } .ico.failed { background: var(--fail); } .ico.todo { background: none; border: 1.5px dashed var(--plan); } .ico.skipped { background: none; border: 1.5px solid var(--skip); }
+  .ms { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  pre.err { margin: 6px 0 4px; padding: 8px 10px; background: var(--fail-bg); color: var(--text); border-left: 3px solid var(--fail); border-radius: 6px; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; }
+  .finding { padding: 12px 14px; }
+  .finding + .finding { border-top: 1px solid var(--border); }
+  .finding .where { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+  .finding .what { font-weight: 600; }
+  .tag { font-family: var(--mono); font-size: 11.5px; font-weight: 700; padding: 1px 6px; border-radius: 5px; background: var(--sunken); color: var(--text); }
+  .shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .shots figure { margin: 0; width: 168px; }
+  .shots img { width: 100%; aspect-ratio: 16/10.75; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 6px; cursor: zoom-in; display: block; background: var(--sunken); }
+  .shots figcaption { font-size: 11.5px; color: var(--muted); margin-top: 3px; line-height: 1.3; }
+  .tracks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 4px 14px 14px; }
+  @media (max-width: 820px) { .tracks { grid-template-columns: minmax(0, 1fr); } }
+  .track h3 { font-size: 13px; margin: 10px 0 2px; } .track .lede { font-size: 12.5px; margin-bottom: 8px; }
+  ol.steps { list-style: none; margin: 0; padding: 0; }
+  ol.steps > li { position: relative; padding: 0 0 14px 30px; }
+  ol.steps > li::before { content: ""; position: absolute; left: 9px; top: 20px; bottom: 0; width: 2px; background: var(--border); }
+  ol.steps > li:last-child::before { display: none; }
+  ol.steps .dot { position: absolute; left: 0; top: 1px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; }
+  .dot.passed { background: var(--pass); } .dot.failed { background: var(--fail); } .dot.skipped { background: var(--sunken); color: var(--muted); border: 1px solid var(--border); } .dot.todo { background: var(--plan); }
+  .actor { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 0 7px; border-radius: 5px; margin-right: 6px; border: 1px solid; }
+  .a-tenant { color: #0b7285; border-color: #0b728555; } .a-admin { color: #9c36b5; border-color: #9c36b555; } .a-worker { color: #c2570a; border-color: #c2570a55; } .a-other { color: var(--muted); border-color: var(--border); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .a-tenant { color: #66d9e8; } :root:not([data-theme="light"]) .a-admin { color: #e599f7; } :root:not([data-theme="light"]) .a-worker { color: #ffa94d; } }
+  .wfhead { padding: 14px 14px 0; display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+  .wfhead .rtitle { font-size: 15px; }
+  .empty { padding: 28px 14px; text-align: center; color: var(--muted); }
+  #log { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: #0f1114; color: #d7dbe0; border-top: 1px solid #2c323a; font: 12px/1.5 var(--mono); }
+  #log header { display: flex; gap: 10px; align-items: center; padding: 6px 14px; cursor: pointer; }
+  #log .body { max-height: 34vh; overflow: auto; padding: 0 14px 10px; white-space: pre-wrap; word-break: break-word; }
+  #log[data-collapsed="true"] .body { display: none; }
+  .spin { width: 12px; height: 12px; border: 2px solid #5d6673; border-top-color: #7fb0ff; border-radius: 50%; animation: sp .8s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  #box { position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,.78); display: none; place-items: center; padding: 20px; cursor: zoom-out; }
+  #box.open { display: grid; } #box img { max-width: 100%; max-height: 88vh; border-radius: 8px; } #box p { color: #fff; text-align: center; margin: 8px 0 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div>
+      <h1>Test dashboard <span class="meta">· LG Maintenance Portal</span></h1>
+      <div class="meta" id="runmeta">Loading…</div>
+    </div>
+    <div class="spacer"></div>
+    <div id="actions" hidden>
+      <button class="btn primary" data-run="all">Run everything</button>
+      <button class="btn" data-run="data" title="Unit, requirement and workflow tests against the local database (about 25s)">Data layer</button>
+      <button class="btn" data-run="browser" title="Real browser clicking through the app (about 2 min)">Browser</button>
+    </div>
+  </div>
+  <div class="wrap"><nav class="tabs" id="tabs" role="tablist"></nav></div>
+</header>
+
+<main class="wrap">
+  <section class="tiles" id="tiles"></section>
+  <div class="bar" id="totalbar"></div>
+  <div id="view"></div>
+</main>
+
+<div id="log" hidden data-collapsed="false"><header><span class="spin" id="spin"></span><strong id="logtitle">Running…</strong><span class="spacer" style="flex:1"></span><span>show / hide log</span></header><div class="body" id="logbody"></div></div>
+<div id="box"><div><img alt="" /><p></p></div></div>
+
+<script id="embedded" type="application/json">null</script>
+<script>
+(() => {
+  const embedded = JSON.parse(document.getElementById("embedded").textContent);
+  const live = embedded === null;
+  let registry = { requirements: [], workflows: [] };
+  let results = { lastRun: null, tests: [] };
+  let shots = {};
+  let running = null;
+  let tab = "fix";
+  const open = new Set();
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const LAYER = { unit: "Unit", data: "Data layer", browser: "Browser" };
+  const shotUrl = (file) => (live ? `/shots/${file}` : shots[file] || "");
+  const ms = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}s` : `${n}ms`);
+
+  function tally(tests) {
+    const t = { passed: 0, failed: 0, todo: 0, skipped: 0, total: tests.length };
+    for (const x of tests) t[x.status]++;
+    return t;
+  }
+  function verdict(t) {
+    if (t.total === 0) return ["none", "No tests yet"];
+    if (t.failed) return ["failed", `${t.failed} failing`];
+    if (t.passed === 0 && t.todo) return ["todo", "Not built"];
+    if (t.passed === 0) return ["skipped", "Not run"];
+    return ["passed", t.todo ? `Passing · ${t.todo} planned` : "Passing"];
+  }
+  function bar(t) {
+    if (!t.total) return '<div class="bar"></div>';
+    const w = (n) => `style="width:${(n / t.total) * 100}%"`;
+    return `<div class="bar" title="${t.passed} passed, ${t.failed} failed, ${t.todo} planned">` +
+      `<i class="p" ${w(t.passed)}></i><i class="f" ${w(t.failed)}></i><i class="t" ${w(t.todo)}></i><i class="s" ${w(t.skipped)}></i></div>`;
+  }
+  const icon = (s) => `<span class="ico ${s}" title="${s}">${s === "passed" ? "✓" : s === "failed" ? "✕" : ""}</span>`;
+  const byTag = (id) => results.tests.filter((t) => t.tags.includes(id));
+  const sortTests = (a, b) => a.file.localeCompare(b.file) || a.order - b.order;
+
+  function shotsHtml(t) {
+    if (!t.shots || !t.shots.length) return "";
+    return `<div class="shots">${t.shots.map((s) => `<figure><img loading="lazy" src="${shotUrl(s.file)}" alt="${esc(s.name)}" data-zoom="${esc(s.name)}" /><figcaption>${esc(s.name)}</figcaption></figure>`).join("")}</div>`;
+  }
+  function testLi(t) {
+    return `<li>${icon(t.status)}<div><div>${esc(t.title)}</div>${t.error ? `<pre class="err">${esc(t.error)}</pre>` : ""}${t.status === "failed" ? shotsHtml(t) : ""}</div><span class="ms">${t.status === "todo" ? "planned" : t.status === "skipped" ? "not run" : ms(t.durationMs)}</span></li>`;
+  }
+  function groupedList(tests) {
+    const groups = new Map();
+    for (const t of [...tests].sort(sortTests)) {
+      const key = `${t.layer}|${t.group.join(" › ")}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t);
+    }
+    return [...groups].map(([key, list]) => {
+      const [layer, name] = key.split("|");
+      return `<div class="grouphead"><span class="layer">${LAYER[layer]}</span>${esc(name)}</div><ul class="tests">${list.map(testLi).join("")}</ul>`;
+    }).join("");
+  }
+
+  // ── Views ──────────────────────────────────────────────────────
+  function viewFix() {
+    const failing = results.tests.filter((t) => t.status === "failed").sort(sortTests);
+    if (!results.tests.length) return `<div class="card empty">No results yet.${live ? " Press <strong>Run everything</strong>." : ""}</div>`;
+    if (!failing.length) return `<h2>Needs fixing</h2><div class="card empty">Nothing is failing. 🎉</div>`;
+    const order = [...registry.requirements, ...registry.workflows].map((r) => r.id);
+    const buckets = new Map();
+    for (const t of failing) {
+      const key = t.tags.find((x) => order.includes(x)) || "Other";
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(t);
+    }
+    const keys = [...buckets.keys()].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+    return `<h2>Needs fixing</h2><p class="lede">Each item is a check that describes how the app is supposed to behave and currently does not. The message is what the app or database actually answered.</p>` +
+      keys.map((k) => {
+        const meta = [...registry.requirements, ...registry.workflows].find((r) => r.id === k);
+        return `<div class="card"><div class="wfhead" style="padding-bottom:10px"><span class="tag">${esc(k)}</span><span class="rtitle">${esc(meta ? meta.title : "Other checks")}</span><span class="pill failed">${buckets.get(k).length} failing</span></div>` +
+          buckets.get(k).map((t) => `<div class="finding"><div class="where"><span class="layer">${LAYER[t.layer]}</span>${esc(t.group.join(" › "))}</div><div class="what">${esc(t.title)}</div>${t.error ? `<pre class="err">${esc(t.error)}</pre>` : ""}${shotsHtml(t)}<div class="meta">${esc(t.file)}</div></div>`).join("") + `</div>`;
+      }).join("");
+  }
+
+  function viewRequirements() {
+    return `<h2>Requirements</h2><p class="lede">One row per requirement. Open a row to see every check behind it. “Planned” checks are written down but the feature is not built yet.</p>` +
+      registry.requirements.map((r) => {
+        const tests = byTag(r.id);
+        const t = tally(tests);
+        const [cls, label] = verdict(t);
+        const isOpen = open.has(r.id);
+        return `<div class="card"><button class="row" data-toggle="${r.id}" aria-expanded="${isOpen}">
+          <span class="rid">${esc(r.id)}</span>
+          <span><div class="rtitle">${esc(r.title)}</div><div class="rsum">${esc(r.summary)}</div></span>
+          <span class="barcell">${bar(t)}<div class="nums">${t.passed} passed · ${t.failed} failed${t.todo ? ` · ${t.todo} planned` : ""}</div></span>
+          <span class="pillcell"><span class="pill ${cls}">${esc(label)}</span></span>
+          <span class="chev">▸</span></button>
+          ${isOpen ? `<div class="detail">${live ? `<button class="btn small" data-run="all" data-tag="${r.id}" style="margin-top:8px">Re-run ${r.id} only</button>` : ""}${tests.length ? groupedList(tests) : '<div class="empty">No checks are tagged with this requirement yet.</div>'}</div>` : ""}
+        </div>`;
+      }).join("");
+  }
+
+  function actorClass(actor) {
+    const a = actor.toLowerCase();
+    if (a.includes("tenant")) return "a-tenant";
+    if (a.includes("admin") || a.includes("staff")) return "a-admin";
+    if (a.includes("worker")) return "a-worker";
+    return "a-other";
+  }
+  function stepLi(t, i) {
+    const cut = t.title.indexOf(" · ");
+    const actor = cut > 0 ? t.title.slice(0, cut) : "";
+    const action = cut > 0 ? t.title.slice(cut + 3) : t.title;
+    return `<li><span class="dot ${t.status}">${t.status === "failed" ? "✕" : i + 1}</span>
+      <div>${actor ? `<span class="actor ${actorClass(actor)}">${esc(actor)}</span>` : ""}${esc(action)} <span class="ms">${t.status === "skipped" ? "· not run" : `· ${ms(t.durationMs)}`}</span></div>
+      ${t.error ? `<pre class="err">${esc(t.error)}</pre>` : ""}${shotsHtml(t)}</li>`;
+  }
+  function viewWorkflows() {
+    return `<h2>Workflows</h2><p class="lede">Each workflow is played twice, in order, by the people involved: once against the data layer (fast, checks the rules) and once in a real browser (clicks through the actual screens, with screenshots).</p>` +
+      registry.workflows.map((w) => {
+        const tests = byTag(w.id).sort(sortTests);
+        const [cls, label] = verdict(tally(tests));
+        const track = (layer, title, lede) => {
+          const steps = tests.filter((t) => t.layer === layer);
+          return `<div class="track"><h3>${title}</h3><p class="lede">${lede}</p>${steps.length ? `<ol class="steps">${steps.map(stepLi).join("")}</ol>` : '<div class="empty">No steps recorded for this track.</div>'}</div>`;
+        };
+        return `<div class="card"><div class="wfhead"><span class="tag">${esc(w.id)}</span><span class="rtitle">${esc(w.title)}</span><span class="pill ${cls}">${esc(label)}</span>${live ? `<button class="btn small" data-run="all" data-tag="${w.id}">Re-run</button>` : ""}</div>
+          <p class="lede" style="padding:4px 14px 0">${esc(w.summary)}</p>
+          <div class="tracks">${track("data", "Data layer", "Signs in as each person and calls the same functions the screens call.")}${track("browser", "In the browser", "Signs in through the login form and uses the real screens.")}</div></div>`;
+      }).join("");
+  }
+
+  function viewOther() {
+    const known = new Set([...registry.requirements, ...registry.workflows].map((r) => r.id));
+    const tests = results.tests.filter((t) => !t.tags.some((x) => known.has(x)));
+    return `<h2>Other checks</h2><p class="lede">Checks that are not tied to a numbered requirement (helpers, formatting).</p><div class="card"><div class="detail" style="border:0">${tests.length ? groupedList(tests) : '<div class="empty">None.</div>'}</div></div>`;
+  }
+
+  // ── Render ─────────────────────────────────────────────────────
+  function render() {
+    const t = tally(results.tests);
+    const run = results.lastRun;
+    $("runmeta").textContent = run
+      ? `Last run ${new Date(run.finishedAt).toLocaleString()} · ${ms(run.durationMs)} · ${run.git.branch}@${run.git.commit}${run.tag ? ` · only ${run.tag}` : run.scope !== "all" ? ` · ${run.scope} only` : ""}${live ? "" : " · snapshot (run `pnpm test:ui` for the live dashboard)"}`
+      : live ? "No runs yet — press Run everything." : "No results.";
+    $("tiles").innerHTML = [
+      ["pass", t.passed, "Passing"], ["fail", t.failed, "Need fixing"], ["plan", t.todo, "Planned (not built)"], ["", t.total, "Checks in total"],
+    ].map(([c, n, l]) => `<div class="tile ${c}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+    $("totalbar").outerHTML = bar(t).replace('class="bar"', 'class="bar" id="totalbar"');
+    const tabs = [["fix", "Needs fixing", t.failed, "fail"], ["req", "Requirements", registry.requirements.length], ["wf", "Workflows", registry.workflows.length], ["other", "Other checks"]];
+    $("tabs").innerHTML = tabs.map(([id, label, n, cls]) => `<button role="tab" data-tab="${id}" aria-selected="${tab === id}">${label}${n !== undefined ? `<span class="count ${n && cls ? cls : ""}">${n}</span>` : ""}</button>`).join("");
+    $("view").innerHTML = tab === "fix" ? viewFix() : tab === "req" ? viewRequirements() : tab === "wf" ? viewWorkflows() : viewOther();
+    document.querySelectorAll("[data-run]").forEach((b) => (b.disabled = !!running));
+  }
+
+  document.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-tab],[data-toggle],[data-run],[data-zoom]");
+    if ($("box").classList.contains("open")) { $("box").classList.remove("open"); return; }
+    if (!el) return;
+    if (el.dataset.tab) { tab = el.dataset.tab; render(); window.scrollTo({ top: 0 }); }
+    else if (el.dataset.toggle) { open.has(el.dataset.toggle) ? open.delete(el.dataset.toggle) : open.add(el.dataset.toggle); render(); }
+    else if (el.dataset.zoom !== undefined) { $("box").querySelector("img").src = el.src; $("box").querySelector("p").textContent = el.dataset.zoom; $("box").classList.add("open"); }
+    else if (el.dataset.run && live) {
+      const q = new URLSearchParams({ scope: el.dataset.run }); if (el.dataset.tag) q.set("tag", el.dataset.tag);
+      fetch(`/api/run?${q}`, { method: "POST" });
+    }
+  });
+  $("log").querySelector("header").addEventListener("click", () => { const l = $("log"); l.dataset.collapsed = l.dataset.collapsed === "true" ? "false" : "true"; });
+
+  function logLine(line) { const b = $("logbody"); b.textContent += line + "\n"; b.scrollTop = b.scrollHeight; }
+  function setRunning(r) {
+    running = r;
+    $("log").hidden = !r && !$("logbody").textContent;
+    $("spin").hidden = !r;
+    $("logtitle").textContent = r ? `Running ${r.tag ? r.tag : r.scope === "all" ? "everything" : r.scope + " tests"}…` : "Last run log";
+    render();
+  }
+  function apply(state) { registry = state.registry; results = state.results; if (state.shots) shots = state.shots; }
+
+  if (!live) { apply(embedded); render(); return; }
+  $("actions").hidden = false;
+  fetch("/api/state").then((r) => r.json()).then((state) => {
+    apply(state);
+    if (state.log.length) { $("logbody").textContent = state.log.join("\n") + "\n"; $("log").dataset.collapsed = state.running ? "false" : "true"; }
+    setRunning(state.running);
+  });
+  const es = new EventSource("/api/events");
+  es.addEventListener("started", (e) => { $("logbody").textContent = ""; $("log").dataset.collapsed = "false"; setRunning(JSON.parse(e.data)); });
+  es.addEventListener("log", (e) => logLine(JSON.parse(e.data)));
+  es.addEventListener("finished", (e) => { apply(JSON.parse(e.data)); $("log").dataset.collapsed = "true"; setRunning(null); });
+})();
+</script>
+</body>
+</html>

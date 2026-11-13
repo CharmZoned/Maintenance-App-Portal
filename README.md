@@ -80,6 +80,17 @@ pnpm build
 
 The dev script applies `src/server/schema.sql` to the local D1 database, then runs Vite and Wrangler in parallel. The schema seeds 3 sample properties, 5 units, and 3 vendors so the app is usable on first boot.
 
+## Test
+
+```bash
+pnpm test:ui      # dashboard at http://localhost:4600 — requirements, workflows, what needs fixing
+pnpm test         # data-layer tests (~25s)
+pnpm test:all     # everything, incl. the real UI in a browser; writes tests/.results/report.html
+pnpm dev:local    # run the portal against a local backend with demo logins (never touches live)
+```
+
+Tests run against a local Supabase emulator built from `supabase/migrations/`. See [`tests/README.md`](tests/README.md).
+
 ## Deploy
 
 If you have the Clawnify CLI installed:
