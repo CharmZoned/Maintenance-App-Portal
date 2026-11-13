@@ -257,18 +257,25 @@ describe("[R7] Permissions", () => {
 
   describe("money", () => {
     let chargeId: number;
+    let leaseId: number;
+
+    async function freshCharge(period: string, amount = 1450): Promise<number> {
+      const [charge] = await sql<{ id: number }>(
+        `insert into public."RentCharges" (lease_id, period, due_date, amount)
+         values ($1, $2, ($2 || '-01')::date, $3) returning id`,
+        [leaseId, period, amount],
+      );
+      return Number(charge.id);
+    }
+
     beforeAll(async () => {
       const [lease] = await sql<{ id: number }>(
         `insert into public."Leases" (unit_id, primary_tenant_id, start_date, end_date, monthly_rent)
          values ($1, $2, '2026-01-01', '2026-12-31', 1450) returning id`,
         [world.units.a.id, world.tenants.tenant.id],
       );
-      const [charge] = await sql<{ id: number }>(
-        `insert into public."RentCharges" (lease_id, period, due_date, amount)
-         values ($1, '2099-01', '2099-01-01', 1450) returning id`,
-        [lease.id],
-      );
-      chargeId = Number(charge.id);
+      leaseId = Number(lease.id);
+      chargeId = await freshCharge("2099-01");
     });
 
     test("an admin records a payment and the balance updates", async () => {
@@ -297,9 +304,107 @@ describe("[R7] Permissions", () => {
 
     test("a tenant sees their own rent charges but not other tenants'", async () => {
       const mine = await clientFor("tenant");
-      expect((await mine.from("RentCharges").select("id")).data).toEqual([{ id: chargeId }]);
+      expect((await mine.from("RentCharges").select("id").eq("id", chargeId)).data).toEqual([{ id: chargeId }]);
       const other = await clientFor("tenant2");
-      expect((await other.from("RentCharges").select("id")).data).toEqual([]);
+      expect((await other.from("RentCharges").select("id").eq("id", chargeId)).data).toEqual([]);
+    });
+
+    describe("payment ledger RPCs", () => {
+      test("deleting a payment reverses the charge balance from the remaining ledger SUM", async () => {
+        const id = await freshCharge("2099-02");
+        await signInApp("admin");
+        await data.recordPayment({ charge_id: id, amount: 400, method: "cash", reference: "keep" });
+        await data.recordPayment({ charge_id: id, amount: 200, method: "cash", reference: "drop" });
+        const payments = await data.listPayments(id);
+        const drop = payments.find((p) => p.reference === "drop");
+        expect(drop).toBeTruthy();
+
+        const after = await data.deletePayment(drop!.id);
+        expect(after).toMatchObject({ amount_paid: 400, status: "partial" });
+        const [sum] = await sql<{ total: string }>(
+          `select coalesce(sum(amount), 0)::text as total from public."Payments" where charge_id = $1`,
+          [id],
+        );
+        expect(Number(sum.total)).toBe(400);
+        expect(Number(sum.total)).toBe(after.amount_paid);
+      });
+
+      test("recording a payment heals amount_paid drift back to SUM(Payments)", async () => {
+        const id = await freshCharge("2099-03");
+        await signInApp("admin");
+        await data.recordPayment({ charge_id: id, amount: 300, method: "cash" });
+        await sql(`update public."RentCharges" set amount_paid = 9999, status = 'paid' where id = $1`, [id]);
+
+        const healed = await data.recordPayment({ charge_id: id, amount: 100, method: "cash" });
+        expect(healed).toMatchObject({ amount_paid: 400, status: "partial" });
+        const [sum] = await sql<{ total: string }>(
+          `select coalesce(sum(amount), 0)::text as total from public."Payments" where charge_id = $1`,
+          [id],
+        );
+        expect(Number(sum.total)).toBe(400);
+        expect(healed.amount_paid).toBe(Number(sum.total));
+      });
+
+      test("deleting a payment also heals amount_paid drift from the ledger SUM", async () => {
+        const id = await freshCharge("2099-04");
+        await signInApp("admin");
+        await data.recordPayment({ charge_id: id, amount: 250, method: "cash", reference: "a" });
+        await data.recordPayment({ charge_id: id, amount: 150, method: "cash", reference: "b" });
+        const drop = (await data.listPayments(id)).find((p) => p.reference === "b")!;
+        await sql(`update public."RentCharges" set amount_paid = 0, status = 'open' where id = $1`, [id]);
+
+        const healed = await data.deletePayment(drop.id);
+        expect(healed).toMatchObject({ amount_paid: 250, status: "partial" });
+      });
+
+      test("only an admin can delete a payment via the RPC", async () => {
+        const id = await freshCharge("2099-05");
+        await signInApp("admin");
+        await data.recordPayment({ charge_id: id, amount: 50, method: "cash", reference: "guard" });
+        const [payment] = await sql<{ id: number }>(
+          `select id from public."Payments" where charge_id = $1 and reference = 'guard'`,
+          [id],
+        );
+        for (const persona of ["worker", "tenant", "landlord"] as const) {
+          const client = await clientFor(persona);
+          const { error } = await client.rpc("delete_payment", { p_payment_id: payment.id });
+          expect(error?.message, persona).toMatch(/only admins/i);
+        }
+        expect(
+          await sql(`select 1 from public."Payments" where id = $1`, [payment.id]),
+        ).toHaveLength(1);
+      });
+
+      test("payments cannot be deleted directly, even by an admin", async () => {
+        const id = await freshCharge("2099-06");
+        await signInApp("admin");
+        await data.recordPayment({ charge_id: id, amount: 75, method: "cash", reference: "direct-del" });
+        const [payment] = await sql<{ id: number }>(
+          `select id from public."Payments" where charge_id = $1 and reference = 'direct-del'`,
+          [id],
+        );
+        const client = await clientFor("admin");
+        expectDenied(await client.from("Payments").delete().eq("id", payment.id).select());
+        expect(await sql(`select 1 from public."Payments" where id = $1`, [payment.id])).toHaveLength(1);
+      });
+
+      test("a zero or negative payment amount is refused", async () => {
+        const id = await freshCharge("2099-07");
+        await signInApp("admin");
+        await expect(data.recordPayment({ charge_id: id, amount: 0 })).rejects.toThrow(/positive/i);
+        await expect(data.recordPayment({ charge_id: id, amount: -10 })).rejects.toThrow(/positive/i);
+        expect(await sql(`select 1 from public."Payments" where charge_id = $1`, [id])).toHaveLength(0);
+      });
+
+      test("any payment on a waived charge clears waived and follows the ledger status", async () => {
+        const id = await freshCharge("2099-08");
+        await sql(`update public."RentCharges" set status = 'waived', amount_paid = 0 where id = $1`, [id]);
+        await signInApp("admin");
+        const after = await data.recordPayment({ charge_id: id, amount: 100, method: "cash" });
+        expect(after.status).toBe("partial");
+        expect(after.status).not.toBe("waived");
+        expect(after.amount_paid).toBe(100);
+      });
     });
   });
 });

@@ -230,6 +230,78 @@ describe("[R4] Maintenance requests", () => {
       const signed = await other.storage.from("maintenance-photos").createSignedUrl(photo.storage_path, 60);
       expect(signed.error).not.toBeNull();
     });
+
+    describe("photo isolation", () => {
+      test("an unassigned worker cannot see or download another worker's request photos", async () => {
+        const id = await seedRequest({ title: "Photo isolation — assigned to Sam" });
+        await signInApp("tenant");
+        const photo = await data.uploadMaintenancePhoto(id, pngFile("leak.png"));
+        await assign(id, world.staff.worker.id);
+
+        const outsider = await clientFor("worker2");
+        expect(
+          (await outsider.from("MaintenanceRequestPhotos").select("id").eq("maintenance_request_id", id)).data,
+        ).toEqual([]);
+        const signed = await outsider.storage.from("maintenance-photos").createSignedUrl(photo.storage_path, 60);
+        expect(signed.error).not.toBeNull();
+      });
+
+      test("a landlord can view photos on owned-property requests but cannot upload", async () => {
+        const id = await seedRequest({ title: "Photo isolation — landlord" });
+        await signInApp("tenant");
+        const photo = await data.uploadMaintenancePhoto(id, pngFile("owner.png"));
+
+        const landlord = await clientFor("landlord");
+        const { data: rows } = await landlord
+          .from("MaintenanceRequestPhotos")
+          .select("id")
+          .eq("maintenance_request_id", id);
+        expect(rows?.map((r) => r.id)).toEqual([photo.id]);
+        const signed = await landlord.storage.from("maintenance-photos").createSignedUrl(photo.storage_path, 60);
+        expect(signed.error).toBeNull();
+        expect(signed.data?.signedUrl).toBeTruthy();
+
+        await signInApp("landlord");
+        await expect(data.uploadMaintenancePhoto(id, pngFile())).rejects.toThrow();
+        expect(
+          await sql(`select 1 from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`, [id]),
+        ).toHaveLength(1);
+      });
+
+      test("an unassigned worker cannot upload a photo onto someone else's request", async () => {
+        const id = await seedRequest({ title: "Photo isolation — upload deny" });
+        await assign(id, world.staff.worker.id);
+        await signInApp("worker2");
+        await expect(data.uploadMaintenancePhoto(id, pngFile())).rejects.toThrow();
+        expect(
+          await sql(`select 1 from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`, [id]),
+        ).toHaveLength(0);
+      });
+
+      test("photo rows cannot be rewritten, even by the uploader or an admin", async () => {
+        const id = await seedRequest({ title: "Photo isolation — no update" });
+        await signInApp("tenant");
+        const photo = await data.uploadMaintenancePhoto(id, pngFile("immutable.png"));
+
+        for (const persona of ["tenant", "admin"] as const) {
+          const client = await clientFor(persona);
+          expectDenied(
+            await client
+              .from("MaintenanceRequestPhotos")
+              .update({ caption: "tampered", storage_path: `${id}/forged.png` })
+              .eq("id", photo.id)
+              .select(),
+            persona,
+          );
+        }
+        const [row] = await sql<{ caption: string | null; storage_path: string }>(
+          `select caption, storage_path from public."MaintenanceRequestPhotos" where id = $1`,
+          [photo.id],
+        );
+        expect(row.caption).toBeNull();
+        expect(row.storage_path).toBe(photo.storage_path);
+      });
+    });
   });
 
   describe("staff work the request through its statuses", () => {
@@ -374,6 +446,66 @@ describe("[R4] Maintenance requests", () => {
         [id],
       );
       expect(rows.map((r) => r.note)).toEqual(["Created", null]);
+    });
+
+    test("another tenant cannot read someone else's status history", async () => {
+      const id = await seedRequest({ title: "History isolation" });
+      await assign(id);
+      await sql(
+        `update public."MaintenanceRequests"
+            set status = 'In Progress', started_at = now()
+          where id = $1`,
+        [id],
+      );
+      const owner = await clientFor("tenant");
+      expect(
+        (await owner.from("MaintenanceRequestStatusHistory").select("to_status").eq("maintenance_request_id", id)).data
+          ?.length,
+      ).toBeGreaterThanOrEqual(2);
+
+      const other = await clientFor("tenant2");
+      expect(
+        (await other.from("MaintenanceRequestStatusHistory").select("id").eq("maintenance_request_id", id)).data,
+      ).toEqual([]);
+    });
+
+    test("history stays append-only across status changes — prior rows are never rewritten", async () => {
+      const id = await seedRequest({ title: "Append-only trail" });
+      const before = await sql<{ id: number; from_status: string | null; to_status: string; note: string | null }>(
+        `select id, from_status, to_status, note from public."MaintenanceRequestStatusHistory"
+          where maintenance_request_id = $1 order by id`,
+        [id],
+      );
+      expect(before).toEqual([
+        expect.objectContaining({ from_status: null, to_status: "Open", note: "Created" }),
+      ]);
+
+      await assign(id);
+      await sql(
+        `update public."MaintenanceRequests"
+            set status = 'In Progress', started_at = now()
+          where id = $1`,
+        [id],
+      );
+      await sql(
+        `update public."MaintenanceRequests"
+            set status = 'Closed', closed_at = now(), resolution_notes = 'Done'
+          where id = $1`,
+        [id],
+      );
+
+      const after = await sql<{ id: number; from_status: string | null; to_status: string; note: string | null }>(
+        `select id, from_status, to_status, note from public."MaintenanceRequestStatusHistory"
+          where maintenance_request_id = $1 order by id`,
+        [id],
+      );
+      expect(after[0]).toEqual(before[0]);
+      expect(after.map((r) => [r.from_status, r.to_status, r.note])).toEqual([
+        [null, "Open", "Created"],
+        ["Open", "Scheduled", null],
+        ["Scheduled", "In Progress", null],
+        ["In Progress", "Closed", null],
+      ]);
     });
   });
 
