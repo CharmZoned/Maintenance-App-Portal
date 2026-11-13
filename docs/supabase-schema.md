@@ -49,7 +49,8 @@ Policies: select own row (`authenticated`); select all for `supabase_auth_admin`
 Key columns: `id`, `source_id`, `first_name`, `last_name`, `company_name`, `email` NOT NULL, `mobile_phone`, `preferred_contact`, `notes`, `is_test_data`, `created_at`.
 
 **RLS (pre-Phase 1):** select for admin / self landlord / tenant-of-landlord / staff-who-sees-landlord.  
-**Phase 1 adds:** admin insert/update/delete.
+**Phase 1 adds:** admin insert/update/delete policies.  
+**WS-A (`20261114010000`):** `authenticated` table GRANT INSERT/UPDATE/DELETE (+ identity sequence USAGE/SELECT) — policies existed but privileges were still SELECT-only on live/emulator baseline. Same grant for `Properties`, `Units`, `Tenants`.
 
 ### `Properties`
 
@@ -57,15 +58,20 @@ Key columns: `property_name`, `street_address` NOT NULL, `city`/`state`/`zip` NO
 
 **RLS:** select for admin / owning landlord / tenant’s property / staff assigned via maintenance.  
 **Phase 1 added:** admin write; landlord update/insert for own `landlord_id`.  
-**LGA-19:** landlord insert/update policies **dropped** — landlords are **read-only** on Properties (admin write only).
+**LGA-19:** landlord insert/update policies **dropped** — landlords are **read-only** on Properties (admin write only).  
+**Privileges:** WS-A `authenticated` INSERT/UPDATE/DELETE (+ sequence) — see Landlords note.
 
 ### `Units`
 
 Key columns: `property_id` NOT NULL, `unit_label` NOT NULL, `bedrooms`, `bathrooms`, `status`, `management_status`, `occupancy_status`, `readiness_status`, `currently_being_marketed`, `sqft`, `market_rent`, dates, `notes`, `source_id`.
 
+**Privileges:** WS-A `authenticated` INSERT/UPDATE/DELETE (+ sequence) — see Landlords note.
+
 ### `Tenants`
 
 Key columns: `first_name`, `last_name`, `email` NOT NULL, `mobile_phone`, **`unit_id`** (Phase 1 migration: **nullable** so portfolio tenants can exist before lease assignment; was NOT NULL), `primary_on_lease`, `invite_to_app`, demographics, `notes`, `source_id`.
+
+**Privileges:** WS-A `authenticated` INSERT/UPDATE/DELETE (+ sequence) — see Landlords note.
 
 ### `Staff`
 
@@ -113,6 +119,7 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 
 - SELECT: admin / submitting tenant / assigned staff / landlord owns unit (`maintenance_requests_select`)
 - UPDATE: USING `private.can_update_maintenance_request(id)`; WITH CHECK on the NEW row — admin or assigned maintenance only (`maintenance_requests_update`, LGA-19)
+- DELETE: admin (`maintenance_requests_admin_delete`); **WS-A** adds `GRANT DELETE` to `authenticated` (policy existed; privilege missing)
 - Comments SELECT: `can_select_maintenance_request` + visibility rules (`maintenance_comments_select`)
 - Photos / comments mutate via `can_upload_maintenance_photo` / `can_update_maintenance_request` (and tenant comment path)
 
@@ -179,7 +186,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 **LGA-19:** `Applications` admin-only (not maintenance); landlords read-only on Properties + MaintenanceRequests UPDATE.  
 **Intentionally deferred:** `inquiries` (website service-role only).
 
-Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration).
+Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration). Table **privileges** for `Landlords`/`Properties`/`Units`/`Tenants` stayed SELECT-only until WS-A `20261114010000` (policies alone were not enough); `Staff` remains SELECT-only by design.
 
 ---
 
