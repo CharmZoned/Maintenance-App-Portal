@@ -498,6 +498,42 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["MaintenanceRequestStatusHistory"]["Insert"]>;
         Relationships: [];
       };
+      PropertyDocuments: {
+        Row: {
+          id: number;
+          created_at: string;
+          property_id: number;
+          unit_id: number | null;
+          title: string;
+          file_name: string;
+          content_type: string | null;
+          byte_size: number | null;
+          storage_path: string;
+          visibility: string;
+          uploaded_by_user_id: string | null;
+          uploaded_by_role: AppRole | null;
+          notes: string | null;
+          is_test_data: boolean;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          property_id: number;
+          unit_id?: number | null;
+          title: string;
+          file_name: string;
+          content_type?: string | null;
+          byte_size?: number | null;
+          storage_path: string;
+          visibility?: string;
+          uploaded_by_user_id?: string | null;
+          uploaded_by_role?: AppRole | null;
+          notes?: string | null;
+          is_test_data?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["PropertyDocuments"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
