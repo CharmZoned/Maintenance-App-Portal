@@ -132,9 +132,9 @@ Branches: `cursor/phaseN-<topic>-0924` (or existing `-8ed9` series). Stack depen
 **Evidence:** `src/client/lib/supabase.ts`, `data.ts`, `mappers.ts`, auth hooks/gate, `supabase/migrations/*`, [`docs/phases/phase-1.md`](phases/phase-1.md).
 
 **Remaining (Phase 1.5, not Phase 2 product):**
-- Gate remaining portfolio mutate UI on `isAdmin` where `maintenance` role still sees CRUD that RLS denies.
-- Fix `lease-dialog` effect deps pattern.
-- Optional: payment ledger RPC, `FORCE ROW LEVEL SECURITY`, narrow `vendors_select`.
+- ~~Gate portfolio mutate UI on `isAdmin`~~ / ~~lease-dialog effect~~ — done on `master` (`3fc7a64`).
+- ~~Payment ledger RPC, `FORCE ROW LEVEL SECURITY`, narrow `vendors_select`~~ — Phase 1.5 migration.
+- Parked Should/Perf (RPC tests, generateCharges soft-fail, dashboard N+1) — [`docs/deferred-work.md`](deferred-work.md).
 - Manual QA checklist in phase-1.md (env + seeded admin).
 
 **Out of scope (still later phases):** approval queue UI, tenant submit, website repo, documents, notifications.

@@ -35,6 +35,7 @@ import type {
   UnitStatus,
   WorkOrderStatus,
 } from "../types";
+import type { Tables } from "../types.supabase";
 
 function throwSb(error: { message: string } | null): never {
   throw new Error(error?.message || "Supabase request failed");
@@ -505,6 +506,60 @@ export async function deleteLease(id: number): Promise<void> {
 
 // ── Rent ──────────────────────────────────────────────────────────
 
+function chargeExtrasFromLease(l: Lease | undefined): Partial<RentCharge> {
+  if (!l) return {};
+  return {
+    unit_id: l.unit_id,
+    lease_rent: l.monthly_rent,
+    rent_due_day: l.rent_due_day,
+    unit_name: l.unit_name,
+    property_id: l.property_id,
+    property_name: l.property_name,
+    property_color: l.property_color,
+    tenant_id: l.primary_tenant_id,
+    tenant_first_name: l.tenant_first_name,
+    tenant_last_name: l.tenant_last_name,
+  };
+}
+
+/** Enrich one charge row with lease/unit/tenant display fields (no full charges refetch). */
+async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
+  const { data: leaseRow, error } = await supabase
+    .from("Leases")
+    .select("*")
+    .eq("id", row.lease_id)
+    .maybeSingle();
+  if (error) throwSb(error);
+  if (!leaseRow) return mapCharge(row);
+
+  const [{ data: unit }, { data: tenant }] = await Promise.all([
+    supabase.from("Units").select("id, unit_label, property_id").eq("id", leaseRow.unit_id).maybeSingle(),
+    leaseRow.primary_tenant_id
+      ? supabase
+          .from("Tenants")
+          .select("id, first_name, last_name, email, mobile_phone")
+          .eq("id", leaseRow.primary_tenant_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const { data: prop } = unit
+    ? await supabase.from("Properties").select("id, property_name, color").eq("id", unit.property_id).maybeSingle()
+    : { data: null };
+
+  return mapCharge(row, {
+    unit_id: leaseRow.unit_id,
+    lease_rent: Number(leaseRow.monthly_rent),
+    rent_due_day: leaseRow.rent_due_day,
+    unit_name: unit?.unit_label,
+    property_id: unit?.property_id,
+    property_name: prop?.property_name,
+    property_color: prop?.color,
+    tenant_id: leaseRow.primary_tenant_id,
+    tenant_first_name: tenant?.first_name,
+    tenant_last_name: tenant?.last_name,
+  });
+}
+
 export async function listCharges(period?: string): Promise<RentCharge[]> {
   let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false });
   if (period) q = q.eq("period", period);
@@ -515,21 +570,7 @@ export async function listCharges(period?: string): Promise<RentCharge[]> {
   const leases = leaseIds.length ? await listLeases() : [];
   const leaseMap = new Map(leases.map((l) => [l.id, l]));
 
-  return (charges ?? []).map((c) => {
-    const l = leaseMap.get(c.lease_id);
-    return mapCharge(c, {
-      unit_id: l?.unit_id,
-      lease_rent: l?.monthly_rent,
-      rent_due_day: l?.rent_due_day,
-      unit_name: l?.unit_name,
-      property_id: l?.property_id,
-      property_name: l?.property_name,
-      property_color: l?.property_color,
-      tenant_id: l?.primary_tenant_id,
-      tenant_first_name: l?.tenant_first_name,
-      tenant_last_name: l?.tenant_last_name,
-    });
-  });
+  return (charges ?? []).map((c) => mapCharge(c, chargeExtrasFromLease(leaseMap.get(c.lease_id))));
 }
 
 export async function generateCharges(period: string): Promise<{ created: number; period: string }> {
@@ -580,83 +621,24 @@ export async function recordPayment(input: {
   notes?: string | null;
   paid_at?: string;
 }): Promise<RentCharge> {
-  const { error: pErr } = await supabase.from("Payments").insert({
-    charge_id: input.charge_id,
-    amount: input.amount,
-    method: input.method ?? "cash",
-    reference: input.reference ?? null,
-    notes: input.notes ?? null,
-    paid_at: input.paid_at ?? new Date().toISOString(),
+  const { data: updated, error } = await supabase.rpc("record_payment", {
+    p_charge_id: input.charge_id,
+    p_amount: input.amount,
+    p_method: input.method ?? "cash",
+    p_reference: input.reference ?? null,
+    p_notes: input.notes ?? null,
+    p_paid_at: input.paid_at ?? new Date().toISOString(),
   });
-  if (pErr) throwSb(pErr);
-
-  const { data: charge, error: cErr } = await supabase
-    .from("RentCharges")
-    .select("*")
-    .eq("id", input.charge_id)
-    .single();
-  if (cErr) throwSb(cErr);
-
-  const amount_paid = Number(charge!.amount_paid) + input.amount;
-  const amount = Number(charge!.amount);
-  let status = charge!.status;
-  if (amount_paid >= amount) status = "paid";
-  else if (amount_paid > 0) status = "partial";
-
-  const { data: updated, error: uErr } = await supabase
-    .from("RentCharges")
-    .update({ amount_paid, status } as never)
-    .eq("id", input.charge_id)
-    .select("*")
-    .single();
-  if (uErr) throwSb(uErr);
-
-  const charges = await listCharges();
-  return charges.find((c) => c.id === input.charge_id) ?? mapCharge(updated!);
+  if (error) throwSb(error);
+  return enrichCharge(updated!);
 }
 
 export async function deletePayment(paymentId: number): Promise<RentCharge> {
-  const { data: payment, error: pErr } = await supabase
-    .from("Payments")
-    .select("*")
-    .eq("id", paymentId)
-    .single();
-  if (pErr) throwSb(pErr);
-
-  const chargeId = payment!.charge_id;
-  const { error: dErr } = await supabase.from("Payments").delete().eq("id", paymentId);
-  if (dErr) throwSb(dErr);
-
-  const { data: remaining, error: rErr } = await supabase
-    .from("Payments")
-    .select("amount")
-    .eq("charge_id", chargeId);
-  if (rErr) throwSb(rErr);
-
-  const amount_paid = (remaining ?? []).reduce((s, row) => s + Number(row.amount), 0);
-  const { data: charge, error: cErr } = await supabase
-    .from("RentCharges")
-    .select("*")
-    .eq("id", chargeId)
-    .single();
-  if (cErr) throwSb(cErr);
-
-  const amount = Number(charge!.amount);
-  let status = "open";
-  if (amount_paid >= amount && amount > 0) status = "paid";
-  else if (amount_paid > 0) status = "partial";
-  else if (charge!.due_date < new Date().toISOString().slice(0, 10)) status = "overdue";
-
-  const { data: updated, error: uErr } = await supabase
-    .from("RentCharges")
-    .update({ amount_paid, status } as never)
-    .eq("id", chargeId)
-    .select("*")
-    .single();
-  if (uErr) throwSb(uErr);
-
-  const charges = await listCharges();
-  return charges.find((c) => c.id === chargeId) ?? mapCharge(updated!);
+  const { data: updated, error } = await supabase.rpc("delete_payment", {
+    p_payment_id: paymentId,
+  });
+  if (error) throwSb(error);
+  return enrichCharge(updated!);
 }
 
 // ── Vendors ───────────────────────────────────────────────────────
