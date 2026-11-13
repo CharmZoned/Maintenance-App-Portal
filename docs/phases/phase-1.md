@@ -11,7 +11,10 @@
 ### BE — P1a Schema & RLS
 
 - [x] `supabase/migrations/` added for live-aligned additive changes
-- [x] `account_status` on `user_roles` (`pending|approved|rejected|suspended`); Phase 1 bootstrap admin treated as approved (see migration comments + `docs/supabase-schema.md`)
+- [x] `account_status` on `user_roles` (`pending|approved|rejected|suspended`); bootstrap admin via `assign_admin` → approved
+- [x] Enforce `approved` in app gate + `private.current_role` / `is_admin` helpers (follow-up migration)
+- [x] Retire open Hono/D1 `/api/*` (Worker returns 410)
+- [x] Maintenance create/delete admin-only in UI (staff may update assigned via RLS)
 - [x] RLS policies for `Leases`, `LeaseTenants`, `RentCharges`, `Payments`, `Vendors`, `Settings`
 - [x] Admin write policies for `Landlords`, `Properties`, `Units`, `Tenants`, `Staff` (were select-only)
 - [x] `Tenants.unit_id` nullable (portfolio create-before-lease)

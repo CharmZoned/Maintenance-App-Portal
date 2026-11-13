@@ -15,11 +15,14 @@ export interface UserRoleRow {
 export type AuthGate =
   | { state: "loading" }
   | { state: "unauthenticated" }
+  | { state: "error"; user: User; message: string }
   | { state: "no_role"; user: User }
+  | { state: "unapproved"; user: User; role: UserRoleRow }
   | { state: "forbidden"; user: User; role: UserRoleRow }
   | { state: "ready"; user: User; session: Session; role: UserRoleRow };
 
 function canAccessPortfolio(role: UserRoleRow): boolean {
+  if (role.account_status !== "approved") return false;
   if (role.role === "admin") return true;
   if (role.role === "maintenance" && role.staff_id != null) return true;
   return false;
@@ -41,18 +44,26 @@ export function useAuth() {
       .maybeSingle();
     if (error) {
       setAuthError(error.message);
-      setGate({ state: "no_role", user: session.user });
+      setGate({ state: "error", user: session.user, message: error.message });
       return;
     }
     if (!data) {
+      setAuthError(null);
       setGate({ state: "no_role", user: session.user });
       return;
     }
     const role = data as UserRoleRow;
+    if (role.account_status !== "approved") {
+      setAuthError(null);
+      setGate({ state: "unapproved", user: session.user, role });
+      return;
+    }
     if (!canAccessPortfolio(role)) {
+      setAuthError(null);
       setGate({ state: "forbidden", user: session.user, role });
       return;
     }
+    setAuthError(null);
     setGate({ state: "ready", user: session.user, session, role });
   }, []);
 
@@ -113,6 +124,11 @@ export function useAuth() {
     }
   }, []);
 
+  const retryRole = useCallback(async () => {
+    const { data } = await supabase.auth.getSession();
+    await resolve(data.session);
+  }, [resolve]);
+
   return {
     gate,
     authError,
@@ -121,6 +137,7 @@ export function useAuth() {
     logout,
     requestPasswordReset,
     updatePassword,
+    retryRole,
     configured: isSupabaseConfigured(),
   };
 }

@@ -14,12 +14,5 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src/client"),
     },
   },
-  server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:8787",
-        changeOrigin: true,
-      },
-    },
-  },
+  // Phase 1: SPA talks to Supabase directly — no /api proxy to the retired D1 Worker.
 });

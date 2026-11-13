@@ -77,7 +77,7 @@ export function MaintenancePage() {
           )}
         </>}
       actions={
-        filtered.length > 0 ? (
+        app.canCreateWorkOrders && filtered.length > 0 ? (
           <Button onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
             <Plus className="h-4 w-4" /> New work order
           </Button>
@@ -105,10 +105,15 @@ export function MaintenancePage() {
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
               {orders.length === 0 ? "Track repairs and turnover work for your properties." : "No work orders match this filter."}
             </p>
-            {orders.length === 0 && (
+            {orders.length === 0 && app.canCreateWorkOrders && (
               <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
                 <Plus className="mr-1 h-4 w-4" /> New work order
               </Button>
+            )}
+            {orders.length === 0 && !app.canCreateWorkOrders && (
+              <p className="mt-2 max-w-sm text-xs text-muted-foreground">
+                Staff can update assigned requests; only admins create new ones.
+              </p>
             )}
           </div>
         ) : (

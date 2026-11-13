@@ -4,7 +4,7 @@
 
 [![Deploy with Clawnify](https://app.clawnify.com/deploy-button.svg)](https://app.clawnify.com/deploy?repo=clawnify/OpenProperty)
 
-**Landlord Gopher** staff/admin portal. Phase 1 uses **Supabase Auth + Postgres + RLS** for portfolio data (landlords, properties, units, tenants, leases, rent, maintenance, vendors, settings). The legacy Hono/D1 server remains in-repo but the client no longer calls `/api` for those flows.
+**Landlord Gopher** staff/admin portal. Phase 1 uses **Supabase Auth + Postgres + RLS** for portfolio data (landlords, properties, units, tenants, leases, rent, maintenance, vendors, settings). The legacy Worker still exists but **all `/api/*` routes return 410 Gone** (unauthenticated D1 CRUD is retired). Accounts must be `account_status = approved` to pass the app gate and RLS helpers.
 
 See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) and [`docs/phases/phase-1.md`](docs/phases/phase-1.md).
 

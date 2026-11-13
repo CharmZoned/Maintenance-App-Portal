@@ -183,4 +183,4 @@ where user_id = (select id from auth.users where lower(email) = lower('you@examp
 
 4. Sign in on the portal with that user. Role must be `admin` (or `maintenance` with `staff_id`) to pass the Phase 1 app gate.
 
-**Choice documented:** Phase 1 treats missing/`approved` `account_status` as allowed for bootstrap; enforcement of `pending` is Phase 2. New rows default to `pending` so Phase 2 can lock down without another schema change.
+**Choice documented:** New rows default to `pending`. Phase 1 follow-up enforces `account_status = 'approved'` in `private.current_role()` / `current_*_id()` / `is_admin()` / `is_staff_or_admin()`, and the portal auth gate blocks non-approved users. Bootstrap via `assign_admin` sets `approved`.

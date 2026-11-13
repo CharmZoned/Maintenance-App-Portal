@@ -49,7 +49,8 @@ export function App() {
     window.location.pathname === "/reset-password" ? "reset-confirm" : "login",
   );
   const ready = auth.gate.state === "ready";
-  const state = useAppState(ready);
+  const isAdmin = auth.gate.state === "ready" && auth.gate.role.role === "admin";
+  const state = useAppState(ready, { isAdmin });
   const { path, route, navigate } = useRouter();
 
   useEffect(() => {
@@ -102,11 +103,33 @@ export function App() {
     );
   }
 
+  if (auth.gate.state === "error") {
+    return (
+      <BlockedPage
+        title="Couldn’t load your role"
+        message={auth.gate.message}
+        onRetry={() => void auth.retryRole()}
+        onLogout={() => void auth.logout()}
+      />
+    );
+  }
+
   if (auth.gate.state === "no_role") {
     return (
       <BlockedPage
         title="No role assigned"
         message="Your account is signed in but has no portal role yet. Ask an admin to run private.assign_admin for your email, or link a Staff row."
+        onLogout={() => void auth.logout()}
+      />
+    );
+  }
+
+  if (auth.gate.state === "unapproved") {
+    const status = auth.gate.role.account_status;
+    return (
+      <BlockedPage
+        title="Account not approved"
+        message={`Your account status is “${status}”. An admin must approve your account before you can use the portal.`}
         onLogout={() => void auth.logout()}
       />
     );

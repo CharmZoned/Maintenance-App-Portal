@@ -45,7 +45,8 @@ function parseSettings(raw: Record<string, string>): AppSettings {
   };
 }
 
-export function useAppState(enabled: boolean) {
+export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
+  const isAdmin = opts?.isAdmin ?? false;
   const [properties, setProperties] = useState<Property[]>([]);
   const [landlords, setLandlords] = useState<Landlord[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -190,6 +191,10 @@ export function useAppState(enabled: boolean) {
     return data.recordPayment(input);
   }, []);
 
+  const deletePayment = useCallback(async (paymentId: number) => {
+    return data.deletePayment(paymentId);
+  }, []);
+
   const createVendor = useCallback(async (input: NewVendor) => {
     const vendor = await data.createVendor(input);
     await refreshLookups();
@@ -215,16 +220,18 @@ export function useAppState(enabled: boolean) {
   }, []);
 
   const createWorkOrder = useCallback(async (input: NewWorkOrder) => {
+    if (!isAdmin) throw new Error("Only admins can create maintenance requests.");
     return data.createWorkOrder(input);
-  }, []);
+  }, [isAdmin]);
 
   const updateWorkOrder = useCallback(async (id: number, patch: Partial<NewWorkOrder>) => {
     return data.updateWorkOrder(id, patch);
   }, []);
 
   const deleteWorkOrder = useCallback(async (id: number) => {
+    if (!isAdmin) throw new Error("Only admins can delete maintenance requests.");
     await data.deleteWorkOrder(id);
-  }, []);
+  }, [isAdmin]);
 
   const createLandlord = useCallback(async (input: NewLandlord) => {
     const landlord = await data.createLandlord(input);
@@ -244,6 +251,10 @@ export function useAppState(enabled: boolean) {
   }, [refreshLookups]);
 
   return {
+    isAdmin,
+    /** Admin: full MR CRUD. Maintenance staff: update assigned only (RLS). */
+    canCreateWorkOrders: isAdmin,
+    canDeleteWorkOrders: isAdmin,
     properties,
     landlords,
     vendors,
@@ -271,6 +282,7 @@ export function useAppState(enabled: boolean) {
     listCharges,
     generateCharges,
     recordPayment,
+    deletePayment,
     createVendor,
     updateVendor,
     deleteVendor,

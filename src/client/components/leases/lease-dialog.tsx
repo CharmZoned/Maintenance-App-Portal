@@ -128,11 +128,15 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
   // we just need property + unit name in the dropdown. Build a "Property · Unit" label.
   // Fetch once when open.
   const [unitLabels, setUnitLabels] = useState<Map<number, string>>(new Map());
+  const listUnits = app.listUnits;
+
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     (async () => {
       try {
-        const units = await app.listUnits();
+        const units = await listUnits();
+        if (cancelled) return;
         const map = new Map<number, string>();
         for (const u of units) {
           map.set(u.id, `${u.property_name ?? "—"} · ${u.name}`);
@@ -142,7 +146,10 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
         /* ignore */
       }
     })();
-  }, [open, app]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, listUnits]);
 
   return (
     <>
