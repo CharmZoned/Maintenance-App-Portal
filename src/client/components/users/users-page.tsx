@@ -248,7 +248,18 @@ export function UsersPage() {
           {visible.map((user) => {
             const busy = busyId === user.user_id;
             const blockReason = approveBlockedReason(user);
+            const linkedTenant =
+              user.role === "tenant" && user.tenant_id != null
+                ? tenants.find((t) => t.id === user.tenant_id)
+                : undefined;
+            const tenantMissingUnit =
+              linkedTenant != null && linkedTenant.active_unit_id == null;
+            // Soft warn: still allow Approve (portal sign-in works); submit needs a unit.
             const showApprove = user.account_status !== "approved";
+            const softUnitWarn =
+              tenantMissingUnit && canApproveForPortal(user)
+                ? "Linked tenant has no unit — they can sign in but cannot submit maintenance until a unit is assigned."
+                : null;
             return (
               <Card key={user.user_id} className="space-y-3 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -262,9 +273,20 @@ export function UsersPage() {
                       {user.staff_id != null && <span>staff #{user.staff_id}</span>}
                       {user.landlord_id != null && <span>landlord #{user.landlord_id}</span>}
                       {user.tenant_id != null && <span>tenant #{user.tenant_id}</span>}
+                      {tenantMissingUnit && (
+                        <span className="text-amber-800">no unit on tenant</span>
+                      )}
                     </div>
                     {showApprove && blockReason && (
                       <p className="text-xs text-amber-800">{blockReason}</p>
+                    )}
+                    {showApprove && !blockReason && softUnitWarn && (
+                      <p className="text-xs text-amber-800">{softUnitWarn}</p>
+                    )}
+                    {!showApprove && tenantMissingUnit && (
+                      <p className="text-xs text-amber-800">
+                        Linked tenant has no unit — assign a unit on Tenants so they can submit maintenance.
+                      </p>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">

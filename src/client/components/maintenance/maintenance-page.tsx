@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkOrderDialog } from "./work-order-dialog";
 import { TenantSubmitDialog } from "./tenant-submit-dialog";
-import type { WorkOrder, WorkOrderStatus } from "@/types";
+import type { TenantHomeContext, WorkOrder, WorkOrderStatus } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
 const PRIORITY_TONE: Record<string, string> = {
@@ -26,14 +26,36 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
   closed: "outline",
 };
 
+type StaffFilter = WorkOrderStatus | "open_all" | "all";
+type TenantFilter = "active" | "closed";
+
+function tenantStatusLabel(status: WorkOrderStatus): string {
+  switch (status) {
+    case "open":
+      return "Submitted";
+    case "scheduled":
+      return "Scheduled";
+    case "in_progress":
+      return "In progress";
+    case "on_hold":
+      return "On hold";
+    case "closed":
+      return "Closed";
+    default:
+      return status;
+  }
+}
+
 export function MaintenancePage() {
   const app = useApp();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<WorkOrderStatus | "open_all" | "all">("open_all");
+  const [staffFilter, setStaffFilter] = useState<StaffFilter>("open_all");
+  const [tenantFilter, setTenantFilter] = useState<TenantFilter>("active");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tenantOpen, setTenantOpen] = useState(false);
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
+  const [home, setHome] = useState<TenantHomeContext | null>(null);
 
   async function load() {
     try {
@@ -52,6 +74,22 @@ export function MaintenancePage() {
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
 
+  useEffect(() => {
+    if (!app.isTenant) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = await app.getTenantHomeContext();
+        if (!cancelled) setHome(ctx);
+      } catch {
+        /* ignore — submit dialog also loads */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [app.isTenant, app]);
+
   const counts = useMemo(() => {
     const c = {
       all: orders.length,
@@ -61,6 +99,7 @@ export function MaintenancePage() {
       on_hold: 0,
       closed: 0,
       urgent: 0,
+      active: 0,
     };
     for (const o of orders) {
       if (o.status === "open") c.open++;
@@ -68,26 +107,38 @@ export function MaintenancePage() {
       if (o.status === "in_progress") c.in_progress++;
       if (o.status === "on_hold") c.on_hold++;
       if (o.status === "closed") c.closed++;
+      if (o.status !== "closed") c.active++;
       if (o.priority === "urgent" && o.status !== "closed") c.urgent++;
     }
     return c;
   }, [orders]);
 
   const filtered = useMemo(() => {
-    if (filter === "all") return orders;
-    if (filter === "open_all") return orders.filter((o) => o.status !== "closed");
-    return orders.filter((o) => o.status === filter);
-  }, [orders, filter]);
+    if (app.isTenant) {
+      if (tenantFilter === "closed") return orders.filter((o) => o.status === "closed");
+      return orders.filter((o) => o.status !== "closed");
+    }
+    if (staffFilter === "all") return orders;
+    if (staffFilter === "open_all") return orders.filter((o) => o.status !== "closed");
+    return orders.filter((o) => o.status === staffFilter);
+  }, [orders, staffFilter, tenantFilter, app.isTenant]);
 
   const title = app.isTenant ? "My requests" : "Maintenance";
-  const metaOpen = counts.open + counts.scheduled + counts.in_progress + counts.on_hold;
+  const metaOpen = app.isTenant ? counts.active : counts.open + counts.scheduled + counts.in_progress + counts.on_hold;
+  const noUnit = app.isTenant && home != null && home.unit_id == null;
+  const homeLabel =
+    home &&
+    [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name].filter(Boolean).join(" · ");
 
   return (
     <PageShell
       title={title}
       meta={
         <>
-          {metaOpen} open
+          {metaOpen} {app.isTenant ? "active" : "open"}
+          {homeLabel && app.isTenant && (
+            <span className="ml-2 text-muted-foreground">· {homeLabel}</span>
+          )}
           {counts.urgent > 0 && (
             <span className="badge-tone tone-danger ml-2">
               <CircleAlert className="h-3 w-3" /> {counts.urgent} urgent
@@ -98,9 +149,9 @@ export function MaintenancePage() {
       actions={
         app.isTenant ? (
           <Button
-            onClick={() => {
-              setTenantOpen(true);
-            }}
+            onClick={() => setTenantOpen(true)}
+            disabled={noUnit}
+            title={noUnit ? "Ask staff to assign a unit first" : undefined}
           >
             <Plus className="h-4 w-4" /> New request
           </Button>
@@ -116,17 +167,32 @@ export function MaintenancePage() {
         ) : null
       }
     >
-      <Tabs value={filter} onValueChange={(v) => setFilter(v as never)}>
-        <TabsList>
-          <TabsTrigger value="open_all">Open</TabsTrigger>
-          <TabsTrigger value="open">Unscheduled</TabsTrigger>
-          <TabsTrigger value="scheduled">Scheduled</TabsTrigger>
-          <TabsTrigger value="in_progress">In progress</TabsTrigger>
-          <TabsTrigger value="on_hold">On hold</TabsTrigger>
-          <TabsTrigger value="closed">Closed</TabsTrigger>
-          <TabsTrigger value="all">All</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {noUnit && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          Your account isn’t linked to a unit yet. Ask staff to assign a unit before submitting requests.
+        </p>
+      )}
+
+      {app.isTenant ? (
+        <Tabs value={tenantFilter} onValueChange={(v) => setTenantFilter(v as TenantFilter)}>
+          <TabsList>
+            <TabsTrigger value="active">Active ({counts.active})</TabsTrigger>
+            <TabsTrigger value="closed">Closed ({counts.closed})</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      ) : (
+        <Tabs value={staffFilter} onValueChange={(v) => setStaffFilter(v as StaffFilter)}>
+          <TabsList>
+            <TabsTrigger value="open_all">Open</TabsTrigger>
+            <TabsTrigger value="open">Unscheduled</TabsTrigger>
+            <TabsTrigger value="scheduled">Scheduled</TabsTrigger>
+            <TabsTrigger value="in_progress">In progress</TabsTrigger>
+            <TabsTrigger value="on_hold">On hold</TabsTrigger>
+            <TabsTrigger value="closed">Closed</TabsTrigger>
+            <TabsTrigger value="all">All</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
 
       {loading ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">Loading…</Card>
@@ -141,7 +207,7 @@ export function MaintenancePage() {
                 : "Track repairs and turnover work for your properties."
               : "No work orders match this filter."}
           </p>
-          {orders.length === 0 && app.isTenant && (
+          {orders.length === 0 && app.isTenant && !noUnit && (
             <Button className="mt-2" onClick={() => setTenantOpen(true)}>
               <Plus className="mr-1 h-4 w-4" /> New request
             </Button>
@@ -156,11 +222,6 @@ export function MaintenancePage() {
             >
               <Plus className="mr-1 h-4 w-4" /> New work order
             </Button>
-          )}
-          {orders.length === 0 && !app.isTenant && !app.canCreateWorkOrders && (
-            <p className="mt-2 max-w-sm text-xs text-muted-foreground">
-              Staff can update assigned requests; only admins create new ones.
-            </p>
           )}
         </div>
       ) : (
@@ -178,7 +239,17 @@ export function MaintenancePage() {
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate font-semibold">{w.title}</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {[w.category, w.property_name, w.unit_name].filter(Boolean).join(" · ") || "—"}
+                    {[
+                      w.request_number ? `#${w.request_number}` : null,
+                      w.category,
+                      !app.isTenant
+                        ? [w.tenant_first_name, w.tenant_last_name].filter(Boolean).join(" ") || null
+                        : null,
+                      w.property_name,
+                      w.unit_name,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ") || "—"}
                   </p>
                 </div>
                 <span
@@ -188,7 +259,7 @@ export function MaintenancePage() {
                   )}
                 >
                   {w.priority === "urgent" && <CircleAlert className="mr-1 h-3 w-3" />}
-                  {w.priority}
+                  {app.isTenant && w.priority === "urgent" ? "emergency" : w.priority}
                 </span>
               </div>
               {w.description && (
@@ -197,18 +268,20 @@ export function MaintenancePage() {
               <div className="mt-3 flex items-center justify-between border-t pt-3 text-xs">
                 <div className="flex items-center gap-2">
                   <Badge variant={STATUS_VARIANT[w.status] ?? "secondary"} className="capitalize">
-                    {w.status.replace("_", " ")}
+                    {app.isTenant ? tenantStatusLabel(w.status) : w.status.replace("_", " ")}
                   </Badge>
                   {w.vendor_name && <span className="text-muted-foreground">{w.vendor_name}</span>}
                 </div>
                 <div className="text-right text-muted-foreground">
                   {w.scheduled_at && <div>Scheduled {formatDate(w.scheduled_at)}</div>}
-                  {w.cost != null && (
+                  {w.cost != null && !app.isTenant && (
                     <div className="font-medium tabular-nums text-foreground">
                       {formatMoney(w.cost, app.settings.currency)}
                     </div>
                   )}
-                  {!w.scheduled_at && w.cost == null && <div>Created {formatDate(w.created_at)}</div>}
+                  {!w.scheduled_at && (w.cost == null || app.isTenant) && (
+                    <div>Created {formatDate(w.created_at)}</div>
+                  )}
                 </div>
               </div>
             </Card>

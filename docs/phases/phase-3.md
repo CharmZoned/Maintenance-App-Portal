@@ -27,7 +27,8 @@
 - Harden `current_tenant_unit_id` / `current_tenant_property_id` (approved + tenant role)
 - FORCE RLS on Photos / Comments / StatusHistory
 - Tenant insert WITH CHECK tightened (property_id + forbid vendor/cost/notes); photo path/author + comment author bound to caller
-- Existing `maintenance-photos` storage policies reused
+- Storage UPDATE/DELETE tightened (tenants only delete own objects); tenant_visible comment replies allowed
+- Staff UI collects companion CHECK fields; Accept & schedule primary action; tenant Active/Closed filters + photo retry
 
 ### FE
 

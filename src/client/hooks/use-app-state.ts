@@ -364,6 +364,8 @@ export function useAppState(
     listMaintenanceComments: data.listMaintenanceComments,
     addMaintenanceComment: data.addMaintenanceComment,
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
+    listStaff: data.listStaff,
+    getTenantHomeContext: data.getTenantHomeContext,
   };
 }
 

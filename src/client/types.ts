@@ -202,6 +202,9 @@ export interface WorkOrder {
   completed_at: string | null;
   cost: number | null;
   notes: string | null;
+  resolution_notes?: string | null;
+  hold_reason?: string | null;
+  next_follow_up_date?: string | null;
   created_at: string;
   // Joined
   property_name?: string | null;
@@ -211,6 +214,14 @@ export interface WorkOrder {
   tenant_last_name?: string | null;
   vendor_name?: string | null;
   vendor_color?: string | null;
+}
+
+export interface TenantHomeContext {
+  tenant_id: number;
+  unit_id: number | null;
+  unit_label: string | null;
+  property_id: number | null;
+  property_name: string | null;
 }
 
 export interface MaintenancePhoto {

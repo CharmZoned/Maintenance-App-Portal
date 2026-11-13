@@ -44,6 +44,7 @@ import type {
   CommentVisibility,
   MaintenanceCategory,
   WorkOrderPriority,
+  TenantHomeContext,
 } from "../types";
 import type { AccountStatus, AppRole, Tables } from "../types.supabase";
 
@@ -894,13 +895,13 @@ export async function updateWorkOrder(
   if (patch.status !== undefined) {
     row.status = workOrderStatusToDb(patch.status);
     const prev = opts?.previousStatus;
-    if (patch.status === "closed" && prev !== "closed") {
-      row.closed_at = new Date().toISOString();
-    }
     if (patch.status === "in_progress" && prev !== "in_progress") {
       row.started_at = new Date().toISOString();
     }
-    if (prev === "closed" && patch.status !== "closed") {
+    // Companion CHECK: Closed needs closed_at; any other status needs closed_at null
+    if (patch.status === "closed") {
+      row.closed_at = new Date().toISOString();
+    } else {
       row.closed_at = null;
     }
   }
@@ -909,9 +910,19 @@ export async function updateWorkOrder(
   if (patch.vendor_id !== undefined) row.vendor_id = patch.vendor_id;
   if (patch.tenant_id !== undefined) row.submitted_by_tenant_id = patch.tenant_id;
   if (patch.assigned_staff_id !== undefined) row.assigned_staff_id = patch.assigned_staff_id;
-  if (patch.scheduled_at !== undefined) row.scheduled_for = patch.scheduled_at;
+  if (patch.scheduled_at !== undefined) {
+    row.scheduled_for = patch.scheduled_at
+      ? patch.scheduled_at.length === 10
+        ? `${patch.scheduled_at}T12:00:00.000Z`
+        : patch.scheduled_at
+      : null;
+  }
   if (patch.cost !== undefined) row.cost = patch.cost;
   if (patch.notes !== undefined) row.notes = patch.notes;
+  if (patch.resolution_notes !== undefined) row.resolution_notes = patch.resolution_notes;
+  if (patch.hold_reason !== undefined) row.hold_reason = patch.hold_reason;
+  if (patch.next_follow_up_date !== undefined) row.next_follow_up_date = patch.next_follow_up_date;
+
   const { data, error } = await supabase
     .from("MaintenanceRequests")
     .update(row as never)
@@ -921,6 +932,66 @@ export async function updateWorkOrder(
   if (error) throwSb(error);
   const list = await listWorkOrders();
   return list.find((w) => w.id === id) ?? mapWorkOrder(data!);
+}
+
+/** Unit + property label for the signed-in tenant (submit context). */
+export async function getTenantHomeContext(): Promise<TenantHomeContext | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: role, error: roleErr } = await supabase
+    .from("user_roles")
+    .select("tenant_id, role, account_status")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (roleErr) throwSb(roleErr);
+  if (!role || role.role !== "tenant" || role.account_status !== "approved" || role.tenant_id == null) {
+    return null;
+  }
+
+  const { data: tenant, error: tenantErr } = await supabase
+    .from("Tenants")
+    .select("id, unit_id")
+    .eq("id", role.tenant_id)
+    .single();
+  if (tenantErr) throwSb(tenantErr);
+
+  if (!tenant.unit_id) {
+    return {
+      tenant_id: tenant.id,
+      unit_id: null,
+      unit_label: null,
+      property_id: null,
+      property_name: null,
+    };
+  }
+
+  const { data: unit, error: unitErr } = await supabase
+    .from("Units")
+    .select("id, unit_label, property_id")
+    .eq("id", tenant.unit_id)
+    .single();
+  if (unitErr) throwSb(unitErr);
+
+  let propertyName: string | null = null;
+  if (unit.property_id != null) {
+    const { data: prop } = await supabase
+      .from("Properties")
+      .select("id, property_name")
+      .eq("id", unit.property_id)
+      .maybeSingle();
+    propertyName = prop?.property_name ?? null;
+  }
+
+  return {
+    tenant_id: tenant.id,
+    unit_id: unit.id,
+    unit_label: unit.unit_label,
+    property_id: unit.property_id,
+    property_name: propertyName,
+  };
 }
 
 export async function deleteWorkOrder(id: number): Promise<void> {
