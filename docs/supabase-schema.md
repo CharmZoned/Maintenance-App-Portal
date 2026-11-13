@@ -80,15 +80,17 @@ LeaseTenants: composite PK `(lease_id, tenant_id)`.
 Charges: `lease_id`, `period` (`YYYY-MM`), `due_date`, `amount`, `amount_paid`, `status`, `notes`.  
 Payments: `charge_id`, `paid_at`, `amount`, `method`, `reference`, `notes`.
 
-Same advisor gap → Phase 1 policies.
+Same advisor gap → Phase 1 policies.  
+**Phase 1.5:** `FORCE ROW LEVEL SECURITY`; portal mutates via RPCs `public.record_payment` / `public.delete_payment` (admin-only, atomic `amount_paid` + status).
 
 ### `Vendors`
 
-`name`, `category`, `phone`, `email`, `notes`, `color`, `is_test_data`. Phase 1: admin CRUD policies.
+`name`, `category`, `phone`, `email`, `notes`, `color`, `is_test_data`. Phase 1: admin CRUD policies.  
+**Phase 1.5:** `vendors_select` narrowed to `private.is_staff_or_admin()` (landlords no longer SELECT all vendors); `FORCE ROW LEVEL SECURITY`.
 
 ### `Settings`
 
-Key/value: `key` PK, `value`, `updated_at`. Phase 1: admin (and optionally maintenance staff) read/write.
+Key/value: `key` PK, `value`, `updated_at`. Phase 1: admin (and optionally maintenance staff) read/write. **Phase 1.5:** `FORCE ROW LEVEL SECURITY`.
 
 ### `Applications`
 
@@ -122,8 +124,11 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `handle_new_user` | Auth trigger: if email matches exactly one of Landlord/Tenant/Staff, insert `user_roles` |
 | `assign_admin(email)` | SECURITY DEFINER: set user to `admin` (clears link ids) |
 | `assign_request_number` / `protect_maintenance_request` | Maintenance triggers |
+| `rent_charge_status_for_paid(amount, paid, due)` | Phase 1.5: derive open/partial/paid/overdue |
 | `public.custom_access_token_hook` | JWT claims |
 | `public.refresh_property_unit_statuses` | Sync property occupancy from units |
+| `public.record_payment(...)` | Phase 1.5: admin-only atomic payment + charge update |
+| `public.delete_payment(id)` | Phase 1.5: admin-only atomic payment delete + balance recompute |
 
 ---
 
@@ -142,6 +147,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 - `Applications`, `Leases`, `LeaseTenants`, `RentCharges`, `Payments`, `Vendors`, `Settings`, `inquiries`
 
 **Phase 1 addresses:** Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings (+ admin write policies on core portfolio tables).  
+**Phase 1.5:** `FORCE ROW LEVEL SECURITY` on those same Phase 1 tables; `vendors_select` staff/admin-only; payment ledger RPCs.  
 **Intentionally deferred:** `Applications` (Phase 2), `inquiries` (website service-role only).
 
 Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration).

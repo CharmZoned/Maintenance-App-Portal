@@ -394,7 +394,23 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      record_payment: {
+        Args: {
+          p_charge_id: number;
+          p_amount: number;
+          p_method?: string;
+          p_reference?: string | null;
+          p_notes?: string | null;
+          p_paid_at?: string;
+        };
+        Returns: Database["public"]["Tables"]["RentCharges"]["Row"];
+      };
+      delete_payment: {
+        Args: { p_payment_id: number };
+        Returns: Database["public"]["Tables"]["RentCharges"]["Row"];
+      };
+    };
     Enums: { app_role: AppRole };
     CompositeTypes: Record<string, never>;
   };

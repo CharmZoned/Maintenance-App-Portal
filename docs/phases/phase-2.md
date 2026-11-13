@@ -1,6 +1,6 @@
 # Phase 2 — Account approval + Applications UI (R2, R8)
 
-**Status:** Next product phase (planning ready). Feature work after Phase 1.5 leftovers or in parallel if product accepts residual UX debt.  
+**Status:** Next product phase (planning ready). Phase 1.5 High/Must/Medium leftovers are done (see table); only Should/Perf remain.  
 **Depends on:** Phase 1 Auth + `user_roles.account_status` + approved-only RLS helpers (**done** on `master`).  
 **Out of scope here:** Tenant maintenance submit (Phase 3), website CTA (Phase 4), documents (Phase 5), email/push/messaging (Phase 6 **deferred** — use popups/toasts).
 
@@ -24,15 +24,15 @@ Pending users cannot use the portal; admins can **approve / reject / suspend** a
 
 | Priority | Item | Notes |
 |----------|------|--------|
-| High | Gate **all** portfolio mutate UI on `isAdmin` | Landlords/properties/tenants/leases/rent/vendors/settings still show CRUD to `maintenance` role; RLS denies — close UX/AuthZ gap |
-| Must | Fix `lease-dialog.tsx` `useEffect([open, app])` | Same cancel + stable-callback pattern as payment/WO dialogs |
-| Medium | Payment ledger RPC (record + delete) | Atomic `amount_paid` update; reduces RMW race |
-| Medium | `FORCE ROW LEVEL SECURITY` on Phase 1 tables | Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings |
-| Medium | Narrow `vendors_select` for landlords | Currently any landlord |
+| High | Gate **all** portfolio mutate UI on `isAdmin` | **Done** on `master` (`3fc7a64`) — `canMutatePortfolio` / hook guards |
+| Must | Fix `lease-dialog.tsx` `useEffect([open, app])` | **Done** on `master` (`3fc7a64`) — cancel + stable callbacks |
+| Medium | Payment ledger RPC (record + delete) | **Done** Phase 1.5 — `public.record_payment` / `delete_payment` |
+| Medium | `FORCE ROW LEVEL SECURITY` on Phase 1 tables | **Done** Phase 1.5 — Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings |
+| Medium | Narrow `vendors_select` for landlords | **Done** Phase 1.5 — staff/admin only |
 | Should | Soft-fail bootstrap / `generateCharges` error swallowing | Surface failures via popup/toast |
 | Perf | Dashboard / charges N+1 | Defer unless blocking; not Phase 2 DoD |
 
-Track as Cursor Project task **Phase 1.5**. Fix High + lease-dialog before multi-staff production.
+Track as Cursor Project task **Phase 1.5** (**LGA-6**). High + lease-dialog + Medium items done; Should/Perf optional before multi-staff.
 
 ---
 
