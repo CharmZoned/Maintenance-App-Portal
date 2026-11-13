@@ -34,10 +34,11 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
-  { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
 ];
+/** Admin-only: Users queue + rental Applications (applicant income PII). */
 const ADMIN_ITEMS: AppNavItem[] = [
   { id: "users", label: "Users", href: "/users", icon: "users", color: "violet" },
+  { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 const TENANT_NAV: AppNavItem[] = [
@@ -244,7 +245,15 @@ export function App() {
               {route.name === "leases" && <LeasesPage navigate={navigate} />}
               {route.name === "rent" && <RentPage />}
               {route.name === "maintenance" && <MaintenancePage />}
-              {route.name === "applications" && <ApplicationsPage />}
+              {route.name === "applications" &&
+                (isAdmin ? (
+                  <ApplicationsPage />
+                ) : (
+                  <Placeholder
+                    title="Admins only"
+                    message="Rental applications include applicant income and other PII — admins only."
+                  />
+                ))}
               {route.name === "users" &&
                 (isAdmin ? (
                   <UsersPage />
