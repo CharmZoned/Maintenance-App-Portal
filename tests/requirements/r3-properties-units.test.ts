@@ -65,16 +65,20 @@ describe("[R3] Properties and units", () => {
 
     test("creates a property for a landlord", async () => {
       await signInApp("admin");
+      // Attach to Grace (created above), not the seeded landlord — later visibility
+      // checks expect Lena Owner to keep only Maple Court from the seed world.
+      const grace = (await data.listLandlords()).find((l) => l.email === "grace@holder.test");
+      expect(grace?.id).toBeGreaterThan(0);
       const property = await data.createProperty({
         name: "Cedar Row",
-        landlord_id: world.landlord.id,
+        landlord_id: grace!.id,
         type: "multi_family",
         address: "4 Cedar Row",
         city: "Baltimore",
         state: "MD",
         zip: "21202",
       });
-      expect(property).toMatchObject({ name: "Cedar Row", landlord_id: world.landlord.id });
+      expect(property).toMatchObject({ name: "Cedar Row", landlord_id: grace!.id });
     });
 
     test("adds a unit to a property", async () => {
@@ -109,6 +113,100 @@ describe("[R3] Properties and units", () => {
       expect(lease).toMatchObject({ unit_id: Number(unitId), status: "active", tenant_first_name: "Leo" });
       const [tenant] = await sql<{ unit_id: number }>(`select unit_id from public."Tenants" where id = $1`, [tenantId]);
       expect(Number(tenant.unit_id), "the tenant now lives in the leased unit").toBe(Number(unitId));
+      const membership = await sql(
+        `select 1 from public."LeaseTenants" where lease_id = $1 and tenant_id = $2`,
+        [lease.id, tenantId],
+      );
+      expect(membership, "createLease upserts LeaseTenants for the primary").toHaveLength(1);
+    });
+
+    test("updateLease moves tenant.unit_id and LeaseTenants when unit or primary changes (gap R3)", async () => {
+      const [{ id: tenantA }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Uma', 'Updater', 'uma@updater.test', false, false) returning id`,
+      );
+      const [{ id: tenantB }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Ned', 'Newprimary', 'ned@newprimary.test', false, false) returning id`,
+      );
+      const [{ id: unitA }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Sync-A', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      const [{ id: unitB }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Sync-B', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const lease = await data.createLease({
+        unit_id: Number(unitA),
+        primary_tenant_id: Number(tenantA),
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
+        monthly_rent: 1100,
+      });
+
+      await data.updateLease(lease.id, { unit_id: Number(unitB) });
+      const [afterUnitMove] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantA],
+      );
+      expect(Number(afterUnitMove.unit_id), "same primary follows the new lease unit").toBe(Number(unitB));
+      expect(afterUnitMove.primary_on_lease).toBe(true);
+
+      await data.updateLease(lease.id, { primary_tenant_id: Number(tenantB) });
+      const [oldPrimary] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantA],
+      );
+      const [newPrimary] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantB],
+      );
+      expect(oldPrimary.unit_id, "previous primary is cleared when replaced").toBeNull();
+      expect(oldPrimary.primary_on_lease).toBe(false);
+      expect(Number(newPrimary.unit_id)).toBe(Number(unitB));
+      expect(newPrimary.primary_on_lease).toBe(true);
+      expect(
+        await sql(`select 1 from public."LeaseTenants" where lease_id = $1 and tenant_id = $2`, [
+          lease.id,
+          tenantA,
+        ]),
+      ).toHaveLength(0);
+      expect(
+        await sql(`select 1 from public."LeaseTenants" where lease_id = $1 and tenant_id = $2`, [
+          lease.id,
+          tenantB,
+        ]),
+      ).toHaveLength(1);
+    });
+
+    test("deleteLease clears tenant.unit_id and leaves no LeaseTenants orphans (gap R3)", async () => {
+      const [{ id: tenantId }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Del', 'Leasee', 'del@leasee.test', false, false) returning id`,
+      );
+      const [{ id: unitId }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Del-U', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const lease = await data.createLease({
+        unit_id: Number(unitId),
+        primary_tenant_id: Number(tenantId),
+        start_date: "2026-03-01",
+        end_date: "2027-02-28",
+        monthly_rent: 900,
+      });
+      await data.deleteLease(lease.id);
+      expect(await sql(`select 1 from public."Leases" where id = $1`, [lease.id])).toHaveLength(0);
+      expect(await sql(`select 1 from public."LeaseTenants" where lease_id = $1`, [lease.id])).toHaveLength(0);
+      const [tenant] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantId],
+      );
+      expect(tenant.unit_id, "product rule: clear unit_id on lease delete (no reassign)").toBeNull();
+      expect(tenant.primary_on_lease).toBe(false);
     });
 
     test("renames a property", async () => {

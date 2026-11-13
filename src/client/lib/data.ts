@@ -501,6 +501,98 @@ export async function listLeases(params?: {
   });
 }
 
+/**
+ * Gap R3 — keep Tenants.unit_id + LeaseTenants aligned with Leases.primary_tenant_id.
+ * Product rule on delete/unlink: clear unit_id (and primary_on_lease) when it still
+ * matches the lease unit — do not auto-reassign to another lease.
+ */
+async function linkPrimaryTenantToLease(
+  leaseId: number,
+  unitId: number,
+  primaryTenantId: number,
+): Promise<void> {
+  const { error: ltErr } = await supabase.from("LeaseTenants").upsert({
+    lease_id: leaseId,
+    tenant_id: primaryTenantId,
+  });
+  if (ltErr) throwSb(ltErr);
+  const { error: tErr } = await supabase
+    .from("Tenants")
+    .update({ unit_id: unitId, primary_on_lease: true } as never)
+    .eq("id", primaryTenantId);
+  if (tErr) throwSb(tErr);
+}
+
+/** Clear unit_id only when it still equals the lease unit (conditional update avoids races). */
+async function clearTenantUnitsMatching(tenantIds: number[], leaseUnitId: number): Promise<void> {
+  if (tenantIds.length === 0) return;
+  const { error } = await supabase
+    .from("Tenants")
+    .update({ unit_id: null, primary_on_lease: false } as never)
+    .in("id", tenantIds)
+    .eq("unit_id", leaseUnitId);
+  if (error) throwSb(error);
+}
+
+async function unlinkTenantFromLease(
+  leaseId: number,
+  tenantId: number,
+  leaseUnitId: number,
+): Promise<void> {
+  const { error: ltErr } = await supabase
+    .from("LeaseTenants")
+    .delete()
+    .eq("lease_id", leaseId)
+    .eq("tenant_id", tenantId);
+  if (ltErr) throwSb(ltErr);
+  await clearTenantUnitsMatching([tenantId], leaseUnitId);
+}
+
+async function moveOccupantsToUnit(
+  leaseId: number,
+  beforeUnit: number,
+  afterUnit: number,
+  skipTenantId: number | null,
+): Promise<void> {
+  const { data: members, error: mErr } = await supabase
+    .from("LeaseTenants")
+    .select("tenant_id")
+    .eq("lease_id", leaseId);
+  if (mErr) throwSb(mErr);
+  const ids = (members ?? [])
+    .map((m) => m.tenant_id)
+    .filter((tid) => skipTenantId == null || tid !== skipTenantId);
+  if (ids.length === 0) return;
+  const { error: tErr } = await supabase
+    .from("Tenants")
+    .update({ unit_id: afterUnit } as never)
+    .in("id", ids)
+    .eq("unit_id", beforeUnit);
+  if (tErr) throwSb(tErr);
+}
+
+async function syncLeaseTenantLinks(args: {
+  leaseId: number;
+  beforeUnit: number;
+  beforePrimary: number | null;
+  afterUnit: number;
+  afterPrimary: number | null;
+}): Promise<void> {
+  const { leaseId, beforeUnit, beforePrimary, afterUnit, afterPrimary } = args;
+
+  if (beforePrimary != null && beforePrimary !== afterPrimary) {
+    await unlinkTenantFromLease(leaseId, beforePrimary, beforeUnit);
+  }
+
+  if (afterPrimary != null) {
+    await linkPrimaryTenantToLease(leaseId, afterUnit, afterPrimary);
+  }
+
+  if (afterUnit !== beforeUnit) {
+    await moveOccupantsToUnit(leaseId, beforeUnit, afterUnit, afterPrimary);
+  }
+}
+
 export async function createLease(input: NewLease): Promise<Lease> {
   const { data, error } = await supabase
     .from("Leases")
@@ -520,22 +612,12 @@ export async function createLease(input: NewLease): Promise<Lease> {
     .single();
   if (error) throwSb(error);
   if (input.primary_tenant_id) {
-    const { error: ltErr } = await supabase.from("LeaseTenants").upsert({
-      lease_id: data!.id,
-      tenant_id: input.primary_tenant_id,
-    });
-    if (ltErr) {
-      await supabase.from("Leases").delete().eq("id", data!.id);
-      throwSb(ltErr);
-    }
-    const { error: tErr } = await supabase
-      .from("Tenants")
-      .update({ unit_id: input.unit_id, primary_on_lease: true } as never)
-      .eq("id", input.primary_tenant_id);
-    if (tErr) {
+    try {
+      await linkPrimaryTenantToLease(data!.id, input.unit_id, input.primary_tenant_id);
+    } catch (err) {
       await supabase.from("LeaseTenants").delete().eq("lease_id", data!.id);
       await supabase.from("Leases").delete().eq("id", data!.id);
-      throwSb(tErr);
+      throw err;
     }
   }
   const list = await listLeases();
@@ -543,6 +625,20 @@ export async function createLease(input: NewLease): Promise<Lease> {
 }
 
 export async function updateLease(id: number, patch: Partial<NewLease>): Promise<Lease> {
+  const needsLinkSync =
+    patch.unit_id !== undefined || patch.primary_tenant_id !== undefined;
+
+  let before: { unit_id: number; primary_tenant_id: number | null } | null = null;
+  if (needsLinkSync) {
+    const { data: existing, error: existingErr } = await supabase
+      .from("Leases")
+      .select("unit_id, primary_tenant_id")
+      .eq("id", id)
+      .single();
+    if (existingErr) throwSb(existingErr);
+    before = existing!;
+  }
+
   const row: Record<string, unknown> = {};
   for (const key of [
     "unit_id",
@@ -560,12 +656,69 @@ export async function updateLease(id: number, patch: Partial<NewLease>): Promise
   }
   const { data, error } = await supabase.from("Leases").update(row as never).eq("id", id).select("*").single();
   if (error) throwSb(error);
+
+  if (needsLinkSync && before) {
+    const afterUnit = data!.unit_id as number;
+    const afterPrimary = (data!.primary_tenant_id as number | null) ?? null;
+    try {
+      await syncLeaseTenantLinks({
+        leaseId: id,
+        beforeUnit: before.unit_id,
+        beforePrimary: before.primary_tenant_id,
+        afterUnit,
+        afterPrimary,
+      });
+    } catch (syncErr) {
+      // Best-effort compensate: restore lease row + previous primary link (FE has no TX).
+      await supabase
+        .from("Leases")
+        .update({
+          unit_id: before.unit_id,
+          primary_tenant_id: before.primary_tenant_id,
+        } as never)
+        .eq("id", id);
+      if (before.primary_tenant_id != null) {
+        try {
+          await linkPrimaryTenantToLease(id, before.unit_id, before.primary_tenant_id);
+        } catch {
+          /* keep original sync error */
+        }
+      }
+      throw syncErr;
+    }
+  }
+
   const list = await listLeases();
   return list.find((l) => l.id === id) ?? mapLease(data!);
 }
 
 export async function deleteLease(id: number): Promise<void> {
-  await supabase.from("LeaseTenants").delete().eq("lease_id", id);
+  const { data: lease, error: leaseReadErr } = await supabase
+    .from("Leases")
+    .select("id, unit_id, primary_tenant_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (leaseReadErr) throwSb(leaseReadErr);
+  if (!lease) {
+    throw new Error("Lease not found");
+  }
+
+  const { data: members, error: membersErr } = await supabase
+    .from("LeaseTenants")
+    .select("tenant_id")
+    .eq("lease_id", id);
+  if (membersErr) throwSb(membersErr);
+
+  const tenantIds = [...new Set<number>([
+    ...(members ?? []).map((m) => m.tenant_id),
+    ...(lease.primary_tenant_id != null ? [lease.primary_tenant_id] : []),
+  ])];
+
+  // Clear unit links first so tenant RLS scope cannot retain a deleted lease's unit.
+  await clearTenantUnitsMatching(tenantIds, lease.unit_id);
+
+  const { error: ltErr } = await supabase.from("LeaseTenants").delete().eq("lease_id", id);
+  if (ltErr) throwSb(ltErr);
   const { error } = await supabase.from("Leases").delete().eq("id", id);
   if (error) throwSb(error);
 }
