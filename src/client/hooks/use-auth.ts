@@ -26,6 +26,7 @@ function canAccessPortfolio(role: UserRoleRow): boolean {
   if (role.role === "admin") return true;
   if (role.role === "maintenance" && role.staff_id != null) return true;
   if (role.role === "tenant" && role.tenant_id != null) return true;
+  if (role.role === "landlord" && role.landlord_id != null) return true;
   return false;
 }
 

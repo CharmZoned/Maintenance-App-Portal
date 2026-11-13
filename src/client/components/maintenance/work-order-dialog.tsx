@@ -96,15 +96,18 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     ? ADMIN_STATUSES
     : staffStatusOptions(hasAssignee || status === "in_progress" || status === "scheduled");
   const isCreate = !workOrder;
-  const readOnlyCore = Boolean(workOrder) && !app.isAdmin;
+  const readOnlyCore =
+    app.isLandlord || app.isTenant || (Boolean(workOrder) && !app.isAdmin);
+  const canEdit = app.canEditWorkOrders;
   const showAccept =
     Boolean(workOrder) &&
     app.canAcceptAndSchedule &&
     !app.isTenant &&
+    !app.isLandlord &&
     workOrder?.status === "open";
 
   useEffect(() => {
-    if (!open || app.isTenant) return;
+    if (!open || app.isTenant || app.isLandlord) return;
     let cancelled = false;
     (async () => {
       try {
@@ -123,7 +126,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     return () => {
       cancelled = true;
     };
-  }, [open, listUnits, setError, app.isTenant, app.isAdmin, app.listStaff]);
+  }, [open, listUnits, setError, app.isTenant, app.isLandlord, app.isAdmin, app.listStaff]);
 
   useEffect(() => {
     if (!open) return;
@@ -381,7 +384,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
           <DialogHeader>
             <DialogTitle>
               {workOrder
-                ? app.isTenant
+                ? app.isTenant || app.isLandlord
                   ? "Request details"
                   : "Edit work order"
                 : "New work order"}
@@ -459,10 +462,10 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Leaking kitchen faucet"
-                disabled={readOnlyCore || app.isTenant}
+                disabled={readOnlyCore || app.isTenant || app.isLandlord}
               />
             </div>
-            {!app.isTenant && (
+            {!app.isTenant && !app.isLandlord && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Property</Label>
@@ -514,7 +517,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
-                disabled={readOnlyCore || app.isTenant}
+                disabled={readOnlyCore || app.isTenant || app.isLandlord}
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -523,7 +526,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 <Select
                   value={category}
                   onValueChange={setCategory}
-                  disabled={readOnlyCore || app.isTenant}
+                  disabled={readOnlyCore || app.isTenant || app.isLandlord}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -540,7 +543,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                   </SelectContent>
                 </Select>
               </div>
-              {!app.isTenant && (
+              {!app.isTenant && !app.isLandlord && (
                 <div>
                   <Label>Priority</Label>
                   <Select
@@ -562,7 +565,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
               )}
             </div>
 
-            {!app.isTenant && (
+            {!app.isTenant && !app.isLandlord && (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -691,7 +694,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
               </>
             )}
 
-            {app.isTenant && (
+            {(app.isTenant || app.isLandlord) && (
               <div className="flex items-center gap-2 text-sm">
                 <Badge variant="secondary" className="capitalize">
                   {status.replace("_", " ")}
@@ -707,12 +710,12 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 checked={permission}
                 onChange={(e) => setPermission(e.target.checked)}
                 className="size-4"
-                disabled={readOnlyCore || app.isTenant}
+                disabled={readOnlyCore || app.isTenant || app.isLandlord}
               />
               Permission to enter
             </label>
 
-            {!app.isTenant && (
+            {!app.isTenant && !app.isLandlord && (
               <div className="grid grid-cols-2 gap-3">
                 {!app.isAdmin && (
                   <div>
@@ -726,7 +729,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 </div>
               </div>
             )}
-            {!app.isTenant && (
+            {!app.isTenant && !app.isLandlord && (
               <div>
                 <Label htmlFor="wo-notes">Internal notes</Label>
                 <Textarea id="wo-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
@@ -769,33 +772,35 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                       )}
                     </div>
                   )}
-                  <div className="mt-2 space-y-2">
-                    <Input
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={(e) =>
-                        setPhotoFiles(Array.from(e.target.files ?? []).slice(0, 5))
-                      }
-                    />
-                    {photoPreviews.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2">
-                        {photoPreviews.map((p) => (
-                          <img
-                            key={p.url}
-                            src={p.url}
-                            alt={p.file.name}
-                            className="aspect-square rounded border object-cover"
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {photoFiles.length > 0 && (
-                      <Button type="button" size="sm" variant="outline" onClick={() => void uploadMorePhotos()}>
-                        Upload {photoFiles.length} photo{photoFiles.length === 1 ? "" : "s"}
-                      </Button>
-                    )}
-                  </div>
+                  {!app.isLandlord && (
+                    <div className="mt-2 space-y-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(e) =>
+                          setPhotoFiles(Array.from(e.target.files ?? []).slice(0, 5))
+                        }
+                      />
+                      {photoPreviews.length > 0 && (
+                        <div className="grid grid-cols-3 gap-2">
+                          {photoPreviews.map((p) => (
+                            <img
+                              key={p.url}
+                              src={p.url}
+                              alt={p.file.name}
+                              className="aspect-square rounded border object-cover"
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {photoFiles.length > 0 && (
+                        <Button type="button" size="sm" variant="outline" onClick={() => void uploadMorePhotos()}>
+                          Upload {photoFiles.length} photo{photoFiles.length === 1 ? "" : "s"}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t pt-3">
@@ -840,44 +845,46 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                       ))}
                     </ul>
                   )}
-                  <div className="mt-2 grid gap-2">
-                    <Textarea
-                      value={commentBody}
-                      onChange={(e) => setCommentBody(e.target.value)}
-                      rows={2}
-                      placeholder={app.isTenant ? "Message staff…" : "Add a comment…"}
-                    />
-                    <div className="flex flex-wrap items-center gap-2">
-                      {!app.isTenant && (
-                        <Select
-                          value={commentVisibility}
-                          onValueChange={(v) => setCommentVisibility(v as CommentVisibility)}
+                  {!app.isLandlord && (
+                    <div className="mt-2 grid gap-2">
+                      <Textarea
+                        value={commentBody}
+                        onChange={(e) => setCommentBody(e.target.value)}
+                        rows={2}
+                        placeholder={app.isTenant ? "Message staff…" : "Add a comment…"}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!app.isTenant && (
+                          <Select
+                            value={commentVisibility}
+                            onValueChange={(v) => setCommentVisibility(v as CommentVisibility)}
+                          >
+                            <SelectTrigger className="w-[180px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="tenant_visible">Tenant visible</SelectItem>
+                              <SelectItem value="internal">Internal</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void postComment()}
+                          disabled={!commentBody.trim()}
                         >
-                          <SelectTrigger className="w-[180px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="tenant_visible">Tenant visible</SelectItem>
-                            <SelectItem value="internal">Internal</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void postComment()}
-                        disabled={!commentBody.trim()}
-                      >
-                        {app.isTenant ? "Send message" : "Post comment"}
-                      </Button>
+                          {app.isTenant ? "Send message" : "Post comment"}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </>
             )}
 
-            {isCreate && !app.isTenant && (
+            {isCreate && canEdit && (
               <div>
                 <Label htmlFor="wo-photos-new">Photos (optional)</Label>
                 <Input
@@ -898,9 +905,9 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
               </Button>
             )}
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              {app.isTenant ? "Close" : "Cancel"}
+              {app.isTenant || app.isLandlord ? "Close" : "Cancel"}
             </Button>
-            {!app.isTenant && (
+            {canEdit && (
               <Button
                 type="button"
                 onClick={() => void save()}

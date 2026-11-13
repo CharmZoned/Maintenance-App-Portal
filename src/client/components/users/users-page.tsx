@@ -37,11 +37,12 @@ function statusVariant(status: AccountStatus): "default" | "secondary" | "destru
   return "outline";
 }
 
-/** Staff/admin portal or linked tenant shell. */
+/** Staff/admin, linked tenant shell, or linked landlord read-only shell. */
 function canApproveForPortal(user: UserAccountRow): boolean {
   if (user.role === "admin") return true;
   if (user.role === "maintenance" && user.staff_id != null) return true;
   if (user.role === "tenant" && user.tenant_id != null) return true;
+  if (user.role === "landlord" && user.landlord_id != null) return true;
   return false;
 }
 
@@ -53,8 +54,8 @@ function approveBlockedReason(user: UserAccountRow): string | null {
   if (user.role === "tenant" && user.tenant_id == null) {
     return "Link a Tenant row before approving a tenant account.";
   }
-  if (user.role === "landlord") {
-    return "Landlord self-serve is not shipped yet — approve only after changing role to admin, maintenance (+ staff), or tenant (+ tenant link).";
+  if (user.role === "landlord" && user.landlord_id == null) {
+    return "Link a Landlord row before approving a landlord account.";
   }
   return null;
 }
@@ -118,8 +119,12 @@ export function UsersPage() {
   }
 
   async function changeRole(user: UserAccountRow, role: AppRole) {
-    if (user.account_status === "approved" && role === "landlord") {
-      setError("Suspend or reject before assigning landlord (landlord portal not shipped).");
+    if (
+      user.account_status === "approved" &&
+      role === "landlord" &&
+      user.landlord_id == null
+    ) {
+      setError("Link a Landlord row before keeping an approved landlord account.");
       return;
     }
     if (
@@ -171,6 +176,10 @@ export function UsersPage() {
   }
 
   async function changeLandlordLink(user: UserAccountRow, landlordId: string) {
+    if (user.account_status === "approved" && landlordId === "none") {
+      setError("Suspend or reject before clearing the Landlord link on an approved account.");
+      return;
+    }
     setBusyId(user.user_id);
     try {
       const id = landlordId === "none" ? null : Number(landlordId);
@@ -392,7 +401,7 @@ export function UsersPage() {
                   )}
                   {user.role === "landlord" && (
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Landlord link</Label>
+                      <Label className="text-xs">Landlord link (required for landlord portal)</Label>
                       <Select
                         value={user.landlord_id != null ? String(user.landlord_id) : "none"}
                         onValueChange={(v) => void changeLandlordLink(user, v)}
@@ -402,7 +411,13 @@ export function UsersPage() {
                           <SelectValue placeholder="Landlord" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">None</SelectItem>
+                          <SelectItem
+                            value="none"
+                            disabled={user.account_status === "approved"}
+                          >
+                            None
+                            {user.account_status === "approved" ? " (suspend first)" : ""}
+                          </SelectItem>
                           {landlords.map((l) => (
                             <SelectItem key={l.id} value={String(l.id)}>
                               {l.company_name?.trim() || `${l.last_name}, ${l.first_name}`}

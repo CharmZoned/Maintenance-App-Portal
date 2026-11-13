@@ -42,7 +42,9 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
             <Building2 className="size-8 text-faint" aria-hidden />
             <p className="font-medium">No properties yet</p>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-              Add your first property to start managing units, leases, and rent.
+              {canMutatePortfolio
+                ? "Add your first property to start managing units, leases, and rent."
+                : "Properties linked to your landlord account will appear here."}
             </p>
             {canMutatePortfolio && (
               <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
@@ -86,13 +88,21 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
                     <Stat label="Occupancy" value={`${occRate}%`} />
                   </div>
                   <div className="mt-3 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); if (!canMutatePortfolio) return; setEditing(p); setDialogOpen(true); }}
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Edit
-                    </button>
+                    {canMutatePortfolio ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditing(p);
+                          setDialogOpen(true);
+                        }}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <span />
+                    )}
                     {p.year_built && (
                       <span className="text-xs text-muted-foreground">Built {p.year_built}</span>
                     )}
