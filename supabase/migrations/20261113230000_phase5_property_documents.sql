@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS public."PropertyDocuments" (
   property_id bigint NOT NULL
     REFERENCES public."Properties"(id) ON DELETE CASCADE,
   unit_id bigint
-    REFERENCES public."Units"(id) ON DELETE SET NULL,
+    REFERENCES public."Units"(id) ON DELETE CASCADE,
   title text NOT NULL,
   file_name text NOT NULL,
   content_type text,

@@ -273,8 +273,6 @@ export interface PropertyDocument {
   created_at: string;
   unit_name?: string | null;
   property_name?: string | null;
-  /** Signed URL for download (ephemeral). */
-  url?: string | null;
 }
 
 export type ApplicationStatus = "new" | "screening" | "approved" | "declined" | "withdrawn";

@@ -19,8 +19,13 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Slim Users tenant-link query (id/name/email only) | Faster Users page | Phase 3 reused full `listTenants` enrich | Next Users UX pass |
 | Split work-order-dialog into staff edit / tenant detail / media panels | Maintainability | Phase 3 shipped one dialog for DoD | Next maintenance UX pass |
 | Landlord documents UI (list/download own property docs) | Completes landlord half of R5 in the portal | Landlord portal shell still deferred; Phase 5 shipped RLS for landlord visibility | When landlord MVP / shell is scoped |
-| Confirm/apply Phase 5 migration `20261113230000_phase5_property_documents.sql` on non-primary envs | Docs bucket + table available outside live Landlord Gopher | Applied to live during Phase 5 PR; other envs may lag | Before documents in that env |
+| Confirm/apply Phase 5 migrations `20261113230000_*` + `20261113233000_*` on non-primary envs | Docs bucket + unit CASCADE ACL fix outside live Landlord Gopher | Applied to live during Phase 5 PR; other envs may lag | Before documents in that env |
 | Automated RLS tests for document visibility (tenant/staff/landlord isolation) | Regression safety | No harness yet | When vitest/pgTAP lands |
+| Property-documents MIME allowlist + attachment-only download | Blocks HTML/SVG open-in-tab via signed URL | Phase 5 ship used short TTL + download click; full MIME policy is product polish | Next docs security pass |
+| Bind storage UPDATE/DELETE to existing `PropertyDocuments.storage_path` | Closes staff orphan-upload / overwrite of arbitrary paths in bucket | SELECT already requires readable row; INSERT path-shaped | Next storage ACL harden |
+| Staff UPDATE of title/notes after admin widens visibility | Staff currently blocked by WITH CHECK `visibility = 'staff'` on non-admin | Admin-only visibility edits work; staff can delete+reupload | Next docs UX pass |
+| Shared `formatBytes` / document row component | DRY staff + tenant document lists | Phase 5 ship focused on High ACL/perf fixes | Next docs UX pass |
+| Paginate property documents beyond 200 | Large portfolios | Limit 200 shipped as High unbounded-list guard | When a property exceeds ~200 docs |
 | Invite-only Auth (disable public signup) | Tighter staff onboarding | Product chose public signup → pending for Phase 2 | If abuse or unwanted signups appear |
 | Paginate / status-filter `list_user_accounts_for_admin` | Faster Users page under large Auth fleets | Tiny fleets OK today; full `auth.users` scan on each load | When Auth user count grows or Users page feels slow |
 | Slim Applications unit-options query (avoid full `listUnits` graph on page mount) | Faster Applications page open | Unit select only needs id/label/property; full enrich is heavier | Next Applications UX pass or when unit count grows |

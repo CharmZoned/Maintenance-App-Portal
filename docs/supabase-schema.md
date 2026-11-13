@@ -113,7 +113,7 @@ Policies cover select/insert/update for admin, tenant submit, landlord, assigned
 
 Property (and optional unit) file metadata. Visibility CHECK: `tenant | staff | landlord` (default `staff`). Path shape `{property_id}/{filename}`.
 
-**Phase 5:** Admin-only visibility mark (trigger + INSERT/UPDATE policies). Hierarchical SELECT via `private.can_select_property_document`. Staff/admin manage via `private.can_manage_property_documents`. FORCE RLS. Storage bucket `property-documents` (private, 20 MB).
+**Phase 5:** Admin-only visibility mark (trigger + INSERT/UPDATE policies). Hierarchical SELECT via `private.can_select_property_document`. Staff/admin manage via `private.can_manage_property_documents`. FORCE RLS. Storage bucket `property-documents` (private, 20 MB). `unit_id` ON DELETE CASCADE (unit-scoped docs must not widen ACL via SET NULL).
 
 ### `inquiries`
 

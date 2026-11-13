@@ -225,6 +225,18 @@ export async function updateProperty(id: number, patch: Partial<NewProperty>): P
 }
 
 export async function deleteProperty(id: number): Promise<void> {
+  // Remove storage objects before CASCADE deletes PropertyDocuments rows.
+  const { data: docs, error: docsErr } = await supabase
+    .from("PropertyDocuments")
+    .select("storage_path")
+    .eq("property_id", id);
+  if (docsErr) throwSb(docsErr);
+  const paths = (docs ?? []).map((d) => d.storage_path).filter(Boolean);
+  if (paths.length > 0) {
+    const { error: rmErr } = await supabase.storage.from("property-documents").remove(paths);
+    if (rmErr) throw new Error(rmErr.message);
+  }
+
   const { error } = await supabase.from("Properties").delete().eq("id", id);
   if (error) throwSb(error);
 }
@@ -1384,10 +1396,12 @@ export async function deleteApplication(id: number): Promise<void> {
 // ── Property documents ────────────────────────────────────────────
 
 const DOC_BUCKET = "property-documents";
+const DOC_LIST_LIMIT = 200;
+const DOC_SIGNED_URL_TTL_SEC = 120;
 
 function mapPropertyDocument(
   row: Tables<"PropertyDocuments">,
-  extras?: { unit_name?: string | null; property_name?: string | null; url?: string | null },
+  extras?: { unit_name?: string | null; property_name?: string | null },
 ): PropertyDocument {
   return {
     id: row.id,
@@ -1404,13 +1418,7 @@ function mapPropertyDocument(
     created_at: row.created_at,
     unit_name: extras?.unit_name ?? null,
     property_name: extras?.property_name ?? null,
-    url: extras?.url ?? null,
   };
-}
-
-async function signDocUrl(path: string): Promise<string | null> {
-  const { data } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, 3600);
-  return data?.signedUrl ?? null;
 }
 
 export async function listPropertyDocuments(params?: {
@@ -1419,7 +1427,8 @@ export async function listPropertyDocuments(params?: {
   let q = supabase
     .from("PropertyDocuments")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(DOC_LIST_LIMIT);
   if (params?.property_id != null) q = q.eq("property_id", params.property_id);
   const { data, error } = await q;
   if (error) throwSb(error);
@@ -1439,16 +1448,25 @@ export async function listPropertyDocuments(params?: {
   const unitMap = new Map((units ?? []).map((u) => [u.id, u.unit_label]));
   const propMap = new Map((props ?? []).map((p) => [p.id, p.property_name]));
 
-  return Promise.all(
-    rows.map(async (row) => {
-      const url = await signDocUrl(row.storage_path);
-      return mapPropertyDocument(row, {
-        unit_name: row.unit_id != null ? unitMap.get(row.unit_id) ?? null : null,
-        property_name: propMap.get(row.property_id) ?? null,
-        url,
-      });
+  return rows.map((row) =>
+    mapPropertyDocument(row, {
+      unit_name: row.unit_id != null ? unitMap.get(row.unit_id) ?? null : null,
+      property_name: propMap.get(row.property_id) ?? null,
     }),
   );
+}
+
+/** Mint a short-lived signed URL on download click (not on list). */
+export async function getPropertyDocumentDownloadUrl(doc: {
+  storage_path: string;
+}): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from(DOC_BUCKET)
+    .createSignedUrl(doc.storage_path, DOC_SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message || "Could not create download link.");
+  }
+  return data.signedUrl;
 }
 
 export async function uploadPropertyDocument(input: {
@@ -1499,12 +1517,15 @@ export async function uploadPropertyDocument(input: {
     .select("*")
     .single();
   if (error) {
-    await supabase.storage.from(DOC_BUCKET).remove([path]);
+    const { error: rmErr } = await supabase.storage.from(DOC_BUCKET).remove([path]);
+    if (rmErr) {
+      // Prefer the insert error; storage orphan is logged via message append.
+      throw new Error(`${error.message} (also failed to roll back upload: ${rmErr.message})`);
+    }
     throwSb(error);
   }
 
-  const url = await signDocUrl(path);
-  return mapPropertyDocument(data!, { url });
+  return mapPropertyDocument(data!);
 }
 
 export async function updatePropertyDocumentVisibility(
@@ -1518,8 +1539,7 @@ export async function updatePropertyDocumentVisibility(
     .select("*")
     .single();
   if (error) throwSb(error);
-  const url = await signDocUrl(data!.storage_path);
-  return mapPropertyDocument(data!, { url });
+  return mapPropertyDocument(data!);
 }
 
 export async function deletePropertyDocument(id: number): Promise<void> {
@@ -1534,5 +1554,6 @@ export async function deletePropertyDocument(id: number): Promise<void> {
   const { error: delErr } = await supabase.from("PropertyDocuments").delete().eq("id", id);
   if (delErr) throwSb(delErr);
 
-  await supabase.storage.from(DOC_BUCKET).remove([data.storage_path]);
+  const { error: rmErr } = await supabase.storage.from(DOC_BUCKET).remove([data.storage_path]);
+  if (rmErr) throw new Error(rmErr.message);
 }

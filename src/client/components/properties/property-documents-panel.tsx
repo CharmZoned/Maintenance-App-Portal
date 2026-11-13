@@ -37,23 +37,27 @@ export function PropertyDocumentsPanel({
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleting, setDeleting] = useState<PropertyDocument | null>(null);
-
-  async function load() {
-    try {
-      setLoading(true);
-      const list = await app.listPropertyDocuments({ property_id: propertyId });
-      setDocs(list);
-    } catch (err) {
-      app.setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const list = await app.listPropertyDocuments({ property_id: propertyId });
+        if (!cancelled) setDocs(list);
+      } catch (err) {
+        if (!cancelled) app.setError((err as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Stable data helpers; avoid depending on whole app object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId]);
+  }, [propertyId, app.listPropertyDocuments, app.setError]);
 
   async function changeVisibility(doc: PropertyDocument, visibility: DocumentVisibility) {
     if (!app.isAdmin || doc.visibility === visibility) return;
@@ -63,6 +67,23 @@ export function PropertyDocumentsPanel({
       app.setNotice(`Visibility set to ${VISIBILITY_LABEL[visibility]}.`);
     } catch (err) {
       app.setError((err as Error).message);
+    }
+  }
+
+  async function downloadDoc(doc: PropertyDocument) {
+    try {
+      setDownloadingId(doc.id);
+      const url = await app.getPropertyDocumentDownloadUrl(doc);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.file_name;
+      a.rel = "noreferrer";
+      a.target = "_blank";
+      a.click();
+    } catch (err) {
+      app.setError((err as Error).message);
+    } finally {
+      setDownloadingId(null);
     }
   }
 
@@ -131,13 +152,14 @@ export function PropertyDocumentsPanel({
                 ) : (
                   <Badge variant="neutral">{VISIBILITY_LABEL[doc.visibility]}</Badge>
                 )}
-                {doc.url ? (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={doc.url} target="_blank" rel="noreferrer" download={doc.file_name}>
-                      <Download className="h-4 w-4" />
-                    </a>
-                  </Button>
-                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={downloadingId === doc.id}
+                  onClick={() => void downloadDoc(doc)}
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => setDeleting(doc)}>
                   <Trash2 className="h-4 w-4 text-destructive" />
                 </Button>

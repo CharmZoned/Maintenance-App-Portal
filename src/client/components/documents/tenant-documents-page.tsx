@@ -16,26 +16,34 @@ function formatBytes(n: number | null | undefined): string {
 
 export function TenantDocumentsPage() {
   const app = useApp();
+  const { getTenantHomeContext, listPropertyDocuments, getPropertyDocumentDownloadUrl, setError } =
+    app;
   const [home, setHome] = useState<TenantHomeContext | null>(null);
   const [docs, setDocs] = useState<PropertyDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setLoading(true);
-        const ctx = await app.getTenantHomeContext();
-        if (cancelled || !ctx) return;
+        const ctx = await getTenantHomeContext();
+        if (cancelled) return;
+        if (!ctx) {
+          setHome(null);
+          setDocs([]);
+          return;
+        }
         setHome(ctx);
         if (ctx.property_id == null) {
           setDocs([]);
           return;
         }
-        const list = await app.listPropertyDocuments({ property_id: ctx.property_id });
+        const list = await listPropertyDocuments({ property_id: ctx.property_id });
         if (!cancelled) setDocs(list);
       } catch (err) {
-        if (!cancelled) app.setError((err as Error).message);
+        if (!cancelled) setError((err as Error).message);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -43,7 +51,24 @@ export function TenantDocumentsPage() {
     return () => {
       cancelled = true;
     };
-  }, [app]);
+  }, [getTenantHomeContext, listPropertyDocuments, setError]);
+
+  async function downloadDoc(doc: PropertyDocument) {
+    try {
+      setDownloadingId(doc.id);
+      const url = await getPropertyDocumentDownloadUrl(doc);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = doc.file_name;
+      a.rel = "noreferrer";
+      a.target = "_blank";
+      a.click();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   const subtitle = home
     ? [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name]
@@ -59,7 +84,11 @@ export function TenantDocumentsPage() {
 
       {loading ? (
         <Card className="p-6 text-sm text-muted-foreground">Loading documents…</Card>
-      ) : home?.property_id == null ? (
+      ) : !home ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">
+          Could not load your tenant profile.
+        </Card>
+      ) : home.property_id == null ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">
           No unit is linked to your account yet, so property documents are unavailable.
         </Card>
@@ -78,7 +107,7 @@ export function TenantDocumentsPage() {
                   <p className="truncate text-xs text-muted-foreground">
                     {[
                       doc.file_name,
-                      doc.unit_name ? `Unit ${doc.unit_name}` : "Property-wide",
+                      doc.unit_name ? `Unit ${doc.unit_name}` : "Whole property",
                       formatBytes(doc.byte_size),
                       formatDate(doc.created_at),
                     ]
@@ -87,14 +116,15 @@ export function TenantDocumentsPage() {
                   </p>
                 </div>
               </div>
-              {doc.url ? (
-                <Button variant="outline" size="sm" asChild>
-                  <a href={doc.url} target="_blank" rel="noreferrer" download={doc.file_name}>
-                    <Download className="mr-1 h-4 w-4" />
-                    Download
-                  </a>
-                </Button>
-              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={downloadingId === doc.id}
+                onClick={() => void downloadDoc(doc)}
+              >
+                <Download className="mr-1 h-4 w-4" />
+                Download
+              </Button>
             </div>
           ))}
         </Card>
