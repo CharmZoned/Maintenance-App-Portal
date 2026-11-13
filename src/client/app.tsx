@@ -45,11 +45,19 @@ const TENANT_NAV: AppNavItem[] = [
   { id: "maintenance", label: "My requests", href: "/maintenance", home: true, icon: "list-checks", color: "orange" },
   { id: "documents", label: "Documents", href: "/documents", icon: "clipboard-list", color: "blue" },
 ];
+const LANDLORD_NAV: AppNavItem[] = [
+  { id: "properties", label: "Properties", href: "/properties", home: true, icon: "building-2", color: "green" },
+  { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
+];
 
 function activeFor(route: Route): string {
   if (route.name === "property") return "properties";
   if (route.name === "tenant") return "tenants";
   return route.name;
+}
+
+function landlordHomeRoute(route: Route): boolean {
+  return route.name === "properties" || route.name === "property" || route.name === "maintenance";
 }
 
 type AuthScreen = "login" | "reset-request" | "reset-confirm";
@@ -65,7 +73,11 @@ export function App() {
     auth.gate.state === "ready" &&
     auth.gate.role.role === "tenant" &&
     auth.gate.role.tenant_id != null;
-  const state = useAppState(ready, { isAdmin, isTenant });
+  const isLandlord =
+    auth.gate.state === "ready" &&
+    auth.gate.role.role === "landlord" &&
+    auth.gate.role.landlord_id != null;
+  const state = useAppState(ready, { isAdmin, isTenant, isLandlord });
   const { path, route, navigate } = useRouter();
 
   useEffect(() => {
@@ -84,6 +96,13 @@ export function App() {
       navigate("/maintenance");
     }
   }, [ready, isTenant, route.name, navigate]);
+
+  useEffect(() => {
+    if (!ready || !isLandlord) return;
+    if (!landlordHomeRoute(route)) {
+      navigate("/properties");
+    }
+  }, [ready, isLandlord, route, navigate]);
 
   if (auth.gate.state === "loading") {
     return (
@@ -167,14 +186,27 @@ export function App() {
   }
 
   if (auth.gate.state === "forbidden") {
+    const role = auth.gate.role.role;
+    const hint =
+      role === "landlord" && auth.gate.role.landlord_id == null
+        ? "Ask an admin to link your Landlord row, then use Check again."
+        : role === "tenant" && auth.gate.role.tenant_id == null
+          ? "Ask an admin to link your Tenant row, then use Check again."
+          : role === "maintenance" && auth.gate.role.staff_id == null
+            ? "Ask an admin to link a Staff row, then use Check again."
+            : "This portal is for admin, maintenance staff, linked tenants, or linked landlords.";
     return (
       <BlockedPage
         title="Access required"
-        message={`Signed in as ${auth.gate.role.role}. This portal is for admin, maintenance staff, or linked tenants. Landlord self-serve comes later.`}
+        message={`Signed in as ${role}. ${hint}`}
+        onRetry={() => void auth.retryRole()}
+        retryLabel="Check again"
         onLogout={() => void auth.logout()}
       />
     );
   }
+
+  const homePath = isTenant ? "/maintenance" : isLandlord ? "/properties" : "/dashboard";
 
   // reset-password while already authenticated (from email link)
   if (authScreen === "reset-confirm" && window.location.pathname === "/reset-password") {
@@ -183,9 +215,9 @@ export function App() {
         error={auth.authError}
         onSubmit={auth.updatePassword}
         onDone={() => {
-          window.history.replaceState(null, "", isTenant ? "/maintenance" : "/dashboard");
+          window.history.replaceState(null, "", homePath);
           setAuthScreen("login");
-          navigate(isTenant ? "/maintenance" : "/dashboard");
+          navigate(homePath);
         }}
       />
     );
@@ -194,22 +226,30 @@ export function App() {
   const adminNav = isAdmin ? ADMIN_ITEMS : ADMIN_ITEMS.filter((i) => i.id === "settings");
   const groups = isTenant
     ? [{ items: TENANT_NAV }]
-    : [
-        { items: PORTFOLIO },
-        { label: "Operations", items: OPERATIONS },
-        { label: "Admin", items: adminNav },
-      ];
+    : isLandlord
+      ? [{ items: LANDLORD_NAV }]
+      : [
+          { items: PORTFOLIO },
+          { label: "Operations", items: OPERATIONS },
+          { label: "Admin", items: adminNav },
+        ];
+
+  const portalTitle = isTenant
+    ? "LG Tenant Portal"
+    : isLandlord
+      ? "LG Landlord Portal"
+      : "LG Maintenance Portal";
 
   return (
     <AppContext.Provider value={state}>
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row">
         <div className="flex shrink-0">
           <AppNav
-            title={isTenant ? "LG Tenant Portal" : "LG Maintenance Portal"}
+            title={portalTitle}
             icon="home"
             groups={groups}
             active={activeFor(route)}
-            onNavigate={(item) => navigate(item.href ?? (isTenant ? "/maintenance" : "/dashboard"))}
+            onNavigate={(item) => navigate(item.href ?? homePath)}
           />
         </div>
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -218,6 +258,11 @@ export function App() {
             <span className="rounded bg-muted px-1.5 py-0.5 font-medium uppercase tracking-wide">
               {auth.gate.role.role}
             </span>
+            {isLandlord && (
+              <span className="rounded bg-muted px-1.5 py-0.5 font-medium tracking-wide">
+                Read-only
+              </span>
+            )}
             <Button variant="outline" size="sm" onClick={() => void auth.logout()}>
               Sign out
             </Button>
@@ -232,6 +277,18 @@ export function App() {
               {route.name === "documents" && <TenantDocumentsPage />}
               {route.name !== "maintenance" && route.name !== "documents" && (
                 <Placeholder title="Tenant portal" message="Use My requests to submit and track maintenance." />
+              )}
+            </>
+          ) : isLandlord ? (
+            <>
+              {route.name === "properties" && <PropertiesList navigate={navigate} />}
+              {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+              {route.name === "maintenance" && <MaintenancePage />}
+              {!landlordHomeRoute(route) && (
+                <Placeholder
+                  title="Landlord portal"
+                  message="Read-only view of your properties and maintenance. Editing is not available yet."
+                />
               )}
             </>
           ) : (

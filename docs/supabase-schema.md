@@ -217,7 +217,7 @@ select private.assign_admin('you@example.com');
 -- assign_admin sets role=admin and account_status=approved
 ```
 
-4. Sign in on the portal with that user. Role must be `admin`, `maintenance` with `staff_id`, or (Phase 3) `tenant` with `tenant_id` to pass the app gate.
+4. Sign in on the portal with that user. Role must be `admin`, `maintenance` with `staff_id`, `tenant` with `tenant_id`, or `landlord` with `landlord_id` to pass the app gate.
 
 **Choice documented:** New rows default to `pending`. Helpers + portal gate require `approved`. Bootstrap via `assign_admin` sets `approved`. Phase 2 admins use Users page / `set_account_status` instead of raw SQL for day-to-day approval.
 

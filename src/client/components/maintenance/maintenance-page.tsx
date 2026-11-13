@@ -204,7 +204,9 @@ export function MaintenancePage() {
             {orders.length === 0
               ? app.isTenant
                 ? "Submit a request when something needs fixing in your unit."
-                : "Track repairs and turnover work for your properties."
+                : app.isLandlord
+                  ? "Maintenance on your properties will show up here (read-only)."
+                  : "Track repairs and turnover work for your properties."
               : "No work orders match this filter."}
           </p>
           {orders.length === 0 && app.isTenant && !noUnit && (

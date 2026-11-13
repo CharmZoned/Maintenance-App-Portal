@@ -47,10 +47,11 @@ function parseSettings(raw: Record<string, string>): AppSettings {
 
 export function useAppState(
   enabled: boolean,
-  opts?: { isAdmin?: boolean; isTenant?: boolean },
+  opts?: { isAdmin?: boolean; isTenant?: boolean; isLandlord?: boolean },
 ) {
   const isAdmin = opts?.isAdmin ?? false;
   const isTenant = opts?.isTenant ?? false;
+  const isLandlord = opts?.isLandlord ?? false;
   const [properties, setProperties] = useState<Property[]>([]);
   const [landlords, setLandlords] = useState<Landlord[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -68,6 +69,19 @@ export function useAppState(
       setSettings(DEFAULT_SETTINGS);
       return;
     }
+    if (isLandlord) {
+      // Thin read-only shell: properties (RLS-scoped) + maintenance; no vendors/settings mutate.
+      try {
+        setProperties(await data.listProperties());
+      } catch (err) {
+        setProperties([]);
+        setError((err as Error).message);
+      }
+      setVendors([]);
+      setLandlords([]);
+      setSettings(DEFAULT_SETTINGS);
+      return;
+    }
     const [props, vens, st, lls] = await Promise.all([
       data.listProperties(),
       data.listVendors().catch(() => [] as Vendor[]),
@@ -78,7 +92,7 @@ export function useAppState(
     setVendors(vens);
     setSettings(parseSettings(st));
     setLandlords(lls);
-  }, [isTenant]);
+  }, [isTenant, isLandlord]);
 
   useEffect(() => {
     if (!enabled) {
@@ -264,9 +278,11 @@ export function useAppState(
       patch: Partial<NewWorkOrder>,
       opts?: { previousStatus?: WorkOrder["status"] },
     ) => {
+      if (isLandlord) throw new Error("Landlord portal is read-only.");
+      if (isTenant) throw new Error("Tenants cannot edit work orders.");
       return data.updateWorkOrder(id, patch, opts);
     },
-    [],
+    [isLandlord, isTenant],
   );
 
   const deleteWorkOrder = useCallback(async (id: number) => {
@@ -307,13 +323,16 @@ export function useAppState(
   return {
     isAdmin,
     isTenant,
+    isLandlord,
     /** Portfolio create/update/delete (landlords, properties, rent, vendors, settings, …). */
     canMutatePortfolio: isAdmin,
-    /** Admin: full MR CRUD. Maintenance staff: update assigned only (RLS). */
+    /** Admin: full MR CRUD. Maintenance staff: update assigned only (RLS). Landlord: read-only. */
     canCreateWorkOrders: isAdmin,
     canDeleteWorkOrders: isAdmin,
     /** Admin-only Accept & schedule (status Scheduled / scheduled_for). */
     canAcceptAndSchedule: isAdmin,
+    /** Staff may update assigned WOs; landlord/tenant view only (tenant comments separately). */
+    canEditWorkOrders: !isTenant && !isLandlord,
     properties,
     landlords,
     vendors,
@@ -360,9 +379,15 @@ export function useAppState(
     getDashboardSummary: data.getDashboardSummary,
     listPayments: data.listPayments,
     listMaintenancePhotos: data.listMaintenancePhotos,
-    uploadMaintenancePhoto: data.uploadMaintenancePhoto,
+    uploadMaintenancePhoto: async (...args: Parameters<typeof data.uploadMaintenancePhoto>) => {
+      if (isLandlord) throw new Error("Landlord portal is read-only.");
+      return data.uploadMaintenancePhoto(...args);
+    },
     listMaintenanceComments: data.listMaintenanceComments,
-    addMaintenanceComment: data.addMaintenanceComment,
+    addMaintenanceComment: async (...args: Parameters<typeof data.addMaintenanceComment>) => {
+      if (isLandlord) throw new Error("Landlord portal is read-only.");
+      return data.addMaintenanceComment(...args);
+    },
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
     listStaff: data.listStaff,
     getTenantHomeContext: data.getTenantHomeContext,
