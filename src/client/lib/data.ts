@@ -640,6 +640,45 @@ async function syncLeaseTenantLinks(args: {
 }
 
 /**
+ * When a slower sync is superseded mid-flight, it may have already upserted a
+ * replaced primary into LeaseTenants / set occupant units. Remove those stale
+ * writes and re-converge to the *current* lease state — never overwrite the
+ * newer lease row.
+ */
+async function repairSupersededLeaseSync(
+  leaseId: number,
+  afterPrimary: number | null,
+  afterUnit: number,
+): Promise<void> {
+  const { data: lease, error } = await supabase
+    .from("Leases")
+    .select("unit_id, primary_tenant_id")
+    .eq("id", leaseId)
+    .maybeSingle();
+  if (error) throwSb(error);
+  if (!lease) return;
+
+  const currentPrimary = (lease.primary_tenant_id as number | null) ?? null;
+  const currentUnit = lease.unit_id as number;
+
+  if (afterPrimary != null && afterPrimary !== currentPrimary) {
+    const { error: ltErr } = await supabase
+      .from("LeaseTenants")
+      .delete()
+      .eq("lease_id", leaseId)
+      .eq("tenant_id", afterPrimary);
+    if (ltErr) throwSb(ltErr);
+    await clearTenantUnitsMatching([afterPrimary], afterUnit);
+  }
+
+  // Occupants may have been parked on our stale afterUnit — snap to winner's unit.
+  await setOccupantsUnit(leaseId, currentUnit, currentPrimary);
+  if (currentPrimary != null) {
+    await linkPrimaryTenantToLease(leaseId, currentUnit, currentPrimary);
+  }
+}
+
+/**
  * Best-effort undo after a partial syncLeaseTenantLinks failure (no DB transaction).
  * Only restores if the lease row still matches our after-state (won't clobber a newer winner).
  */
@@ -666,7 +705,8 @@ async function compensateLeaseTenantLinkSync(args: {
   const { data: restored, error: leaseErr } = await restore.select("id").maybeSingle();
   if (leaseErr) throwSb(leaseErr);
   if (!restored) {
-    // Another update won the lease row; do not roll that back.
+    // Another update won — scrub any stale memberships we may have written.
+    await repairSupersededLeaseSync(leaseId, afterPrimary, afterUnit);
     return;
   }
 
@@ -775,15 +815,21 @@ export async function updateLease(id: number, patch: Partial<NewLease>): Promise
         afterPrimary,
       });
     } catch (syncErr) {
-      // Best-effort full compensate (FE has no TX): undo new primary + co-tenant moves too.
+      // Best-effort: roll back if we still own after-state; else scrub stale writes only.
       try {
-        await compensateLeaseTenantLinkSync({
-          leaseId: id,
-          beforeUnit: before.unit_id,
-          beforePrimary: before.primary_tenant_id,
-          afterUnit,
-          afterPrimary,
-        });
+        const superseded =
+          syncErr instanceof Error && syncErr.message === LEASE_CONCURRENT_MSG;
+        if (superseded) {
+          await repairSupersededLeaseSync(id, afterPrimary, afterUnit);
+        } else {
+          await compensateLeaseTenantLinkSync({
+            leaseId: id,
+            beforeUnit: before.unit_id,
+            beforePrimary: before.primary_tenant_id,
+            afterUnit,
+            afterPrimary,
+          });
+        }
       } catch {
         /* keep original sync error */
       }
