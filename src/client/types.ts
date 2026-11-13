@@ -2,6 +2,18 @@
 
 export type PropertyType = "single_family" | "multi_family" | "condo" | "townhouse" | "commercial";
 
+export interface Landlord {
+  id: number;
+  first_name: string;
+  last_name: string;
+  company_name: string | null;
+  email: string;
+  phone: string | null;
+  preferred_contact: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export interface Property {
   id: number;
   name: string;
@@ -13,6 +25,8 @@ export interface Property {
   year_built: number | null;
   notes: string | null;
   color: string;
+  landlord_id: number;
+  landlord_name?: string | null;
   created_at: string;
   // Joined
   unit_count?: number;
@@ -210,7 +224,15 @@ export interface DashboardSummary {
 
 // ── Input types for mutations ──────────────────────────────────────
 
-export type NewProperty = Partial<Omit<Property, "id" | "created_at" | "unit_count" | "occupied_count">> & { name: string };
+export type NewProperty = Partial<Omit<Property, "id" | "created_at" | "unit_count" | "occupied_count" | "landlord_name">> & {
+  name: string;
+  landlord_id: number;
+};
+export type NewLandlord = Partial<Omit<Landlord, "id" | "created_at">> & {
+  first_name: string;
+  last_name: string;
+  email: string;
+};
 export type NewUnit = Partial<Omit<Unit, "id" | "created_at" | "property_name" | "property_color" | "property_address" | "property_city" | "active_lease_id" | "active_tenant_name">> & { property_id: number; name: string };
 export type NewTenant = Partial<Omit<Tenant, "id" | "created_at" | "active_unit_id" | "active_unit_name" | "active_property_name">> & { first_name: string; last_name: string };
 export type NewLease = Partial<Omit<Lease, "id" | "created_at" | "unit_name" | "property_id" | "property_name" | "property_color" | "tenant_first_name" | "tenant_last_name" | "tenant_email" | "tenant_phone">> & { unit_id: number; start_date: string; end_date: string };

@@ -43,7 +43,7 @@ export function TenantsList({ navigate }: { navigate: (to: string) => void }) {
       title="Tenants"
       meta={`${tenants.length} ${tenants.length === 1 ? "record" : "records"}`}
       actions={
-        tenants.length > 0 ? (
+        app.canMutatePortfolio && tenants.length > 0 ? (
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="h-4 w-4" /> New tenant
           </Button>
@@ -69,7 +69,7 @@ export function TenantsList({ navigate }: { navigate: (to: string) => void }) {
             <User className="size-7 text-faint" aria-hidden />
             <p className="font-medium">{tenants.length === 0 ? "No tenants yet" : "No matches"}</p>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">{tenants.length === 0 ? "Add a tenant to start signing leases." : "Try a different search."}</p>
-            {tenants.length === 0 && (
+            {tenants.length === 0 && app.canMutatePortfolio && (
               <Button className="mt-2" onClick={() => setDialogOpen(true)}>
                 <Plus className="mr-1 h-4 w-4" /> New tenant
               </Button>

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm db:migrate && concurrently -n ui,api -c cyan,green \"vite\" \"wrangler dev --port 8787\"",
+    "dev": "vite",
+    "dev:legacy-worker": "wrangler dev --port 8787",
     "db:migrate": "wrangler d1 execute open-property-db --local --file=src/server/schema.sql",
     "build": "vite build",
     "typecheck": "tsc --noEmit"
@@ -24,6 +25,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@supabase/supabase-js": "^2.119.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "hono": "^4.6.0",

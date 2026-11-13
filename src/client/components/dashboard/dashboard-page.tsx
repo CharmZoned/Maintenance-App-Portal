@@ -9,7 +9,6 @@ import {
   Wrench,
 } from "lucide-react";
 import { useApp } from "@/context";
-import { api } from "@/api";
 import { cn, daysBetween, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
 import type { DashboardSummary } from "@/types";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +16,7 @@ import { Card } from "@/components/ui/card";
 import { PageShell } from "@/components/page-shell";
 
 export function DashboardPage({ navigate }: { navigate: (to: string) => void }) {
-  const { settings, setError } = useApp();
+  const { settings, setError, getDashboardSummary } = useApp();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -26,7 +25,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
     (async () => {
       try {
         setLoading(true);
-        const data = await api<DashboardSummary>("GET", "/api/dashboard/summary");
+        const data = await getDashboardSummary();
         if (!cancelled) setSummary(data);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -35,7 +34,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
       }
     })();
     return () => { cancelled = true; };
-  }, [setError]);
+  }, [setError, getDashboardSummary]);
 
   if (loading || !summary) {
     return (

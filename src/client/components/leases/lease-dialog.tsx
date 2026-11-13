@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
-import { api } from "@/api";
 import { toIsoDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
@@ -44,18 +43,30 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const listUnits = app.listUnits;
+  const listTenants = app.listTenants;
+  const setError = app.setError;
+  const defaultDueDay = app.settings.default_rent_due_day;
+  const defaultLateFee = app.settings.late_fee_amount;
+  const canMutate = app.canMutatePortfolio;
+
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     (async () => {
       try {
-        const [u, t] = await Promise.all([app.listUnits(), app.listTenants()]);
+        const [u, t] = await Promise.all([listUnits(), listTenants()]);
+        if (cancelled) return;
         setUnits(u);
         setTenants(t);
       } catch (err) {
-        app.setError((err as Error).message);
+        if (!cancelled) setError((err as Error).message);
       }
     })();
-  }, [open, app]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, listUnits, listTenants, setError]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,11 +79,11 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
     setEnd(lease?.end_date ?? toIsoDate(oneYear));
     setRent(String(lease?.monthly_rent ?? 0));
     setDeposit(String(lease?.deposit ?? 0));
-    setDueDay(String(lease?.rent_due_day ?? app.settings.default_rent_due_day));
-    setLateFee(String(lease?.late_fee ?? app.settings.late_fee_amount));
+    setDueDay(String(lease?.rent_due_day ?? defaultDueDay));
+    setLateFee(String(lease?.late_fee ?? defaultLateFee));
     setStatus(lease?.status ?? "active");
     setNotes(lease?.notes ?? "");
-  }, [open, lease, defaults, app.settings]);
+  }, [open, lease, defaults, defaultDueDay, defaultLateFee]);
 
   // When picking a unit we don't already have rent for, pre-fill from market_rent.
   const selectedUnit = useMemo(() => units.find((u) => u.id === unitId), [units, unitId]);
@@ -125,25 +136,13 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
     }
   }
 
-  // Get a property association from the API (LEASE_SELECT joins) — but for the dialog
-  // we just need property + unit name in the dropdown. Build a "Property · Unit" label.
-  // Fetch once when open.
-  const [unitLabels, setUnitLabels] = useState<Map<number, string>>(new Map());
-  useEffect(() => {
-    if (!open) return;
-    (async () => {
-      try {
-        const data = await api<{ units: Unit[] }>("GET", "/api/units");
-        const map = new Map<number, string>();
-        for (const u of data.units) {
-          map.set(u.id, `${u.property_name ?? "—"} · ${u.name}`);
-        }
-        setUnitLabels(map);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, [open]);
+  const unitLabels = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const u of units) {
+      map.set(u.id, `${u.property_name ?? "—"} · ${u.name}`);
+    }
+    return map;
+  }, [units]);
 
   return (
     <>
@@ -226,15 +225,17 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
           </div>
         </div>
         <DialogFooter className="mt-2">
-          {lease && (
+          {lease && canMutate && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
               Delete
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !unitId || !start || !end}>
-            {lease ? "Save changes" : "Create lease"}
-          </Button>
+          {canMutate && (
+            <Button type="button" onClick={save} disabled={saving || !unitId || !start || !end}>
+              {lease ? "Save changes" : "Create lease"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

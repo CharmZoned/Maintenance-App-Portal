@@ -44,6 +44,10 @@ export function TenantDialog({ open, onOpenChange, tenant, onSaved }: Props) {
 
   async function save() {
     if (!firstName.trim() || !lastName.trim()) return;
+    if (!email.trim()) {
+      app.setError("Email is required for tenants.");
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -133,15 +137,17 @@ export function TenantDialog({ open, onOpenChange, tenant, onSaved }: Props) {
           </div>
         </div>
         <DialogFooter className="mt-2">
-          {tenant && (
+          {tenant && app.canMutatePortfolio && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
               Delete
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !firstName.trim() || !lastName.trim()}>
-            {tenant ? "Save changes" : "Create tenant"}
-          </Button>
+          {app.canMutatePortfolio && (
+            <Button type="button" onClick={save} disabled={saving || !firstName.trim() || !lastName.trim()}>
+              {tenant ? "Save changes" : "Create tenant"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

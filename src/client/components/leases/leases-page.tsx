@@ -59,7 +59,7 @@ export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
       title="Leases"
       meta={`${leases.length} total · ${leases.filter((l) => l.status === "active").length} active`}
       actions={
-        leases.length > 0 ? (
+        app.canMutatePortfolio && leases.length > 0 ? (
           <Button onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
             <Plus className="h-4 w-4" /> New lease
           </Button>
@@ -89,7 +89,7 @@ export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
             <ClipboardList className="size-7 text-faint" aria-hidden />
             <p className="font-medium">No leases here</p>
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">{leases.length === 0 ? "Create your first lease to start collecting rent." : "Try a different filter."}</p>
-            {leases.length === 0 && (
+            {leases.length === 0 && app.canMutatePortfolio && (
               <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
                 <Plus className="mr-1 h-4 w-4" /> New lease
               </Button>
@@ -116,7 +116,7 @@ export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
                     <TableRow
                       key={l.id}
                       className="cursor-pointer"
-                      onClick={() => { setEditing(l); setDialogOpen(true); }}
+                      onClick={() => { if (!app.canMutatePortfolio) return; setEditing(l); setDialogOpen(true); }}
                     >
                       <TableCell>
                         {l.primary_tenant_id ? (

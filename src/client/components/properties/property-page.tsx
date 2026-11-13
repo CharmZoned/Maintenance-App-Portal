@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
-import { api } from "@/api";
 import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,8 +40,8 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   async function load() {
     try {
       setLoading(true);
-      const [{ property: p }, ulist, wlist] = await Promise.all([
-        api<{ property: Property }>("GET", `/api/properties/${id}`),
+      const [p, ulist, wlist] = await Promise.all([
+        app.getProperty(id),
         app.listUnits(id),
         app.listWorkOrders({ property_id: id }),
       ]);
@@ -114,11 +113,18 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                   {[property.address, property.city, property.state, property.zip].filter(Boolean).join(", ")}
                 </p>
               )}
+              {property.landlord_name && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Landlord: {property.landlord_name}
+                </p>
+              )}
             </div>
           </div>
-          <Button variant="outline" onClick={() => setEditingProperty(true)}>
-            <Pencil className="mr-1 h-4 w-4" /> Edit property
-          </Button>
+          {app.canMutatePortfolio && (
+            <Button variant="outline" onClick={() => setEditingProperty(true)}>
+              <Pencil className="mr-1 h-4 w-4" /> Edit property
+            </Button>
+          )}
         </header>
 
         <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -131,9 +137,11 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-[1.0625rem] font-semibold leading-tight">Units</h2>
-            <Button size="sm" onClick={() => { setEditingUnit(undefined); setUnitDialogOpen(true); }}>
-              <Plus className="mr-1 h-4 w-4" /> New unit
-            </Button>
+            {app.canMutatePortfolio && (
+              <Button size="sm" onClick={() => { setEditingUnit(undefined); setUnitDialogOpen(true); }}>
+                <Plus className="mr-1 h-4 w-4" /> New unit
+              </Button>
+            )}
           </div>
           {units.length === 0 ? (
             <Card className="p-8 text-center text-sm text-muted-foreground">
@@ -142,7 +150,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
               {units.map((u) => (
-                <Card key={u.id} className="cursor-pointer p-4 transition-colors duration-150 hover:bg-muted" onClick={() => { setEditingUnit(u); setUnitDialogOpen(true); }}>
+                <Card key={u.id} className={cn("p-4", app.canMutatePortfolio && "cursor-pointer transition-colors duration-150 hover:bg-muted")} onClick={() => { if (!app.canMutatePortfolio) return; setEditingUnit(u); setUnitDialogOpen(true); }}>
                   <div className="flex items-start justify-between">
                     <div>
                       <h3 className="font-semibold">{u.name}</h3>
@@ -172,9 +180,11 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
         <section>
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-[1.0625rem] font-semibold leading-tight">Work orders</h2>
-            <Button size="sm" variant="outline" onClick={() => setWoDialogOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> New work order
-            </Button>
+            {app.canCreateWorkOrders && (
+              <Button size="sm" variant="outline" onClick={() => setWoDialogOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" /> New work order
+              </Button>
+            )}
           </div>
           {workOrders.length === 0 ? (
             <Card className="p-8 text-center text-sm text-muted-foreground">No work orders for this property.</Card>

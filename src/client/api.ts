@@ -1,3 +1,8 @@
+/**
+ * @deprecated Phase 1 cutover: portfolio data goes through `src/client/lib/data.ts`
+ * (Supabase). This helper remains only for any leftover Hono/D1 paths; the client
+ * app no longer calls `/api` for staff portfolio screens.
+ */
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = { method, headers: {} };
   if (body !== undefined) {

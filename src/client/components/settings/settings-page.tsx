@@ -72,9 +72,11 @@ function VendorsTab() {
           <h2 className="text-sm font-semibold">Vendors</h2>
           <p className="text-xs text-muted-foreground">Plumbers, electricians, handymen, and other service providers.</p>
         </div>
-        <Button size="sm" onClick={() => { setEditing(undefined); setOpen(true); }}>
-          <Plus className="mr-1 h-4 w-4" /> Add vendor
-        </Button>
+        {app.canMutatePortfolio && (
+          <Button size="sm" onClick={() => { setEditing(undefined); setOpen(true); }}>
+            <Plus className="mr-1 h-4 w-4" /> Add vendor
+          </Button>
+        )}
       </div>
       {app.vendors.length === 0 ? (
         <div className="p-8 text-center text-sm text-muted-foreground">No vendors yet.</div>
@@ -95,9 +97,11 @@ function VendorsTab() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="neutral" className="capitalize">{v.category}</Badge>
+                  {app.canMutatePortfolio && (
                   <Button size="icon" variant="ghost" onClick={() => { setEditing(v); setOpen(true); }}>
                     <Pencil className="h-4 w-4" />
                   </Button>
+                  )}
                 </div>
               </li>
             );
@@ -223,15 +227,17 @@ function VendorDialog({
           </div>
         </div>
         <DialogFooter>
-          {vendor && (
+          {vendor && app.canMutatePortfolio && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
               <Trash2 className="mr-1 h-4 w-4" /> Delete
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !name.trim()}>
-            {vendor ? "Save changes" : "Create"}
-          </Button>
+          {app.canMutatePortfolio && (
+            <Button type="button" onClick={save} disabled={saving || !name.trim()}>
+              {vendor ? "Save changes" : "Create"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -307,7 +313,11 @@ function PolicyTab() {
         </div>
       </div>
       <div className="mt-4">
-        <Button onClick={save} disabled={saving}>Save settings</Button>
+        {app.canMutatePortfolio ? (
+          <Button onClick={save} disabled={saving}>Save settings</Button>
+        ) : (
+          <p className="text-xs text-muted-foreground">Only admins can change rent policy defaults.</p>
+        )}
       </div>
     </Card>
   );

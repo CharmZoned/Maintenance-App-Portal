@@ -48,17 +48,24 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const listUnits = app.listUnits;
+  const setError = app.setError;
+
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     (async () => {
       try {
-        const all = await app.listUnits();
-        setUnits(all);
+        const all = await listUnits();
+        if (!cancelled) setUnits(all);
       } catch (err) {
-        app.setError((err as Error).message);
+        if (!cancelled) setError((err as Error).message);
       }
     })();
-  }, [open, app]);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, listUnits, setError]);
 
   useEffect(() => {
     if (!open) return;
@@ -217,13 +224,17 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         </div>
 
         <DialogFooter className="mt-2">
-          {workOrder && (
+          {workOrder && app.canDeleteWorkOrders && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
               Delete
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !title.trim()}>
+          <Button
+            type="button"
+            onClick={save}
+            disabled={saving || !title.trim() || (!workOrder && !app.canCreateWorkOrders)}
+          >
             {workOrder ? "Save changes" : "Create work order"}
           </Button>
         </DialogFooter>
