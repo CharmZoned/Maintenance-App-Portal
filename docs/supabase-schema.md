@@ -58,15 +58,20 @@ Key columns: `property_name`, `street_address` NOT NULL, `city`/`state`/`zip` NO
 
 **RLS:** select for admin / owning landlord / tenant’s property / staff assigned via maintenance.  
 **Phase 1 added:** admin write; landlord update/insert for own `landlord_id`.  
-**LGA-19:** landlord insert/update policies **dropped** — landlords are **read-only** on Properties (admin write only).
+**LGA-19:** landlord insert/update policies **dropped** — landlords are **read-only** on Properties (admin write only).  
+**Privileges:** WS-A `authenticated` INSERT/UPDATE/DELETE (+ sequence) — see Landlords note.
 
 ### `Units`
 
 Key columns: `property_id` NOT NULL, `unit_label` NOT NULL, `bedrooms`, `bathrooms`, `status`, `management_status`, `occupancy_status`, `readiness_status`, `currently_being_marketed`, `sqft`, `market_rent`, dates, `notes`, `source_id`.
 
+**Privileges:** WS-A `authenticated` INSERT/UPDATE/DELETE (+ sequence) — see Landlords note.
+
 ### `Tenants`
 
 Key columns: `first_name`, `last_name`, `email` NOT NULL, `mobile_phone`, **`unit_id`** (Phase 1 migration: **nullable** so portfolio tenants can exist before lease assignment; was NOT NULL), `primary_on_lease`, `invite_to_app`, demographics, `notes`, `source_id`.
+
+**Privileges:** WS-A `authenticated` INSERT/UPDATE/DELETE (+ sequence) — see Landlords note.
 
 ### `Staff`
 
@@ -181,7 +186,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 **LGA-19:** `Applications` admin-only (not maintenance); landlords read-only on Properties + MaintenanceRequests UPDATE.  
 **Intentionally deferred:** `inquiries` (website service-role only).
 
-Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration).
+Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration). Table **privileges** for `Landlords`/`Properties`/`Units`/`Tenants` stayed SELECT-only until WS-A `20261114010000` (policies alone were not enough); `Staff` remains SELECT-only by design.
 
 ---
 

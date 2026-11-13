@@ -1,7 +1,7 @@
--- WS-A / B3+B5: restore authenticated DML that RLS already allows.
--- Live (and emulator baseline 20261012184126) left Landlords/Properties/Units/Tenants
--- SELECT-only and MaintenanceRequests without DELETE. Leases and PropertyDocuments
--- already have full DML — leave them alone.
+-- WS-A / B3+B5 (docs/parallel-work-plan.md): restore authenticated DML that RLS
+-- already allows. Live (and emulator baseline 20261012184126) left
+-- Landlords/Properties/Units/Tenants SELECT-only and MaintenanceRequests without
+-- DELETE. Leases and PropertyDocuments already have full DML — leave them alone.
 -- Policies (admin write / admin delete WO / non-admin deny) are unchanged.
 
 GRANT INSERT, UPDATE, DELETE ON TABLE
