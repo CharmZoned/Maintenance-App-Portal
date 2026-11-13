@@ -18,7 +18,9 @@ import type {
   WorkOrderStatus,
   Application,
   ApplicationStatus,
+  MaintenanceCategory,
 } from "../types";
+import { isMaintenanceCategory, isWorkOrderStatus } from "../types";
 import type { Tables } from "../types.supabase";
 
 type SbProperty = Tables<"Properties">;
@@ -291,18 +293,17 @@ export function mapWorkOrder(
 ): WorkOrder {
   const statusRaw = lowerStatus(row.status);
   const priorityRaw = lowerStatus(row.priority);
-  const statusMap: Record<string, WorkOrderStatus> = {
-    open: "open",
-    scheduled: "scheduled",
-    in_progress: "in_progress",
-    on_hold: "on_hold",
-    closed: "closed",
-    // Legacy D1 aliases (if any old rows / docs)
-    assigned: "scheduled",
+  // Display-only aliases for retired D1 labels — live CHECK forbids writing these.
+  // Map Assigned → open (not scheduled) so a staff save does not trip Accept & schedule.
+  const legacyStatusAlias: Record<string, WorkOrderStatus> = {
+    assigned: "open",
     completed: "closed",
     cancelled: "closed",
     canceled: "closed",
   };
+  const status: WorkOrderStatus = isWorkOrderStatus(statusRaw)
+    ? statusRaw
+    : (legacyStatusAlias[statusRaw] ?? "open");
   const priorityMap: Record<string, WorkOrderPriority> = {
     low: "low",
     normal: "normal",
@@ -320,7 +321,7 @@ export function mapWorkOrder(
     description: row.description,
     category: row.category || "General repair",
     priority: priorityMap[priorityRaw] ?? "normal",
-    status: statusMap[statusRaw] ?? "open",
+    status,
     permission_to_enter: Boolean(row.permission_to_enter),
     assigned_staff_id: row.assigned_staff_id,
     scheduled_at: row.scheduled_for,
@@ -341,12 +342,34 @@ export function mapWorkOrder(
   };
 }
 
-export function workOrderStatusToDb(status: WorkOrderStatus): string {
-  return WO_STATUS_TO_DB[status] ?? status;
+export function workOrderStatusToDb(status: WorkOrderStatus | string): string {
+  const key = lowerStatus(status);
+  if (!isWorkOrderStatus(key)) {
+    throw new Error(
+      `Invalid work order status "${status}". Use open / scheduled / in_progress / on_hold / closed.`,
+    );
+  }
+  return WO_STATUS_TO_DB[key];
 }
 
-export function workOrderPriorityToDb(priority: WorkOrderPriority): string {
-  return WO_PRIORITY_TO_DB[priority] ?? priority;
+export function workOrderPriorityToDb(priority: WorkOrderPriority | string): string {
+  const key = lowerStatus(priority) as WorkOrderPriority;
+  const mapped = WO_PRIORITY_TO_DB[key];
+  if (!mapped) {
+    throw new Error(`Invalid work order priority "${priority}". Use low / normal / high / urgent.`);
+  }
+  return mapped;
+}
+
+/** Live category CHECK — Title Case values from MAINTENANCE_CATEGORIES only. */
+export function maintenanceCategoryToDb(category: string): MaintenanceCategory {
+  const trimmed = category.trim();
+  if (!isMaintenanceCategory(trimmed)) {
+    throw new Error(
+      `Invalid maintenance category "${category}". Choose a value from the maintenance category list.`,
+    );
+  }
+  return trimmed;
 }
 
 const APP_STATUSES: ApplicationStatus[] = ["new", "screening", "approved", "declined", "withdrawn"];

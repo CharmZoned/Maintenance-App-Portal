@@ -8,7 +8,8 @@
     "dev:legacy-worker": "wrangler dev --port 8787",
     "db:migrate": "wrangler d1 execute open-property-db --local --file=src/server/schema.sql",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@clawnify/app": "^0.2.1",
@@ -45,6 +46,7 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0",
+    "vitest": "3.2.4",
     "wrangler": "^4.0.0"
   },
   "pnpm": {

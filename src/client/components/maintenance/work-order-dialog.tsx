@@ -253,6 +253,13 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       app.setError("Only admins can set the scheduled date.");
       return;
     }
+    if (
+      (app.isAdmin || !workOrder) &&
+      !MAINTENANCE_CATEGORIES.includes(category.trim() as (typeof MAINTENANCE_CATEGORIES)[number])
+    ) {
+      app.setError("Pick a current maintenance category before saving (legacy value is not allowed).");
+      return;
+    }
     setSaving(true);
     try {
       const payload: Parameters<typeof app.updateWorkOrder>[1] & { title: string } = {
@@ -261,7 +268,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         vendor_id: vendorId ? Number(vendorId) : null,
         title: title.trim(),
         description: description.trim() || null,
-        category,
+        // Non-admins cannot change category (protect trigger); omit to avoid rejecting legacy rows.
+        ...(app.isAdmin || !workOrder ? { category } : {}),
         priority,
         status,
         permission_to_enter: permission,
@@ -698,7 +706,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
             {(app.isTenant || app.isLandlord) && (
               <div className="flex items-center gap-2 text-sm">
                 <Badge variant="secondary" className="capitalize">
-                  {status.replace("_", " ")}
+                  {status.replaceAll("_", " ")}
                 </Badge>
                 <span className="text-muted-foreground">{category}</span>
                 {priority === "urgent" && <Badge variant="destructive">Emergency</Badge>}

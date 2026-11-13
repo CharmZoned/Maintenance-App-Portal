@@ -337,5 +337,9 @@ function StatusBadge({ status }: { status: string }) {
     on_hold: "outline",
     closed: "outline",
   };
-  return <Badge variant={(map[status] ?? "secondary") as never} className="capitalize">{status.replace("_", " ")}</Badge>;
+  return (
+    <Badge variant={(map[status] ?? "secondary") as never} className="capitalize">
+      {status.replaceAll("_", " ")}
+    </Badge>
+  );
 }

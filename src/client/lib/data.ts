@@ -14,6 +14,7 @@ import {
   unitStatusToDb,
   workOrderStatusToDb,
   workOrderPriorityToDb,
+  maintenanceCategoryToDb,
 } from "./mappers";
 import type {
   Landlord,
@@ -810,7 +811,7 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
     .insert({
       title: input.title,
       description: input.description?.trim() || input.title,
-      category: (input.category as string) || "General repair",
+      category: maintenanceCategoryToDb((input.category as string) || "General repair"),
       priority: workOrderPriorityToDb(input.priority ?? "normal"),
       status: "Open",
       property_id: input.property_id ?? null,
@@ -875,7 +876,7 @@ export async function submitTenantMaintenanceRequest(input: {
     .insert({
       title: input.title.trim(),
       description: input.description.trim(),
-      category: input.category,
+      category: maintenanceCategoryToDb(input.category),
       priority: workOrderPriorityToDb(input.priority ?? "normal"),
       status: "Open",
       property_id: unit.property_id,
@@ -909,7 +910,7 @@ export async function updateWorkOrder(
     // Never coerce empty description to title — protect_maintenance_request blocks non-admin description changes.
     if (next) row.description = next;
   }
-  if (patch.category !== undefined) row.category = patch.category;
+  if (patch.category !== undefined) row.category = maintenanceCategoryToDb(patch.category);
   if (patch.permission_to_enter !== undefined) row.permission_to_enter = patch.permission_to_enter;
   if (patch.priority !== undefined) row.priority = workOrderPriorityToDb(patch.priority);
   if (patch.status !== undefined) {

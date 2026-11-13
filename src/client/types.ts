@@ -153,6 +153,15 @@ export type WorkOrderPriority = "low" | "normal" | "high" | "urgent";
 /** Maps to live Supabase CHECK: Open | Scheduled | In Progress | On Hold | Closed */
 export type WorkOrderStatus = "open" | "scheduled" | "in_progress" | "on_hold" | "closed";
 
+/** Canonical UI statuses — map 1:1 to MaintenanceRequests_status_check via workOrderStatusToDb. */
+export const WORK_ORDER_STATUSES: WorkOrderStatus[] = [
+  "open",
+  "scheduled",
+  "in_progress",
+  "on_hold",
+  "closed",
+];
+
 export type MaintenanceCategory =
   | "Plumbing"
   | "Electrical"
@@ -167,6 +176,7 @@ export type MaintenanceCategory =
   | "General repair"
   | "Other";
 
+/** Canonical categories — must stay 1:1 with MaintenanceRequests_category_check. */
 export const MAINTENANCE_CATEGORIES: MaintenanceCategory[] = [
   "Plumbing",
   "Electrical",
@@ -181,6 +191,14 @@ export const MAINTENANCE_CATEGORIES: MaintenanceCategory[] = [
   "General repair",
   "Other",
 ];
+
+export function isMaintenanceCategory(value: string): value is MaintenanceCategory {
+  return (MAINTENANCE_CATEGORIES as string[]).includes(value);
+}
+
+export function isWorkOrderStatus(value: string): value is WorkOrderStatus {
+  return (WORK_ORDER_STATUSES as string[]).includes(value);
+}
 
 export type CommentVisibility = "tenant_visible" | "internal";
 
