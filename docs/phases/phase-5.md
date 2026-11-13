@@ -1,8 +1,8 @@
 # Phase 5 — Property documents (R5)
 
-**Status:** Stub — after Phase 3 (or when product prioritizes docs).
+**Status:** Planned — after Phase 3 (or when product prioritizes docs).
 
-**Goal:** Staff attach documents to property/unit with RLS.
+**Goal:** Staff attach documents to property/unit with RLS. Admin sets visibility `tenant` | `staff` | `landlord`.
 
 ## Agents
 

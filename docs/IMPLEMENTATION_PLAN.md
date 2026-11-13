@@ -1,265 +1,206 @@
 # Landlord Gopher — Phased Implementation Plan
 
-## Verified facts vs assumptions
+**Last revised:** 2026-11-13  
+**Tracker:** Cursor Project task list (this doc is the source of truth for scope; Project tasks mirror phases/requirements below).
 
-**Verified**
-- This repo ([maintenance-app-portal](https://github.com/charmzoned/maintenance-app-portal)) is **OpenProperty**: React 19 + Vite + Hono on **Cloudflare Workers + D1**, not Supabase. Nav title is already "LG Maintenance Portal". No `AGENTS.md`. No auth/login/session code. All `/api/*` routes are open. Schema in [`src/server/schema.sql`](src/server/schema.sql); routes in [`src/server/index.ts`](src/server/index.ts).
-- README lists public tenant/owner portals and email as **intentionally out of scope** for the Clawnify template — conflicts with your product requirements.
-- There is **no** `docs/` tracker in-repo (only `README.md`). Planning docs will be created as [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) after you approve this plan.
-- Marketing site [`LandlordGopherWebsite`](https://github.com/CharmZoned/LandlordGopherWebsite) is Next.js; uses Supabase only for `inquiries` (service-role insert; RLS on, no policies). Canonical site URL default `https://landlordgopher.com`.
-- Supabase project **Landlord Gopher** (`bgjkjtfgrfiszbzatriq`) already has empty domain tables: `Landlords`, `Properties` (with `landlord_id`), `Units`, `Tenants`, `Staff`, `Leases`, `LeaseTenants`, `RentCharges`, `Payments`, `Vendors`, `Applications`, `Settings`, `MaintenanceRequests` (+ photos/comments), `user_roles`, plus `inquiries`. Roles enum used in RLS: `admin` | `landlord` | `tenant` | `maintenance`. Private helpers exist (`current_role`, `handle_new_user`, etc.). Bucket `maintenance-photos` (private). Advisors: RLS enabled **without policies** on Applications, Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings, inquiries.
-- `Landlord-Gopher-Portal` GitHub repo is effectively empty ("read me test"). Mobile repo exists separately and is out of this plan unless you expand scope.
+## Status snapshot
 
-**Decisions (locked — you agreed with the plan)**
-- Reuse the **same** Supabase project as the website (`bgjkjtfgrfiszbzatriq`).
-- Keep this React portal UI; **replace D1/Hono** with Supabase client (Auth + PostgREST + Storage), adapting field names to the live schema.
-- MVP = **Phase 1 + Phase 2** (staff/admin + auth + approval); tenant maintenance = Phase 3; website CTA = Phase 4; documents = Phase 5; notifications = Phase 6.
-- Website integration MVP = nav/CTA links + shared Auth project (not SSO iframe in Phase 1).
-- "Account approval" is **user account** status (pending/approve/reject/suspend), **not** rental `Applications` records.
-- On execute: commit overall tracker to [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) plus per-phase agent briefs under [`docs/phases/`](docs/phases/).
-
-```mermaid
-flowchart LR
-  Website["landlordgopher.com"] -->|"CTA / login link"| Portal["LG Maintenance Portal"]
-  Portal --> Auth["Supabase Auth"]
-  Portal --> DB["Postgres + RLS"]
-  Portal --> Storage["maintenance-photos"]
-  Website -->|"service role"| Inquiries["inquiries"]
-  Auth --> Roles["user_roles"]
-  Roles --> DB
-```
-
----
-
-## Requirement map (R1–R8)
-
-Do not treat README checklists as done. Status is vs **this app’s code**, with Supabase schema noted separately.
-
-| ID | Description | Status | Evidence | Remaining work / acceptance |
-|----|-------------|--------|----------|-----------------------------|
-| **R1** Accounts and login | Missing in app | No users/passwords/sessions in portal; Supabase Auth exists platform-side; `user_roles` + `handle_new_user` in DB | Wire `@supabase/supabase-js`, signup/login/verify/reset/logout UI; map Auth user → `user_roles` + Staff/Landlord/Tenant row; AC: unauthenticated users cannot load portfolio data |
-| **R2** Account approval | Missing | No pending/approve/reject/suspend; `Applications` is rental applicants (API in Hono, **no UI**); Supabase `Applications` has RLS but no policies | Add `account_status` (or equivalent) + staff approval UI; do **not** overload rental Applications; AC: new accounts blocked until approved (except bootstrap admin) |
-| **R3** Properties and units | Partial in app; stronger in Supabase | App: CRUD properties/units + lease→tenant. No landlord entity in D1. Supabase: `Landlords` + `Properties.landlord_id` already | Point UI at Supabase; require landlord on property create; staff landlord management screens; AC: every property has landlord; units CRUD under property |
-| **R4** Maintenance requests | Partial | App work orders: description, priority, statuses open→cancelled; staff-only; no category/photos/history UI. Supabase: `MaintenanceRequests` with category, photos, comments, tenant insert RLS | Map work-order UI to Supabase model; tenant submit path; photo upload to bucket; status history (table or comment audit); AC: tenant submits with category+photos; staff updates status with trail |
-| **R5** Property documents | Missing | No documents table/routes/storage beyond maintenance photos | New `PropertyDocuments` (+ Storage bucket) + staff upload/list/download; AC: staff attach docs to property/unit with RLS |
-| **R6** Notifications | Missing | No email/push/in-app | Start with in-app + email on request create/status change (Resend/Supabase); push later; AC: staff alerted on new tenant request |
-| **R7** Permissions | Missing in app; partial in DB | All Hono routes unauthenticated. Supabase RLS present for landlords/properties/units/tenants/staff/maintenance/user_roles; **gaps** on leases/rent/vendors/settings/applications | Kill open D1 API or protect it; client uses user JWT; fill missing RLS; AC: role A cannot read role B’s rows |
-| **R8** Admin web portal | Partial | Dashboard, properties, tenants, leases, rent, maintenance, settings exist; no users/approvals/messages/documents; not staff-gated | Auth gate + role-based nav; user/approval admin; documents; optional messages; AC: only approved staff/admin reach admin routes |
-
-**Conflicts / outdated items**
-- Your gap table matches the **portal app**, but understates Supabase (landlords, category, photos, roles, RLS helpers already exist).
-- README “no public portals / no email” is obsolete for Landlord Gopher product goals.
-- Field naming differs (D1 `name` vs Supabase `property_name` / `unit_label`; work_orders vs MaintenanceRequests; status casing).
-
----
-
-## When multi-agent starts
-
-| Moment | What happens |
-|--------|----------------|
-| **Now (plan mode)** | Single coordinator iterates the plan. No feature agents. |
-| **On execute** | Coordinator commits Phase 0 docs, then **spawns Phase 1 agents** (first real multi-agent run). |
-| **Phase 1 complete + reviewed** | Coordinator opens Phase 2 agents (new workers / new stacked PRs). |
-| **Each later phase** | Same pattern: freeze inputs from prior phase → spawn role agents → Testing merges last → user review → next phase. |
-
-Multi-agent is **per phase**, not one forever-running swarm. The coordinator owns sequencing, PR stacking, and shared files (`docs/`, `src/client/api.ts`, migrations). Agents never start the next phase without a green Testing handoff and your go-ahead if the phase DoD needs product judgment.
+| Phase | Focus | Status |
+|-------|--------|--------|
+| **0** | Planning docs / schema tracker | **Done** (merged via PR #1) |
+| **1** | Auth, RLS, Supabase data cutover, landlords | **Done** (merged via PR #1; optional manual QA + small leftovers remain) |
+| **1.5** | Phase 1 follow-ups (UX AuthZ + lease-dialog) | **Next (small)** — before multi-staff production |
+| **2** | Account approval UI + Applications UI | **Next product phase** |
+| **3** | Tenant maintenance + photos + status history | Planned |
+| **4** | Website CTA + shared Auth links | Planned (can overlap Phase 2 once portal URL is stable) |
+| **5** | Property documents | Planned |
+| **6** | Email / push / messaging notifications | **Deferred** — use in-app popups/toasts for now |
 
 ```mermaid
 flowchart TB
-  Coord[Coordinator]
-  P0[Phase0_Docs]
-  P1[Phase1_MVP]
+  P0[Phase0_Docs_DONE]
+  P1[Phase1_MVP_DONE]
+  P15[Phase1_5_Followups]
   P2[Phase2_Approval]
   P3[Phase3_TenantMaint]
   P4[Phase4_Website]
   P5[Phase5_Documents]
-  P6[Phase6_Notify]
-  Coord --> P0 --> P1 --> P2 --> P3
+  P6[Phase6_Notify_DEFERRED]
+  P0 --> P1 --> P15 --> P2 --> P3 --> P5
   P1 -.->|portal URL ready| P4
-  P3 --> P5 --> P6
-  P4 -.->|can overlap after P1 auth| P2
+  P4 -.->|can overlap| P2
+  P3 -.->|deferred| P6
 ```
 
-Phase 4 (website CTA) may start in parallel with Phase 2 once Phase 1 has a stable portal URL and Auth project config — it does not need tenant maintenance.
+---
+
+## Verified facts (updated after Phase 0–1)
+
+**Verified**
+- Repo: [maintenance-app-portal](https://github.com/charmzoned/maintenance-app-portal) — React 19 + Vite; product path is **Supabase** (Auth + PostgREST + Storage), not D1.
+- Phase 0–1 merged to `master` (PR #1 / `cursor/phase0-phase1-mvp-8ed9`).
+- Client uses `@supabase/supabase-js` (`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`); open Hono `/api/*` returns **410**.
+- Live Supabase project **Landlord Gopher** (`bgjkjtfgrfiszbzatriq`) shared with marketing site.
+- `user_roles.account_status` (`pending|approved|rejected|suspended`); app gate + SQL helpers require `approved`.
+- Staff/admin portal: dashboard, landlords, properties, units, tenants, leases, rent, maintenance, vendors, settings against Supabase with RLS.
+- Marketing site [`LandlordGopherWebsite`](https://github.com/CharmZoned/LandlordGopherWebsite) still separate (Next.js); inquiries via service role.
+
+**Decisions (locked)**
+- Same Supabase project as the website.
+- Keep this React portal UI; D1/Hono is legacy (retired for product reads/writes).
+- MVP remaining = **Phase 2** (account approval + Applications UI).
+- "Account approval" = user `account_status`, **not** rental `Applications`.
+- **Defer messaging and notifications (email/push/in-app message center).** Near-term feedback = **web app popups/toasts/dialogs** only. Revisit as Phase 6 later.
+- Document visibility (when Phase 5 lands): admin sets `tenant` \| `staff` \| `landlord`.
+- Accept & schedule / OK maintenance orders: **admin only** (when richer WO UI lands).
+- Signup path (Phase 2): email signup → verification → `pending` until admin approves.
+
+---
+
+## Requirement map (R1–R8) — revised after Phase 0–1
+
+Status reflects **shipped portal code on `master`**, not the original gap table.
+
+| ID | Requirement | Status | Done in Phase 0–1 | Main gap / next phase |
+|----|-------------|--------|-------------------|----------------------|
+| **R1** | Accounts and login | **Partial** | Login, logout, password reset, session restore, role gate (`admin` / staff-linked) | Public signup + email-verify UX; richer role linking for landlord/tenant self-serve → **Phase 2** |
+| **R2** | Account approval | **Partial** | `account_status` column; unapproved users blocked in UI + RLS helpers | No admin Users queue (approve/reject/suspend); no Applications UI → **Phase 2** |
+| **R3** | Properties and units | **Done (staff MVP)** | Landlords CRUD; properties require `landlord_id`; units/tenants/leases on Supabase | Landlord self-serve portal later (out of MVP); keep polishing via normal CRUD |
+| **R4** | Maintenance requests | **Partial** | Staff work orders mapped to `MaintenanceRequests` on Supabase | Tenant submit; category/photos UI; status history; admin-only Accept & schedule → **Phase 3** (+ Nov 9 port if still needed) |
+| **R5** | Property documents | **Not started** | — | Upload/store/list with visibility → **Phase 5** |
+| **R6** | Notifications / messaging | **Deferred** | — | No email, push, or messaging. Use **popups/toasts** in the web app for operator feedback until Phase 6 is reopened |
+| **R7** | Permissions | **Mostly done** | Auth required; JWT client; RLS on core tables; D1 API retired | Applications RLS; leftover AuthZ UX for `maintenance` role mutates; optional FORCE RLS → **Phase 1.5 / 2** |
+| **R8** | Admin web portal | **Partial** | Staff/admin auth gate + portfolio screens | Users/approvals, Applications, documents; not a public unauthenticated dashboard anymore → **Phase 2** then **5** |
+
+---
+
+## Cursor Project task list (mirror these)
+
+Create/update Project tasks so the list tracks planned work (not the old “everything not started” gap table):
+
+| Task | Status category | Notes |
+|------|-----------------|-------|
+| Phase 0 — Planning docs | **Done** | Merged |
+| Phase 1 — Auth / RLS / Supabase / landlords | **Done** | Merged; manual QA checklist optional |
+| Phase 1.5 — Follow-ups (isAdmin mutate UI, lease-dialog, optional FORCE RLS) | Queued / next | See [`docs/phases/phase-2.md`](phases/phase-2.md) leftovers section once expanded |
+| Phase 2 — Account approval + Applications UI (R2, R8) | Queued | Next major product phase |
+| Phase 3 — Tenant maintenance + photos + history (R4) | Queued | After Phase 2 (or reorder if product prioritizes) |
+| Phase 4 — Website CTA + shared Auth (portal URL) | Queued | Can overlap Phase 2 |
+| Phase 5 — Property documents (R5) | Queued | After Phase 3 preferred |
+| Phase 6 — Email / push / messaging (R6) | **Canceled / Deferred** | Explicit hold; popups only for now |
+| R3 Properties & units (staff) | **Done** | Covered by Phase 1 |
+| R7 Permissions (core) | **Done** (with known leftovers in 1.5) | Covered by Phase 1 |
+
+Do **not** create active tasks for messaging threads or notification email until Phase 6 is deliberately reopened.
 
 ---
 
 ## Standing agent roles
 
-| Role id | Name | Owns | Forbidden without sync |
-|---------|------|------|------------------------|
-| **BE** | Supabase/Backend | `supabase/migrations/**`, RLS, Storage buckets, Auth triggers/Edge Functions, generated types | `src/client/components/**` UI |
-| **FE** | Frontend/Design | Auth screens, shell, CRUD pages, branding, `src/client/**` (except waiting on BE types) | Raw SQL / live DB writes |
-| **WEB** | Website integration | `LandlordGopherWebsite` nav/CTA, env, auth deep links | Portal schema or portal routes |
-| **QA** | Testing/Review | RLS SQL tests, manual/Playwright scripts, security checklist, “ready for review” note | Shipping feature commits without BE/FE DoD |
+| Role | Owns | Forbidden without sync |
+|------|------|------------------------|
+| **BE** | `supabase/migrations/**`, RLS, Storage, Auth helpers/RPCs, types | Portal UI components |
+| **FE** | Auth screens, shell, CRUD pages, `src/client/**` | Raw SQL / live DB writes |
+| **WEB** | `LandlordGopherWebsite` nav/CTA, env, deep links | Portal schema |
+| **QA** | Checklists, RLS verification, “ready for review” | Shipping features without BE/FE DoD |
 
-**Shared-file rules**
-- Only **BE** edits migrations; FE consumes `src/client/types.supabase.ts` (or equivalent) after BE typegen.
-- Only **one** agent owns `src/client/api.ts` / data hooks per PR stack step (usually FE after BE contract is merged or stacked underneath).
-- Branches: `cursor/phaseN-<topic>-8ed9`; stack child PRs on parent when dependent.
-- Each agent writes a short handoff in the phase doc checkboxes when done.
+Branches: `cursor/phaseN-<topic>-0924` (or existing `-8ed9` series). Stack dependent PRs.
 
 ---
 
-## Phase 0 — Planning tracker (coordinator only)
+## Phase 0 — Planning tracker — DONE
 
-- Write [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) (this overall plan + R1–R8 + decisions).
-- Write [`docs/supabase-schema.md`](docs/supabase-schema.md) (tables, RLS summary, helpers, bucket).
-- Write stubs [`docs/phases/phase-1.md`](docs/phases/phase-1.md) … `phase-6.md` (copy agent packages below).
-- **Agents:** none. **DoD:** docs committed; no feature/DB/deploy changes.
+- [`docs/IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md), [`docs/supabase-schema.md`](supabase-schema.md), [`docs/phases/`](phases/) committed and merged.
 
 ---
 
-## Phase 1 — MVP foundation (R1, R7, R8 core, R3) — agent detail
+## Phase 1 — MVP foundation (R1, R7, R8 core, R3) — DONE
 
-**Goal:** Staff/admin sign in and run the existing portfolio screens against Supabase with RLS; every property has a landlord; open D1 API is no longer the product path.
+**Delivered:** Staff/admin sign-in; portfolio screens on Supabase with RLS; landlords required on properties; client no longer calls `/api` for product data; `/api` → 410.
 
-### Phase 1 dependency graph
+**Evidence:** `src/client/lib/supabase.ts`, `data.ts`, `mappers.ts`, auth hooks/gate, `supabase/migrations/*`, [`docs/phases/phase-1.md`](phases/phase-1.md).
 
-```mermaid
-flowchart LR
-  BE1[BE_P1a_schema_RLS] --> BE2[BE_P1b_typegen_admin]
-  BE1 --> FE1[FE_P1a_auth_shell]
-  BE2 --> FE2[FE_P1b_data_layer]
-  FE1 --> FE2
-  FE2 --> FE3[FE_P1c_landlords_CRUD]
-  FE2 --> QA1[QA_P1_verify]
-  FE3 --> QA1
-```
+**Remaining (Phase 1.5, not Phase 2 product):**
+- Gate remaining portfolio mutate UI on `isAdmin` where `maintenance` role still sees CRUD that RLS denies.
+- Fix `lease-dialog` effect deps pattern.
+- Optional: payment ledger RPC, `FORCE ROW LEVEL SECURITY`, narrow `vendors_select`.
+- Manual QA checklist in phase-1.md (env + seeded admin).
 
-### Agent packages (spawn these workers)
-
-**1. BE — P1a Schema & RLS freeze** (starts first; blocks FE data work)
-- **Branch:** `cursor/phase1-supabase-rls-8ed9`
-- **Tasks:**
-  - Add `supabase/migrations/` to this repo mirroring live project; migration for `account_status` on `user_roles` (or `profiles`) with values `pending | approved | rejected | suspended` (Phase 2 will enforce UI; Phase 1 may treat missing status as approved for bootstrap admin only — document choice in migration comments).
-  - Add RLS policies for `Leases`, `LeaseTenants`, `RentCharges`, `Payments`, `Vendors`, `Settings` (admin/staff/landlord scoped using existing `private.*` helpers).
-  - Confirm `handle_new_user` / `assign_admin`; document how to bootstrap first admin.
-  - Do **not** change maintenance photo policies except as needed for staff admin path.
-- **Files:** `supabase/migrations/*`, `docs/supabase-schema.md` update.
-- **Acceptance:** Advisors no longer flag those tables as RLS-with-no-policy; SQL policy tests for admin vs landlord vs anon.
-- **Handoff to FE:** published column map D1→Supabase + typegen file.
-
-**2. FE — P1a Auth shell** (parallel with BE P1a after env vars known)
-- **Branch:** `cursor/phase1-auth-ui-8ed9` (stack on BE when integrating, or land independently if using mocks)
-- **Tasks:**
-  - Add `@supabase/supabase-js`; `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
-  - Screens: login, logout, password reset request/confirm, session restore.
-  - App shell: unauthenticated → login; authenticated but no `user_roles` → blocked message; role `admin` or staff-linked → existing nav.
-  - Branding pass: LG title already present; pull logo/colors from website assets where practical.
-- **Files:** `src/client/lib/supabase.ts`, auth components, `app.tsx` gate, env example.
-- **Acceptance:** Manual login/logout; refresh keeps session; anon never hits portfolio queries.
-- **Does not:** swap CRUD to Supabase yet (that is FE P1b).
-
-**3. BE — P1b Typegen & admin seed** (after P1a)
-- Generate TS types from Supabase; commit types.
-- Script or documented SQL to create first admin Auth user + `user_roles` + `Staff` row.
-- **Acceptance:** FE can import types; admin seed steps work in a fresh Auth user.
-
-**4. FE — P1b Data-layer cutover** (after BE P1a+P1b + FE P1a)
-- **Branch:** `cursor/phase1-supabase-data-8ed9` (stack on auth + RLS)
-- **Tasks:**
-  - Replace `src/client/api.ts` / `use-app-state` Hono fetches with Supabase queries/mutations matching current screens (properties, units, tenants, leases, rent, work orders→`MaintenanceRequests`, vendors, settings, dashboard).
-  - Mapping layer for field names (`name`→`property_name`, work order statuses ↔ `Open`/etc.).
-  - Leave Hono/D1 in repo but unused by client **or** remove routes in same PR if safe; prefer “client no longer calls `/api`” as MVP cut.
-- **Acceptance:** All existing staff screens read/write Supabase with signed-in admin; empty DB shows empty states (seed optional demo via `is_test_data`).
-
-**5. FE — P1c Landlords** (after or late-parallel with P1b)
-- Landlords list/detail/dialog; property create/edit **requires** `landlord_id`.
-- **Acceptance:** Cannot save property without landlord; landlord appears on property detail.
-
-**6. QA — P1 verify** (after FE P1b+P1c)
-- Checklist: anon 401/empty; admin full CRUD; landlord role only sees own properties (create test landlord user); no secret key in client; typecheck/build green.
-- Write results into `docs/phases/phase-1.md`.
-- **Phase 1 DoD:** Staff/admin signed-in portal on Supabase with landlord-linked properties; D1 not required for those flows; QA checklist signed off.
-
-**Phase 1 out of scope:** approval queue UI (Phase 2), tenant submit (Phase 3), website repo edits (Phase 4), documents, notifications.
+**Out of scope (still later phases):** approval queue UI, tenant submit, website repo, documents, notifications.
 
 ---
 
-## Phase 2 — Account approval + Applications UI (R2, R8)
+## Phase 2 — Account approval + Applications UI (R2, R8) — NEXT
 
-**Agents:** BE (status enforcement + admin RPCs/policies) → FE (approval queue + Applications screens) → QA.
+**Already from Phase 1 (do not rebuild):** `account_status`; app `unapproved` gate; SQL helpers require `approved`.
 
 | Step | Agent | Work |
 |------|-------|------|
-| P2a | BE | Enforce `account_status`: pending users blocked by RLS or Edge gate; admin-only update policies; optional `approve_user` RPC |
-| P2b | FE | Admin “Users” page: pending / approve / reject / suspend; signup lands in pending |
-| P2c | FE | Applications list/detail (rental applicants) — clearly labeled; not the approval queue |
-| P2d | QA | Pending cannot load data; approve unlocks; reject/suspend stick |
+| P2a | BE | Admin-only status update policies/RPC; Applications read/write RLS |
+| P2b | FE | Admin Users page: pending / approve / reject / suspend; signup → pending (+ email verify) |
+| P2c | FE | Applications list/detail (rental applicants) — clearly labeled |
+| P2d | QA | Pending blocked; approve unlocks; reject/suspend stick |
 
-**Parallel:** P2c Applications UI can run beside P2b once read policies exist.  
-**DoD:** Pending users cannot use portal; staff can approve; Applications UI separate from account approval.
+**DoD:** Pending users cannot use portal; admin can approve; Applications UI ≠ account approval.  
+**Detail:** [`docs/phases/phase-2.md`](phases/phase-2.md)
 
 ---
 
 ## Phase 3 — Tenant maintenance + photos (R4, R7)
 
-**Agents:** BE (status history if missing; storage path rules) ‖ FE (tenant route group + staff photo/category UX) → QA.
-
 | Step | Agent | Work |
 |------|-------|------|
-| P3a | BE | Confirm tenant insert RLS; photo bucket policies; add `MaintenanceRequestStatusHistory` **or** document comment-based audit |
-| P3b | FE | Tenant shell: submit request (category, description, permission_to_enter, photos); list own requests |
-| P3c | FE | Staff maintenance UI: category, photos, comments (tenant_visible vs internal), status transitions via mapping layer |
-| P3d | QA | Tenant cannot see other units; staff sees assigned/owned; photo upload/download works |
+| P3a | BE | Tenant insert RLS; photo bucket; status history **or** comment audit |
+| P3b | FE | Tenant shell: submit (category, description, permission_to_enter, photos); list own |
+| P3c | FE | Staff maintenance UI: category, photos, comments, status; admin-only Accept & schedule |
+| P3d | QA | Tenant isolation; staff scope; photo upload/download |
 
-**DoD:** Tenant submits with photo; staff updates status with visible trail; comments respect visibility.
+**DoD:** Tenant submits with photo; staff status trail; comments visibility respected.  
+Near-term alerts = **in-app popups**, not email/push.
 
 ---
 
 ## Phase 4 — Website integration
 
-**Agents:** WEB primary; FE only if portal needs return-URL/login branding; QA smoke on both hosts.
-
 | Step | Agent | Work |
 |------|-------|------|
-| P4a | WEB | CTA in header/footer → `NEXT_PUBLIC_PORTAL_URL`; copy for “Staff / Tenant login” |
-| P4b | FE | Login page accepts `?redirect=` / branded shell consistent with site |
-| P4c | QA | From landlordgopher.com → portal login → session on shared Auth project |
+| P4a | WEB | CTA → `NEXT_PUBLIC_PORTAL_URL`; Staff / Tenant login copy |
+| P4b | FE | Login `?redirect=` / branding aligned with site |
+| P4c | QA | Site → portal login → shared Auth session |
 
-**Start when:** Phase 1 portal URL + Auth env are stable (can overlap Phase 2).  
-**DoD:** Marketing site links to live portal; shared Auth login works.
+**Start when:** Phase 1 portal URL + Auth env stable (may overlap Phase 2).
 
 ---
 
 ## Phase 5 — Property documents (R5)
 
-**Agents:** BE (table + bucket + RLS) → FE (property/unit documents panel) → QA.
-
 | Step | Agent | Work |
 |------|-------|------|
-| P5a | BE | `PropertyDocuments` table; private `property-documents` bucket; staff/admin/landlord policies |
+| P5a | BE | `PropertyDocuments` + private bucket; admin visibility `tenant`\|`staff`\|`landlord` |
 | P5b | FE | Upload/list/download on property (and unit if linked) |
-| P5c | QA | Tenant cannot read staff-only docs; landlord scoped |
-
-**DoD:** Staff attach docs to property/unit with RLS.
+| P5c | QA | Tenant only reads tenant-visible docs; landlord scoped |
 
 ---
 
-## Phase 6 — Notifications (R6)
+## Phase 6 — Notifications & messaging (R6) — DEFERRED
 
-**Agents:** BE (trigger/Edge Function + email provider) → FE (optional in-app bell) → QA.
+**Hold:** email alerts, push, in-app message center, staff↔tenant/landlord messaging threads.
 
-| Step | Agent | Work |
-|------|-------|------|
-| P6a | BE | On MaintenanceRequests insert/status change → email staff where `gets_request_alerts`; secrets in host env |
-| P6b | FE | Optional in-app notification list (DB table if needed) |
-| P6c | QA | Alert fires once per event; disabled flag respected |
+**Interim:** use existing web UI patterns (dialogs, toasts, confirm popups) for staff feedback.
 
-**DoD:** Configurable staff email alerts on new/updated requests; push deferred.
+When reopened: Edge Function/email for maintenance create/status change; optional in-app list; messaging as a separate design (not WO comments).
 
 ---
 
-## Coordinator runbook (execute time)
+## Coordinator runbook (current)
 
-1. Phase 0 docs PR → merge.
-2. Spawn **BE P1a** + **FE P1a** in parallel.
-3. On BE P1a merge: spawn **BE P1b**, then **FE P1b** (stacked), then **FE P1c**, then **QA P1**.
-4. User reviews Phase 1 → spawn Phase 2 agents (and optionally Phase 4 WEB).
-5. Continue Phase 3 → 5 → 6 with the same BE→FE→QA pattern.
+1. ~~Phase 0–1~~ **Done** (merged).
+2. Sync **Cursor Project tasks** to the table above (mark 0/1/R3/R7-core done; defer Phase 6).
+3. Optional **Phase 1.5** follow-up PR, then spawn **Phase 2** agents (P2a → P2b ‖ P2c → P2d).
+4. Optionally start **Phase 4** once a stable portal URL exists.
+5. Continue Phase 3 → 5; leave Phase 6 parked until product asks to reopen.
 
-**Open questions still useful (non-blocking for Phase 1):**
-1. Portal host target (Cloudflare Pages vs Vercel) — recommend Cloudflare Pages next to current Workers setup; tradeoff: website is Next.js/Vercel-friendly.
-2. Email provider for Phase 6 (Resend vs Supabase) — recommend Resend; tradeoff: extra vendor vs built-in limits.
-3. Tenant UI in same SPA vs subdomain — recommend same SPA with role-based routes for MVP.
+**Open questions (non-blocking):**
+1. Portal host (Cloudflare Pages vs Vercel).
+2. Public signup vs invite-only for staff (Phase 2).
+3. Tenant UI in same SPA vs subdomain (recommend same SPA + role routes).

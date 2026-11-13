@@ -1,8 +1,9 @@
 # Phase 1 — MVP foundation (R1, R7, R8 core, R3)
 
+**Status:** **Done** (merged to `master` via PR #1 / `cursor/phase0-phase1-mvp-8ed9`).  
 **Goal:** Staff/admin sign in and run portfolio screens against Supabase with RLS; every property has a landlord; client no longer calls `/api` for those flows.
 
-**Out of scope:** Account approval UI (Phase 2), tenant submit (Phase 3), website repo (Phase 4), documents, notifications.
+**Out of scope:** Account approval UI (Phase 2), tenant submit (Phase 3), website repo (Phase 4), documents, notifications (deferred — use popups).
 
 ---
 
