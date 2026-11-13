@@ -159,7 +159,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 
 **Phase 1 addresses:** Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings (+ admin write policies on core portfolio tables).  
 **Phase 1.5:** `FORCE ROW LEVEL SECURITY` on those same Phase 1 tables; `vendors_select` staff/admin-only; payment ledger RPCs.  
-**Phase 2 addresses:** `Applications` staff/admin policies + FORCE RLS; account approval RPCs.  
+**Phase 2 addresses:** `Applications` FORCE RLS + policies; account approval RPCs.  
+**LGA-19:** `Applications` admin-only (not maintenance); landlords read-only on Properties + MaintenanceRequests UPDATE.  
 **Intentionally deferred:** `inquiries` (website service-role only).
 
 Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration).

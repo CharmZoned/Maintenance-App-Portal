@@ -3,6 +3,7 @@
 -- - Landlords: no UPDATE on MaintenanceRequests (cannot close/edit WOs; SELECT kept)
 -- - Applications: admin-only CRUD (maintenance staff must not read income/PII)
 -- Does not alter inquiries, use-auth gate, or landlord portal shell (LGA-18).
+-- Follow-up 20261113240100 switches UPDATE policy to call can_update_maintenance_request.
 
 -- ── Properties: landlord write → drop ─────────────────────────────
 DROP POLICY IF EXISTS properties_landlord_insert ON public."Properties";
@@ -12,7 +13,6 @@ COMMENT ON TABLE public."Properties" IS
   'Portfolio properties. SELECT: admin / owning landlord / tenant property / assigned staff. WRITE: admin only (landlords read-only).';
 
 -- ── MaintenanceRequests: landlord update → drop ───────────────────
--- Recreate update policy without landlord branch (admin + assigned maintenance only).
 DROP POLICY IF EXISTS maintenance_requests_update ON public."MaintenanceRequests";
 CREATE POLICY maintenance_requests_update ON public."MaintenanceRequests"
   FOR UPDATE

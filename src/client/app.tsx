@@ -33,10 +33,11 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
-  { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
 ];
+/** Admin-only: Users queue + rental Applications (applicant income PII). */
 const ADMIN_ITEMS: AppNavItem[] = [
   { id: "users", label: "Users", href: "/users", icon: "users", color: "violet" },
+  { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
 const TENANT_NAV: AppNavItem[] = [
@@ -64,9 +65,6 @@ export function App() {
     auth.gate.role.tenant_id != null;
   const state = useAppState(ready, { isAdmin, isTenant });
   const { path, route, navigate } = useRouter();
-  const operationsNav = isAdmin
-    ? OPERATIONS
-    : OPERATIONS.filter((i) => i.id !== "applications");
 
   useEffect(() => {
     if (ready) reportLocation(path);
@@ -196,7 +194,7 @@ export function App() {
     ? [{ items: TENANT_NAV }]
     : [
         { items: PORTFOLIO },
-        { label: "Operations", items: operationsNav },
+        { label: "Operations", items: OPERATIONS },
         { label: "Admin", items: adminNav },
       ];
 
