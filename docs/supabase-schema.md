@@ -54,7 +54,8 @@ Key columns: `id`, `source_id`, `first_name`, `last_name`, `company_name`, `emai
 Key columns: `property_name`, `street_address` NOT NULL, `city`/`state`/`zip` NOT NULL, `property_type` NOT NULL, **`landlord_id` NOT NULL**, `management_status`, `occupancy_status`, `management_end_date`, `year_built`, `color`, `notes`, `source_id`, `is_test_data`.
 
 **RLS:** select for admin / owning landlord / tenant’s property / staff assigned via maintenance.  
-**Phase 1 adds:** admin write; landlord update/insert for own `landlord_id`.
+**Phase 1 added:** admin write; landlord update/insert for own `landlord_id`.  
+**LGA-19:** landlord insert/update policies **dropped** — landlords are **read-only** on Properties (admin write only).
 
 ### `Units`
 
@@ -99,15 +100,17 @@ Rental applicants (not account approval). Do not confuse with `user_roles.accoun
 
 Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_income`, `employer`, `desired_move_in`, `status` (default `new`: `new|screening|approved|declined|withdrawn`), `notes`, `is_test_data`.
 
-**Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.
+**Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.  
+**LGA-19:** narrowed to **admin-only** SELECT/INSERT/UPDATE/DELETE (maintenance staff must not read applicant income / PII).
 
 ### `MaintenanceRequests` (+ Photos, Comments, StatusHistory)
 
 Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category` (Title Case enum), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
 
-Policies cover select/insert/update for admin, tenant submit, landlord, assigned maintenance staff. Photo + comment + storage bucket policies exist.
+Policies cover select for admin / submitter tenant / assigned staff / owning landlord; insert for admin or scoped tenant; update for admin or assigned maintenance. Photo + comment + storage bucket policies exist.
 
-**Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).
+**Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).  
+**LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).
 
 ### `inquiries`
 

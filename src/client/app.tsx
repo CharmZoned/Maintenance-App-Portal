@@ -64,6 +64,9 @@ export function App() {
     auth.gate.role.tenant_id != null;
   const state = useAppState(ready, { isAdmin, isTenant });
   const { path, route, navigate } = useRouter();
+  const operationsNav = isAdmin
+    ? OPERATIONS
+    : OPERATIONS.filter((i) => i.id !== "applications");
 
   useEffect(() => {
     if (ready) reportLocation(path);
@@ -193,7 +196,7 @@ export function App() {
     ? [{ items: TENANT_NAV }]
     : [
         { items: PORTFOLIO },
-        { label: "Operations", items: OPERATIONS },
+        { label: "Operations", items: operationsNav },
         { label: "Admin", items: adminNav },
       ];
 
@@ -241,7 +244,15 @@ export function App() {
               {route.name === "leases" && <LeasesPage navigate={navigate} />}
               {route.name === "rent" && <RentPage />}
               {route.name === "maintenance" && <MaintenancePage />}
-              {route.name === "applications" && <ApplicationsPage />}
+              {route.name === "applications" &&
+                (isAdmin ? (
+                  <ApplicationsPage />
+                ) : (
+                  <Placeholder
+                    title="Admins only"
+                    message="Rental applications include applicant income and other PII — admins only."
+                  />
+                ))}
               {route.name === "users" &&
                 (isAdmin ? (
                   <UsersPage />
