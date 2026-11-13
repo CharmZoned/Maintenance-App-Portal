@@ -4,6 +4,9 @@ import {
   mapUnit,
   mapWorkOrder,
   propertyToInsert,
+  propertyTypeFromDb,
+  propertyTypeToDb,
+  unitReadinessToDb,
   unitStatusToDb,
   workOrderPriorityToDb,
   workOrderStatusToDb,
@@ -95,15 +98,56 @@ describe("[R4] work order field mapping (database ↔ screen)", () => {
 describe("[R3] property and unit field mapping", () => {
   test("a new property gets placeholder address fields the database will accept", () => {
     const row = propertyToInsert({ name: "Maple Court", landlord_id: 4 });
-    expect(row).toMatchObject({ property_name: "Maple Court", landlord_id: 4, color: "sky" });
+    expect(row).toMatchObject({
+      property_name: "Maple Court",
+      landlord_id: 4,
+      color: "sky",
+      property_type: "Single-family",
+    });
     expect(row.state).toMatch(/^[A-Z]{2}$/);
     expect(row.zip).toMatch(/^[0-9]{5}$/);
     expect(row.street_address.length).toBeGreaterThan(0);
   });
 
-  test("unit status words map to the database's capitalised words", () => {
+  test.each([
+    ["single_family", "Single-family"],
+    ["multi_family", "Multi-family"],
+    ["condo", "Condo"],
+    ["townhouse", "Townhouse"],
+    ["apartment_building", "Apartment building"],
+    ["commercial", "Commercial"],
+    ["other", "Other"],
+  ] as const)("property type %s maps to CHECK value %s", (ui, db) => {
+    expect(propertyTypeToDb(ui)).toBe(db);
+    expect(propertyToInsert({ name: "X", type: ui, landlord_id: 1 }).property_type).toBe(db);
+    expect(propertyTypeFromDb(db)).toBe(ui);
+  });
+
+  test("hyphenated property type labels round-trip", () => {
+    expect(propertyTypeFromDb("multi-family")).toBe("multi_family");
+    expect(propertyTypeFromDb("Single-family")).toBe("single_family");
+    expect(propertyTypeToDb("multi-family")).toBe("Multi-family");
+    expect(propertyTypeToDb("Apartment building")).toBe("Apartment building");
+  });
+
+  test("unit occupancy words map to the database's capitalised words", () => {
     expect(unitStatusToDb("vacant")).toBe("Vacant");
     expect(unitStatusToDb("occupied")).toBe("Occupied");
+  });
+
+  test("retired turnover/unavailable statuses are refused (use readiness instead)", () => {
+    expect(() => unitStatusToDb("turnover")).toThrow(/invalid unit status/i);
+    expect(() => unitStatusToDb("unavailable")).toThrow(/invalid unit status/i);
+  });
+
+  test.each([
+    ["ready", "Ready"],
+    ["turnover_needed", "Turnover Needed"],
+    ["turnover_in_progress", "Turnover In Progress"],
+    ["rehab_needed", "Rehab Needed"],
+    ["rehab_in_progress", "Rehab In Progress"],
+  ] as const)("unit readiness %s maps to CHECK value %s", (ui, db) => {
+    expect(unitReadinessToDb(ui)).toBe(db);
   });
 
   test("a unit row is shaped for the screens", () => {
@@ -116,10 +160,18 @@ describe("[R3] property and unit field mapping", () => {
       sqft: 700,
       market_rent: "1450",
       status: "Occupied",
+      readiness_status: "Turnover Needed",
       notes: null,
       created_at: "2026-11-01T10:00:00+00:00",
     } as unknown as Tables<"Units">);
-    expect(unit).toMatchObject({ name: "1A", bedrooms: 0, bathrooms: 1.5, market_rent: 1450, status: "occupied" });
+    expect(unit).toMatchObject({
+      name: "1A",
+      bedrooms: 0,
+      bathrooms: 1.5,
+      market_rent: 1450,
+      status: "occupied",
+      readiness_status: "turnover_needed",
+    });
   });
 });
 

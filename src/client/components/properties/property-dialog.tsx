@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Property, PropertyType } from "@/types";
+import { PROPERTY_TYPE_LABELS, PROPERTY_TYPES, type Property, type PropertyType } from "@/types";
 
 interface Props {
   open: boolean;
@@ -16,13 +16,10 @@ interface Props {
   onSaved?: (p: Property) => void;
 }
 
-const TYPES: { value: PropertyType; label: string }[] = [
-  { value: "single_family", label: "Single-family home" },
-  { value: "multi_family", label: "Multi-family / apartments" },
-  { value: "condo", label: "Condo" },
-  { value: "townhouse", label: "Townhouse" },
-  { value: "commercial", label: "Commercial" },
-];
+const TYPES: { value: PropertyType; label: string }[] = PROPERTY_TYPES.map((value) => ({
+  value,
+  label: value === "single_family" ? "Single-family home" : PROPERTY_TYPE_LABELS[value],
+}));
 
 const COLORS = ["sky", "emerald", "amber", "rose", "violet", "fuchsia", "teal", "orange", "slate"];
 
