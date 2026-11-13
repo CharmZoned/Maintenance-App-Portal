@@ -101,11 +101,13 @@ Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_in
 
 **Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.
 
-### `MaintenanceRequests` (+ Photos, Comments)
+### `MaintenanceRequests` (+ Photos, Comments, StatusHistory)
 
-Staff/tenant maintenance model. Status defaults use Title Case (`Open`, etc.). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category`, `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
+Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category` (Title Case enum), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
 
-Policies already cover select/insert/update for admin, tenant submit, landlord, assigned maintenance staff. Photo + comment policies exist; storage bucket policies exist.
+Policies cover select/insert/update for admin, tenant submit, landlord, assigned maintenance staff. Photo + comment + storage bucket policies exist.
+
+**Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).
 
 ### `inquiries`
 
@@ -173,8 +175,11 @@ Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `S
 | unit status `vacant`/`occupied`/… | often Title Case in live data (`Vacant`/`Occupied`); mapping layer normalizes |
 | `tenants.phone` | `Tenants.mobile_phone` |
 | `work_orders` | `MaintenanceRequests` |
-| work order status `open` | `Open` (and `assigned`→`Assigned`, `in_progress`→`In Progress`, `completed`→`Completed`, `cancelled`→`Cancelled`) |
+| work order status `open` / `scheduled` / `in_progress` / `on_hold` / `closed` | `Open` / `Scheduled` / `In Progress` / `On Hold` / `Closed` |
 | work order priority `normal` | `Normal` (etc.) |
+| (photos) | `MaintenanceRequestPhotos` + storage `maintenance-photos` (`{requestId}/…`) |
+| (comments) | `MaintenanceRequestComments` |
+| (status trail) | `MaintenanceRequestStatusHistory` |
 | `settings` table | `Settings` |
 
 ---
@@ -190,7 +195,7 @@ select private.assign_admin('you@example.com');
 -- assign_admin sets role=admin and account_status=approved
 ```
 
-4. Sign in on the portal with that user. Role must be `admin` (or `maintenance` with `staff_id`) to pass the app gate.
+4. Sign in on the portal with that user. Role must be `admin`, `maintenance` with `staff_id`, or (Phase 3) `tenant` with `tenant_id` to pass the app gate.
 
 **Choice documented:** New rows default to `pending`. Helpers + portal gate require `approved`. Bootstrap via `assign_admin` sets `approved`. Phase 2 admins use Users page / `set_account_status` instead of raw SQL for day-to-day approval.
 

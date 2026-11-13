@@ -5,6 +5,7 @@ import { useAuth } from "./hooks/use-auth";
 import { useRouter, type Route } from "./hooks/use-router";
 import { AppContext } from "./context";
 import { ErrorBanner } from "./components/error-banner";
+import { NoticeBanner } from "./components/notice-banner";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { PropertiesList } from "./components/properties/properties-list";
 import { PropertyPage } from "./components/properties/property-page";
@@ -38,6 +39,9 @@ const ADMIN_ITEMS: AppNavItem[] = [
   { id: "users", label: "Users", href: "/users", icon: "users", color: "violet" },
   { id: "settings", label: "Settings", href: "/settings", icon: "settings" },
 ];
+const TENANT_NAV: AppNavItem[] = [
+  { id: "maintenance", label: "My requests", href: "/maintenance", home: true, icon: "list-checks", color: "orange" },
+];
 
 function activeFor(route: Route): string {
   if (route.name === "property") return "properties";
@@ -54,7 +58,11 @@ export function App() {
   );
   const ready = auth.gate.state === "ready";
   const isAdmin = auth.gate.state === "ready" && auth.gate.role.role === "admin";
-  const state = useAppState(ready, { isAdmin });
+  const isTenant =
+    auth.gate.state === "ready" &&
+    auth.gate.role.role === "tenant" &&
+    auth.gate.role.tenant_id != null;
+  const state = useAppState(ready, { isAdmin, isTenant });
   const { path, route, navigate } = useRouter();
 
   useEffect(() => {
@@ -66,6 +74,13 @@ export function App() {
       setAuthScreen("reset-confirm");
     }
   }, []);
+
+  useEffect(() => {
+    if (!ready || !isTenant) return;
+    if (route.name !== "maintenance") {
+      navigate("/maintenance");
+    }
+  }, [ready, isTenant, route.name, navigate]);
 
   if (auth.gate.state === "loading") {
     return (
@@ -151,8 +166,8 @@ export function App() {
   if (auth.gate.state === "forbidden") {
     return (
       <BlockedPage
-        title="Staff access required"
-        message={`Signed in as ${auth.gate.role.role}. This portal is for admin and maintenance staff. Tenant/landlord portals come in later phases.`}
+        title="Access required"
+        message={`Signed in as ${auth.gate.role.role}. This portal is for admin, maintenance staff, or linked tenants. Landlord self-serve comes later.`}
         onLogout={() => void auth.logout()}
       />
     );
@@ -165,31 +180,33 @@ export function App() {
         error={auth.authError}
         onSubmit={auth.updatePassword}
         onDone={() => {
-          window.history.replaceState(null, "", "/dashboard");
+          window.history.replaceState(null, "", isTenant ? "/maintenance" : "/dashboard");
           setAuthScreen("login");
-          navigate("/dashboard");
+          navigate(isTenant ? "/maintenance" : "/dashboard");
         }}
       />
     );
   }
 
   const adminNav = isAdmin ? ADMIN_ITEMS : ADMIN_ITEMS.filter((i) => i.id === "settings");
-  const groups = [
-    { items: PORTFOLIO },
-    { label: "Operations", items: OPERATIONS },
-    { label: "Admin", items: adminNav },
-  ];
+  const groups = isTenant
+    ? [{ items: TENANT_NAV }]
+    : [
+        { items: PORTFOLIO },
+        { label: "Operations", items: OPERATIONS },
+        { label: "Admin", items: adminNav },
+      ];
 
   return (
     <AppContext.Provider value={state}>
       <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row">
         <div className="flex shrink-0">
           <AppNav
-            title="LG Maintenance Portal"
+            title={isTenant ? "LG Tenant Portal" : "LG Maintenance Portal"}
             icon="home"
             groups={groups}
             active={activeFor(route)}
-            onNavigate={(item) => navigate(item.href ?? "/dashboard")}
+            onNavigate={(item) => navigate(item.href ?? (isTenant ? "/maintenance" : "/dashboard"))}
           />
         </div>
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -206,6 +223,13 @@ export function App() {
             <div className="flex flex-1 items-center justify-center text-muted-foreground">
               Loading…
             </div>
+          ) : isTenant ? (
+            <>
+              {route.name === "maintenance" && <MaintenancePage />}
+              {route.name !== "maintenance" && (
+                <Placeholder title="Tenant portal" message="Use My requests to submit and track maintenance." />
+              )}
+            </>
           ) : (
             <>
               {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
@@ -235,6 +259,7 @@ export function App() {
           )}
         </main>
         <ErrorBanner />
+        <NoticeBanner />
       </div>
     </AppContext.Provider>
   );

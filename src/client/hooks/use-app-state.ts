@@ -45,16 +45,29 @@ function parseSettings(raw: Record<string, string>): AppSettings {
   };
 }
 
-export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
+export function useAppState(
+  enabled: boolean,
+  opts?: { isAdmin?: boolean; isTenant?: boolean },
+) {
   const isAdmin = opts?.isAdmin ?? false;
+  const isTenant = opts?.isTenant ?? false;
   const [properties, setProperties] = useState<Property[]>([]);
   const [landlords, setLandlords] = useState<Landlord[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refreshLookups = useCallback(async () => {
+    if (isTenant) {
+      // Tenant shell only needs maintenance; soft-fail portfolio reads.
+      setProperties([]);
+      setVendors([]);
+      setLandlords([]);
+      setSettings(DEFAULT_SETTINGS);
+      return;
+    }
     const [props, vens, st, lls] = await Promise.all([
       data.listProperties(),
       data.listVendors().catch(() => [] as Vendor[]),
@@ -65,7 +78,7 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     setVendors(vens);
     setSettings(parseSettings(st));
     setLandlords(lls);
-  }, []);
+  }, [isTenant]);
 
   useEffect(() => {
     if (!enabled) {
@@ -237,9 +250,24 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     return data.createWorkOrder(input);
   }, [isAdmin]);
 
-  const updateWorkOrder = useCallback(async (id: number, patch: Partial<NewWorkOrder>) => {
-    return data.updateWorkOrder(id, patch);
-  }, []);
+  const submitTenantRequest = useCallback(
+    async (input: Parameters<typeof data.submitTenantMaintenanceRequest>[0]) => {
+      if (!isTenant) throw new Error("Only tenants can use tenant submit.");
+      return data.submitTenantMaintenanceRequest(input);
+    },
+    [isTenant],
+  );
+
+  const updateWorkOrder = useCallback(
+    async (
+      id: number,
+      patch: Partial<NewWorkOrder>,
+      opts?: { previousStatus?: WorkOrder["status"] },
+    ) => {
+      return data.updateWorkOrder(id, patch, opts);
+    },
+    [],
+  );
 
   const deleteWorkOrder = useCallback(async (id: number) => {
     if (!isAdmin) throw new Error("Only admins can delete maintenance requests.");
@@ -278,11 +306,14 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
 
   return {
     isAdmin,
+    isTenant,
     /** Portfolio create/update/delete (landlords, properties, rent, vendors, settings, …). */
     canMutatePortfolio: isAdmin,
     /** Admin: full MR CRUD. Maintenance staff: update assigned only (RLS). */
     canCreateWorkOrders: isAdmin,
     canDeleteWorkOrders: isAdmin,
+    /** Admin-only Accept & schedule (status Scheduled / scheduled_for). */
+    canAcceptAndSchedule: isAdmin,
     properties,
     landlords,
     vendors,
@@ -290,6 +321,8 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     loading,
     error,
     setError,
+    notice,
+    setNotice,
     refreshLookups,
     updateSettings,
     createProperty,
@@ -316,6 +349,7 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     deleteVendor,
     listWorkOrders,
     createWorkOrder,
+    submitTenantRequest,
     updateWorkOrder,
     deleteWorkOrder,
     createLandlord,
@@ -325,6 +359,13 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     getTenant: data.getTenant,
     getDashboardSummary: data.getDashboardSummary,
     listPayments: data.listPayments,
+    listMaintenancePhotos: data.listMaintenancePhotos,
+    uploadMaintenancePhoto: data.uploadMaintenancePhoto,
+    listMaintenanceComments: data.listMaintenanceComments,
+    addMaintenanceComment: data.addMaintenanceComment,
+    listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
+    listStaff: data.listStaff,
+    getTenantHomeContext: data.getTenantHomeContext,
   };
 }
 

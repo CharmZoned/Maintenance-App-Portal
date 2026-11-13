@@ -150,22 +150,61 @@ export interface Vendor {
 }
 
 export type WorkOrderPriority = "low" | "normal" | "high" | "urgent";
-export type WorkOrderStatus = "open" | "assigned" | "in_progress" | "completed" | "cancelled";
+/** Maps to live Supabase CHECK: Open | Scheduled | In Progress | On Hold | Closed */
+export type WorkOrderStatus = "open" | "scheduled" | "in_progress" | "on_hold" | "closed";
+
+export type MaintenanceCategory =
+  | "Plumbing"
+  | "Electrical"
+  | "Heating / AC"
+  | "Appliance"
+  | "Pest control"
+  | "Locks / keys / doors"
+  | "Windows"
+  | "Roof / leaks"
+  | "Mold / water damage"
+  | "Exterior / yard"
+  | "General repair"
+  | "Other";
+
+export const MAINTENANCE_CATEGORIES: MaintenanceCategory[] = [
+  "Plumbing",
+  "Electrical",
+  "Heating / AC",
+  "Appliance",
+  "Pest control",
+  "Locks / keys / doors",
+  "Windows",
+  "Roof / leaks",
+  "Mold / water damage",
+  "Exterior / yard",
+  "General repair",
+  "Other",
+];
+
+export type CommentVisibility = "tenant_visible" | "internal";
 
 export interface WorkOrder {
   id: number;
+  request_number?: string | null;
   property_id: number | null;
   unit_id: number | null;
   tenant_id: number | null;
   vendor_id: number | null;
   title: string;
   description: string | null;
+  category: MaintenanceCategory | string;
   priority: WorkOrderPriority;
   status: WorkOrderStatus;
+  permission_to_enter: boolean;
+  assigned_staff_id?: number | null;
   scheduled_at: string | null;
   completed_at: string | null;
   cost: number | null;
   notes: string | null;
+  resolution_notes?: string | null;
+  hold_reason?: string | null;
+  next_follow_up_date?: string | null;
   created_at: string;
   // Joined
   property_name?: string | null;
@@ -175,6 +214,46 @@ export interface WorkOrder {
   tenant_last_name?: string | null;
   vendor_name?: string | null;
   vendor_color?: string | null;
+}
+
+export interface TenantHomeContext {
+  tenant_id: number;
+  unit_id: number | null;
+  unit_label: string | null;
+  property_id: number | null;
+  property_name: string | null;
+}
+
+export interface MaintenancePhoto {
+  id: number;
+  maintenance_request_id: number;
+  storage_path: string;
+  caption: string | null;
+  created_at: string;
+  uploaded_by_role: string | null;
+  /** Signed URL for display (ephemeral). */
+  url?: string | null;
+}
+
+export interface MaintenanceComment {
+  id: number;
+  maintenance_request_id: number;
+  body: string;
+  visibility: CommentVisibility;
+  author_role: string | null;
+  author_staff_id: number | null;
+  author_tenant_id: number | null;
+  created_at: string;
+}
+
+export interface MaintenanceStatusEvent {
+  id: number;
+  maintenance_request_id: number;
+  from_status: string | null;
+  to_status: string;
+  changed_by_role: string | null;
+  note: string | null;
+  created_at: string;
 }
 
 export type ApplicationStatus = "new" | "screening" | "approved" | "declined" | "withdrawn";
@@ -236,6 +315,20 @@ export type NewLandlord = Partial<Omit<Landlord, "id" | "created_at">> & {
 export type NewUnit = Partial<Omit<Unit, "id" | "created_at" | "property_name" | "property_color" | "property_address" | "property_city" | "active_lease_id" | "active_tenant_name">> & { property_id: number; name: string };
 export type NewTenant = Partial<Omit<Tenant, "id" | "created_at" | "active_unit_id" | "active_unit_name" | "active_property_name">> & { first_name: string; last_name: string };
 export type NewLease = Partial<Omit<Lease, "id" | "created_at" | "unit_name" | "property_id" | "property_name" | "property_color" | "tenant_first_name" | "tenant_last_name" | "tenant_email" | "tenant_phone">> & { unit_id: number; start_date: string; end_date: string };
-export type NewWorkOrder = Partial<Omit<WorkOrder, "id" | "created_at" | "property_name" | "property_color" | "unit_name" | "tenant_first_name" | "tenant_last_name" | "vendor_name" | "vendor_color">> & { title: string };
+export type NewWorkOrder = Partial<
+  Omit<
+    WorkOrder,
+    | "id"
+    | "created_at"
+    | "property_name"
+    | "property_color"
+    | "unit_name"
+    | "tenant_first_name"
+    | "tenant_last_name"
+    | "vendor_name"
+    | "vendor_color"
+    | "request_number"
+  >
+> & { title: string };
 export type NewVendor = Partial<Omit<Vendor, "id" | "created_at">> & { name: string };
 export type NewApplication = Partial<Omit<Application, "id" | "created_at" | "unit_name" | "property_name">> & { first_name: string; last_name: string };

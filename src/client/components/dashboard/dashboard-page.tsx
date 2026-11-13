@@ -332,10 +332,10 @@ function PriorityBadge({ priority }: { priority: string }) {
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     open: "secondary",
-    assigned: "default",
+    scheduled: "default",
     in_progress: "default",
-    completed: "outline",
-    cancelled: "outline",
+    on_hold: "outline",
+    closed: "outline",
   };
   return <Badge variant={(map[status] ?? "secondary") as never} className="capitalize">{status.replace("_", " ")}</Badge>;
 }

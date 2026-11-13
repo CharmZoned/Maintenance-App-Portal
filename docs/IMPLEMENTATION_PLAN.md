@@ -10,9 +10,11 @@
 |------|--------|
 | Phase 0–1 | Merged (PR #1) |
 | Cursor review skills | Merged (PR #2) under `.cursor/skills/` |
-| Plan revision (Phase 0–1 done + defer notify) | Open [PR #3](https://github.com/CharmZoned/Maintenance-App-Portal/pull/3) — merges this tracker |
-| Phase 2 feature work | In progress — `cursor/phase2-account-approval-0924` (LGA-7) |
-| Nov 9 WO port | Phase 3 (not a Phase 2 blocker) |
+| Plan revision (Phase 0–1 done + defer notify) | Merged (PR #3) |
+| Phase 1.5 / deferred tracking | Merged (PRs #5–#7, #9) |
+| Phase 2 feature work | Merged (PR #8) |
+| Phase 3 tenant maintenance | Branch `cursor/phase3-tenant-maintenance-0924` (LGA-8) |
+| Nov 9 WO port | Covered by Phase 3 status/photos UI (or deferred leftovers) |
 
 ## Status snapshot
 
@@ -20,9 +22,9 @@
 |-------|--------|--------|
 | **0** | Planning docs / schema tracker | **Done** (merged via PR #1) |
 | **1** | Auth, RLS, Supabase data cutover, landlords | **Done** (merged via PR #1; optional manual QA + small leftovers remain) |
-| **1.5** | Phase 1 follow-ups (UX AuthZ + lease-dialog) | **Next (small)** — before multi-staff production |
-| **2** | Account approval UI + Applications UI | **In progress** (LGA-7) |
-| **3** | Tenant maintenance + photos + status history | Planned |
+| **1.5** | Phase 1 follow-ups (UX AuthZ + lease-dialog) | **Done** (merged; residual polish in deferred-work) |
+| **2** | Account approval UI + Applications UI | **Done** (merged PR #8) |
+| **3** | Tenant maintenance + photos + status history | Implemented (branch / PR — merge next) |
 | **4** | Website CTA + shared Auth links | Planned (can overlap Phase 2 once portal URL is stable) |
 | **5** | Property documents | Planned |
 | **6** | Email / push / messaging notifications | **Deferred** — use in-app popups/toasts for now |
@@ -77,7 +79,7 @@ Status reflects **shipped portal code on `master`**, not the original gap table.
 | **R1** | Accounts and login | **Partial** | Login, logout, password reset, session restore, role gate (`admin` / staff-linked) | Public signup + email-verify UX; richer role linking for landlord/tenant self-serve → **Phase 2** |
 | **R2** | Account approval | **Partial** | `account_status` column; unapproved users blocked in UI + RLS helpers | No admin Users queue (approve/reject/suspend); no Applications UI → **Phase 2** |
 | **R3** | Properties and units | **Done (staff MVP)** | Landlords CRUD; properties require `landlord_id`; units/tenants/leases on Supabase | Landlord self-serve portal later (out of MVP); keep polishing via normal CRUD |
-| **R4** | Maintenance requests | **Partial** | Staff work orders mapped to `MaintenanceRequests` on Supabase | Tenant submit; category/photos UI; status history; admin-only Accept & schedule → **Phase 3** (+ Nov 9 port if still needed) |
+| **R4** | Maintenance requests | **Mostly done (Phase 3)** | Staff WOs + tenant submit/photos/status history/comments on branch | Merge Phase 3; optional richer Accept & schedule UX (deferred) |
 | **R5** | Property documents | **Not started** | — | Upload/store/list with visibility → **Phase 5** |
 | **R6** | Notifications / messaging | **Deferred** | — | No email, push, or messaging. Use **popups/toasts** in the web app for operator feedback until Phase 6 is reopened |
 | **R7** | Permissions | **Mostly done** | Auth required; JWT client; RLS on core tables; D1 API retired | Applications RLS; leftover AuthZ UX for `maintenance` role mutates; optional FORCE RLS → **Phase 1.5 / 2** |
@@ -95,7 +97,7 @@ Create/update Project tasks so the list tracks planned work (not the old “ever
 | Phase 1 — Auth / RLS / Supabase / landlords | **Done** | Merged; manual QA checklist optional |
 | Phase 1.5 — Follow-ups (isAdmin mutate UI, lease-dialog, optional FORCE RLS) | Queued / next | See [`docs/phases/phase-2.md`](phases/phase-2.md) leftovers section once expanded |
 | Phase 2 — Account approval + Applications UI (R2, R8) | Queued | Next major product phase |
-| Phase 3 — Tenant maintenance + photos + history (R4) | Queued | After Phase 2 (or reorder if product prioritizes) |
+| Phase 3 — Tenant maintenance + photos + history (R4) | In progress / PR | Branch `cursor/phase3-tenant-maintenance-0924` |
 | Phase 4 — Website CTA + shared Auth (portal URL) | Queued | Can overlap Phase 2 |
 | Phase 5 — Property documents (R5) | Queued | After Phase 3 preferred |
 | Phase 6 — Email / push / messaging (R6) | **Canceled / Deferred** | Explicit hold; popups only for now |
@@ -157,17 +159,18 @@ Branches: `cursor/phaseN-<topic>-0924` (or existing `-8ed9` series). Stack depen
 
 ---
 
-## Phase 3 — Tenant maintenance + photos (R4, R7)
+## Phase 3 — Tenant maintenance + photos (R4, R7) — IMPLEMENTED (merge pending)
 
 | Step | Agent | Work |
 |------|-------|------|
-| P3a | BE | Tenant insert RLS; photo bucket; status history **or** comment audit |
+| P3a | BE | Status history table + trigger; reuse photo bucket/RLS; tenant approve gates; admin-only Accept & schedule |
 | P3b | FE | Tenant shell: submit (category, description, permission_to_enter, photos); list own |
-| P3c | FE | Staff maintenance UI: category, photos, comments, status; admin-only Accept & schedule |
-| P3d | QA | Tenant isolation; staff scope; photo upload/download |
+| P3c | FE | Staff maintenance UI: category, photos, comments, status history; admin-only Accept & schedule |
+| P3d | QA | typecheck/build; checklist in [`docs/phases/phase-3.md`](phases/phase-3.md) |
 
 **DoD:** Tenant submits with photo; staff status trail; comments visibility respected.  
-Near-term alerts = **in-app popups**, not email/push.
+Near-term alerts = **in-app popups/toasts**, not email/push.  
+**Detail:** [`docs/phases/phase-3.md`](phases/phase-3.md)
 
 ---
 
