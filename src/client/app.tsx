@@ -98,14 +98,10 @@ export function App() {
 
   useEffect(() => {
     if (!ready || !isLandlord) return;
-    if (
-      route.name !== "properties" &&
-      route.name !== "property" &&
-      route.name !== "maintenance"
-    ) {
+    if (!landlordHomeRoute(route)) {
       navigate("/properties");
     }
-  }, [ready, isLandlord, route.name, navigate]);
+  }, [ready, isLandlord, route, navigate]);
 
   if (auth.gate.state === "loading") {
     return (

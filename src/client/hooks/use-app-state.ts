@@ -71,8 +71,12 @@ export function useAppState(
     }
     if (isLandlord) {
       // Thin read-only shell: properties (RLS-scoped) + maintenance; no vendors/settings mutate.
-      const props = await data.listProperties().catch(() => [] as Property[]);
-      setProperties(props);
+      try {
+        setProperties(await data.listProperties());
+      } catch (err) {
+        setProperties([]);
+        setError((err as Error).message);
+      }
       setVendors([]);
       setLandlords([]);
       setSettings(DEFAULT_SETTINGS);
