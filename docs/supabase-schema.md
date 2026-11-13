@@ -4,6 +4,8 @@
 **URL:** `https://bgjkjtfgrfiszbzatriq.supabase.co`  
 **Verified:** 2026-11-13 via Supabase MCP (live introspection)
 
+**Ops:** Never apply live DDL without a matching file under `supabase/migrations/` on a branch/PR first. Prefer staging. See [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).
+
 Shared with the marketing site (`LandlordGopherWebsite`). Website uses service-role inserts into `inquiries` only — do not add anon policies that expose inquiries.
 
 ---
@@ -105,7 +107,12 @@ Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_in
 
 Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category` (Title Case enum), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
 
-Policies cover select/insert/update for admin, tenant submit, landlord, assigned maintenance staff. Photo + comment + storage bucket policies exist.
+**Live ACL baseline** (pre-repo Oct migrations + Phase 3 tighten; full predicate table in [`docs/ops/live-maintenance-acl-baseline.md`](./ops/live-maintenance-acl-baseline.md)):
+
+- SELECT: admin / submitting tenant / assigned staff / landlord owns unit (`maintenance_requests_select`)
+- UPDATE: `private.can_update_maintenance_request(id)` — admin or assigned maintenance only (`maintenance_requests_update`)
+- Comments SELECT: `can_select_maintenance_request` + visibility rules (`maintenance_comments_select`)
+- Photos / comments mutate via `can_upload_maintenance_photo` / `can_update_maintenance_request` (and tenant comment path)
 
 **Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).
 
