@@ -305,6 +305,9 @@ test.describe("[R5] Property documents — screens", () => {
     await expect(page.getByText("House rules", { exact: true })).toBeVisible();
     await expect(page.getByText("Staff only binder")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
+    await page.goto(`/properties/${world.property.id}`);
+    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await shot(page, testInfo, "Landlord Documents page");
   });
 });
