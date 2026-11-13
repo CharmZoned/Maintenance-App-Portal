@@ -1,5 +1,46 @@
 -- LGA-18: approve linked landlords; allow landlord portal access (thin read-only shell).
--- Write ACL hardening (drop landlord property INSERT/UPDATE) is owned by LGA-19.
+--
+-- Read-only must hold at the database, not just in the UI: approving a landlord
+-- would otherwise activate the Phase 1 landlord write policies. This migration
+-- therefore includes the LGA-19 (#14) landlord write lockdown, identical SQL,
+-- so it is safe whichever of the two lands first. All statements are idempotent.
+
+-- ── Landlord write lockdown (same as LGA-19 #14) ──────────────────
+
+DROP POLICY IF EXISTS properties_landlord_insert ON public."Properties";
+DROP POLICY IF EXISTS properties_landlord_update ON public."Properties";
+
+-- Single UPDATE predicate shared with comment/photo write paths: admin or assigned maintenance.
+CREATE OR REPLACE FUNCTION private.can_update_maintenance_request(target_request bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public."MaintenanceRequests" AS request
+    WHERE request.id = target_request
+      AND (
+        (SELECT private.current_role()) = 'admin'::public.app_role
+        OR (
+          (SELECT private.current_role()) = 'maintenance'::public.app_role
+          AND request.assigned_staff_id = (SELECT private.current_staff_id())
+        )
+      )
+  );
+$function$;
+
+COMMENT ON FUNCTION private.can_update_maintenance_request(bigint) IS
+  'True when caller may UPDATE the request (admin or assigned maintenance). Landlords are read-only.';
+
+DROP POLICY IF EXISTS maintenance_requests_update ON public."MaintenanceRequests";
+CREATE POLICY maintenance_requests_update ON public."MaintenanceRequests"
+  FOR UPDATE
+  TO authenticated
+  USING (private.can_update_maintenance_request(id))
+  WITH CHECK (private.can_update_maintenance_request(id));
 
 -- ── Harden current_landlord_id (parity with tenant helpers) ───────
 
