@@ -294,8 +294,9 @@ export function mapWorkOrder(
   const statusRaw = lowerStatus(row.status);
   const priorityRaw = lowerStatus(row.priority);
   // Display-only aliases for retired D1 labels — live CHECK forbids writing these.
+  // Map Assigned → open (not scheduled) so a staff save does not trip Accept & schedule.
   const legacyStatusAlias: Record<string, WorkOrderStatus> = {
-    assigned: "scheduled",
+    assigned: "open",
     completed: "closed",
     cancelled: "closed",
     canceled: "closed",

@@ -250,9 +250,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       return;
     }
     if (
-      app.isAdmin &&
-      category &&
-      !MAINTENANCE_CATEGORIES.includes(category as (typeof MAINTENANCE_CATEGORIES)[number])
+      (app.isAdmin || !workOrder) &&
+      !MAINTENANCE_CATEGORIES.includes(category.trim() as (typeof MAINTENANCE_CATEGORIES)[number])
     ) {
       app.setError("Pick a current maintenance category before saving (legacy value is not allowed).");
       return;
