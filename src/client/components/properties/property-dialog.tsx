@@ -38,6 +38,7 @@ export function PropertyDialog({ open, onOpenChange, property, onSaved }: Props)
   const [yearBuilt, setYearBuilt] = useState("");
   const [color, setColor] = useState("sky");
   const [notes, setNotes] = useState("");
+  const [landlordId, setLandlordId] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -51,10 +52,15 @@ export function PropertyDialog({ open, onOpenChange, property, onSaved }: Props)
     setYearBuilt(property?.year_built ? String(property.year_built) : "");
     setColor(property?.color ?? "sky");
     setNotes(property?.notes ?? "");
+    setLandlordId(property?.landlord_id ? String(property.landlord_id) : "");
   }, [open, property]);
 
   async function save() {
     if (!name.trim()) return;
+    if (!landlordId) {
+      app.setError("Select a landlord before saving the property.");
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -67,6 +73,7 @@ export function PropertyDialog({ open, onOpenChange, property, onSaved }: Props)
         year_built: yearBuilt ? parseInt(yearBuilt, 10) : null,
         color,
         notes: notes.trim() || null,
+        landlord_id: Number(landlordId),
       };
       const saved = property
         ? await app.updateProperty(property.id, payload)
@@ -102,6 +109,24 @@ export function PropertyDialog({ open, onOpenChange, property, onSaved }: Props)
           <div>
             <Label htmlFor="prop-name">Name</Label>
             <Input id="prop-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Oakwood Estate" />
+          </div>
+          <div>
+            <Label>Landlord</Label>
+            <Select value={landlordId} onValueChange={setLandlordId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select landlord" />
+              </SelectTrigger>
+              <SelectContent>
+                {app.landlords.map((l) => (
+                  <SelectItem key={l.id} value={String(l.id)}>
+                    {l.company_name?.trim() || `${l.first_name} ${l.last_name}`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {app.landlords.length === 0 && (
+              <p className="mt-1 text-xs text-amber-700">Create a landlord first (Landlords nav).</p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -165,7 +190,7 @@ export function PropertyDialog({ open, onOpenChange, property, onSaved }: Props)
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !name.trim()}>
+          <Button type="button" onClick={save} disabled={saving || !name.trim() || !landlordId}>
             {property ? "Save changes" : "Create property"}
           </Button>
         </DialogFooter>

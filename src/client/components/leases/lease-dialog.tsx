@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
-import { api } from "@/api";
 import { toIsoDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
@@ -133,9 +132,9 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
     if (!open) return;
     (async () => {
       try {
-        const data = await api<{ units: Unit[] }>("GET", "/api/units");
+        const units = await app.listUnits();
         const map = new Map<number, string>();
-        for (const u of data.units) {
+        for (const u of units) {
           map.set(u.id, `${u.property_name ?? "—"} · ${u.name}`);
         }
         setUnitLabels(map);
@@ -143,7 +142,7 @@ export function LeaseDialog({ open, onOpenChange, lease, defaults, onSaved }: Pr
         /* ignore */
       }
     })();
-  }, [open]);
+  }, [open, app]);
 
   return (
     <>

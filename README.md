@@ -1,14 +1,29 @@
 <img src="readme-banner.png" alt="OpenProperty preview" width="100%" />
 
-# OpenProperty
+# LG Maintenance Portal (OpenProperty)
 
 [![Deploy with Clawnify](https://app.clawnify.com/deploy-button.svg)](https://app.clawnify.com/deploy?repo=clawnify/OpenProperty)
 
-Open-source **property management software** — a self-hosted, cloud-based alternative to TenantCloud, AppFolio, Buildium, and Propertyware for landlords, small property managers, and apartment / multi-family back-office teams.
+**Landlord Gopher** staff/admin portal. Phase 1 uses **Supabase Auth + Postgres + RLS** for portfolio data (landlords, properties, units, tenants, leases, rent, maintenance, vendors, settings). The legacy Hono/D1 server remains in-repo but the client no longer calls `/api` for those flows.
 
-Rental property management with everything you need to run a portfolio: properties and units, tenants and leases, rent collection and a ledger, maintenance work orders, and a vendor directory.
+See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) and [`docs/phases/phase-1.md`](docs/phases/phase-1.md).
 
-> Built on the [Clawnify](https://clawnify.com) template format. Deploy your own copy in minutes, customize freely, own the data.
+### Local env (required for the UI)
+
+```bash
+cp .env.example .env
+# Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (Landlord Gopher project)
+pnpm install
+pnpm exec vite   # or: pnpm build && serve dist
+```
+
+Bootstrap the first admin after creating an Auth user:
+
+```sql
+select private.assign_admin('you@example.com');
+```
+
+Open-source **property management software** lineage (Clawnify OpenProperty template), adapted for Landlord Gopher.
 
 ## Features
 
@@ -78,24 +93,21 @@ Or wire it up to Cloudflare Workers + D1 directly using the bindings in `wrangle
 ## Project layout
 
 ```
+docs/               Implementation plan + phase briefs + schema notes
+supabase/migrations Phase 1 additive RLS / account_status
 src/
-  server/
-    index.ts        Hono routes for every entity
-    db.ts           D1 adapter (query / get / run)
-    schema.sql      Tables + seed data
+  server/           Legacy Hono + D1 (unused by Phase 1 client)
   client/
-    app.tsx         Shell + routing
+    app.tsx         Auth gate + shell + routing
+    lib/
+      supabase.ts   Browser client
+      data.ts       Supabase queries/mutations
+      mappers.ts    D1/UI ↔ Supabase field mapping
     components/
-      dashboard/    Portfolio + month-at-a-glance
-      properties/   List, property detail, property + unit dialogs
-      tenants/      List, tenant detail, tenant dialog
-      leases/       Leases page + lease dialog
-      rent/         Rent ledger + payment dialog
-      maintenance/  Work orders board + work-order dialog
-      settings/     Vendors + rent policy defaults
-      ui/           Vendored shadcn primitives
-    hooks/          use-router, use-app-state
-    lib/utils.ts    cn helper, color palette, date / money / period helpers
+      auth/         Login, reset password, blocked
+      landlords/    Landlord CRUD
+      dashboard/ properties/ tenants/ leases/ rent/ maintenance/ settings/
+    hooks/          use-auth, use-router, use-app-state
 ```
 
 ## What's intentionally not included

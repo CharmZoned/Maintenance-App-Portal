@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp } from "@/context";
-import { api } from "@/api";
+import { supabase } from "@/lib/supabase";
 import { formatDate, formatMoney, toIsoDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
@@ -48,13 +48,13 @@ export function PaymentDialog({ open, onOpenChange, charge, onSaved }: Props) {
     setNotes("");
     (async () => {
       try {
-        const data = await api<{ payments: Payment[] }>("GET", `/api/rent-charges/${charge.id}/payments`);
-        setHistory(data.payments);
+        const payments = await app.listPayments(charge.id);
+        setHistory(payments);
       } catch {
         setHistory([]);
       }
     })();
-  }, [open, charge]);
+  }, [open, charge, app]);
 
   async function save() {
     if (!charge) return;
@@ -81,7 +81,8 @@ export function PaymentDialog({ open, onOpenChange, charge, onSaved }: Props) {
 
   async function deletePayment(id: number) {
     try {
-      await api("DELETE", `/api/payments/${id}`);
+      const { error } = await supabase.from("Payments").delete().eq("id", id);
+      if (error) throw error;
       setHistory((prev) => prev.filter((p) => p.id !== id));
       onSaved?.();
     } catch (err) {

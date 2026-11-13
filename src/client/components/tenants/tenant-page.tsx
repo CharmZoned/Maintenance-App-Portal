@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Mail, Pencil, Phone, User } from "lucide-react";
 import { useApp } from "@/context";
-import { api } from "@/api";
 import { formatDate, formatMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +19,8 @@ export function TenantPage({ id, navigate }: { id: number; navigate: (to: string
   async function load() {
     try {
       setLoading(true);
-      const [{ tenant: t }, ll] = await Promise.all([
-        api<{ tenant: Tenant }>("GET", `/api/tenants/${id}`),
+      const [t, ll] = await Promise.all([
+        app.getTenant(id),
         app.listLeases({ tenant_id: id }),
       ]);
       setTenant(t);

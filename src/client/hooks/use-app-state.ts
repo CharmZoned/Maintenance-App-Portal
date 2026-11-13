@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
+import * as data from "../lib/data";
 import type {
   Property,
   Unit,
@@ -8,12 +8,14 @@ import type {
   RentCharge,
   Vendor,
   WorkOrder,
+  Landlord,
   NewProperty,
   NewUnit,
   NewTenant,
   NewLease,
   NewWorkOrder,
   NewVendor,
+  NewLandlord,
 } from "../types";
 
 export interface AppSettings {
@@ -43,24 +45,25 @@ function parseSettings(raw: Record<string, string>): AppSettings {
   };
 }
 
-export function useAppState() {
+export function useAppState(enabled: boolean) {
   const [properties, setProperties] = useState<Property[]>([]);
+  const [landlords, setLandlords] = useState<Landlord[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Lookup loaders ─────────────────────────────────────────────────
-
   const refreshLookups = useCallback(async () => {
-    const [props, vens, st] = await Promise.all([
-      api<{ properties: Property[] }>("GET", "/api/properties"),
-      api<{ vendors: Vendor[] }>("GET", "/api/vendors").catch(() => ({ vendors: [] })),
-      api<{ settings: Record<string, string> }>("GET", "/api/settings").catch(() => ({ settings: {} })),
+    const [props, vens, st, lls] = await Promise.all([
+      data.listProperties(),
+      data.listVendors().catch(() => [] as Vendor[]),
+      data.getSettings().catch(() => ({} as Record<string, string>)),
+      data.listLandlords().catch(() => [] as Landlord[]),
     ]);
-    setProperties(props.properties);
-    setVendors(vens.vendors);
-    setSettings(parseSettings(st.settings));
+    setProperties(props);
+    setVendors(vens);
+    setSettings(parseSettings(st));
+    setLandlords(lls);
   }, []);
 
   const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
@@ -68,12 +71,15 @@ export function useAppState() {
     for (const [k, v] of Object.entries(patch)) {
       if (v !== undefined) body[k] = String(v);
     }
-    const res = await api<{ settings: Record<string, string> }>("PUT", "/api/settings", body);
-    setSettings(parseSettings(res.settings));
+    const res = await data.updateSettings(body);
+    setSettings(parseSettings(res));
   }, []);
 
-  // Initial load.
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     (async () => {
       try {
         setLoading(true);
@@ -84,114 +90,93 @@ export function useAppState() {
         setLoading(false);
       }
     })();
-  }, [refreshLookups]);
+  }, [refreshLookups, enabled]);
 
-  // Property mutations ─────────────────────────────────────────────
-
-  const createProperty = useCallback(async (data: NewProperty) => {
-    const res = await api<{ property: Property }>("POST", "/api/properties", data);
+  const createProperty = useCallback(async (input: NewProperty) => {
+    const property = await data.createProperty(input);
     await refreshLookups();
-    return res.property;
+    return property;
   }, [refreshLookups]);
 
   const updateProperty = useCallback(async (id: number, patch: Partial<NewProperty>) => {
-    const res = await api<{ property: Property }>("PUT", `/api/properties/${id}`, patch);
+    const property = await data.updateProperty(id, patch);
     await refreshLookups();
-    return res.property;
+    return property;
   }, [refreshLookups]);
 
   const deleteProperty = useCallback(async (id: number) => {
-    await api("DELETE", `/api/properties/${id}`);
+    await data.deleteProperty(id);
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Unit mutations ─────────────────────────────────────────────────
-
   const listUnits = useCallback(async (propertyId?: number): Promise<Unit[]> => {
-    const path = propertyId ? `/api/units?property_id=${propertyId}` : "/api/units";
-    const data = await api<{ units: Unit[] }>("GET", path);
-    return data.units;
+    return data.listUnits(propertyId);
   }, []);
 
-  const createUnit = useCallback(async (data: NewUnit) => {
-    const res = await api<{ unit: Unit }>("POST", "/api/units", data);
+  const createUnit = useCallback(async (input: NewUnit) => {
+    const unit = await data.createUnit(input);
     await refreshLookups();
-    return res.unit;
+    return unit;
   }, [refreshLookups]);
 
   const updateUnit = useCallback(async (id: number, patch: Partial<NewUnit>) => {
-    const res = await api<{ unit: Unit }>("PUT", `/api/units/${id}`, patch);
+    const unit = await data.updateUnit(id, patch);
     await refreshLookups();
-    return res.unit;
+    return unit;
   }, [refreshLookups]);
 
   const deleteUnit = useCallback(async (id: number) => {
-    await api("DELETE", `/api/units/${id}`);
+    await data.deleteUnit(id);
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Tenant mutations ───────────────────────────────────────────────
-
   const listTenants = useCallback(async (q?: string): Promise<Tenant[]> => {
-    const path = q ? `/api/tenants?q=${encodeURIComponent(q)}` : "/api/tenants";
-    const data = await api<{ tenants: Tenant[] }>("GET", path);
-    return data.tenants;
+    return data.listTenants(q);
   }, []);
 
-  const createTenant = useCallback(async (data: NewTenant) => {
-    const res = await api<{ tenant: Tenant }>("POST", "/api/tenants", data);
-    return res.tenant;
+  const createTenant = useCallback(async (input: NewTenant) => {
+    return data.createTenant(input);
   }, []);
 
   const updateTenant = useCallback(async (id: number, patch: Partial<NewTenant>) => {
-    const res = await api<{ tenant: Tenant }>("PUT", `/api/tenants/${id}`, patch);
-    return res.tenant;
+    return data.updateTenant(id, patch);
   }, []);
 
   const deleteTenant = useCallback(async (id: number) => {
-    await api("DELETE", `/api/tenants/${id}`);
+    await data.deleteTenant(id);
   }, []);
 
-  // Lease mutations ────────────────────────────────────────────────
-
-  const listLeases = useCallback(async (params?: { tenant_id?: number; unit_id?: number; status?: string }): Promise<Lease[]> => {
-    const qs = new URLSearchParams();
-    if (params?.tenant_id) qs.set("tenant_id", String(params.tenant_id));
-    if (params?.unit_id) qs.set("unit_id", String(params.unit_id));
-    if (params?.status) qs.set("status", params.status);
-    const path = qs.toString() ? `/api/leases?${qs.toString()}` : "/api/leases";
-    const data = await api<{ leases: Lease[] }>("GET", path);
-    return data.leases;
+  const listLeases = useCallback(async (params?: {
+    tenant_id?: number;
+    unit_id?: number;
+    status?: string;
+  }): Promise<Lease[]> => {
+    return data.listLeases(params);
   }, []);
 
-  const createLease = useCallback(async (data: NewLease) => {
-    const res = await api<{ lease: Lease }>("POST", "/api/leases", data);
+  const createLease = useCallback(async (input: NewLease) => {
+    const lease = await data.createLease(input);
     await refreshLookups();
-    return res.lease;
+    return lease;
   }, [refreshLookups]);
 
   const updateLease = useCallback(async (id: number, patch: Partial<NewLease>) => {
-    const res = await api<{ lease: Lease }>("PUT", `/api/leases/${id}`, patch);
+    const lease = await data.updateLease(id, patch);
     await refreshLookups();
-    return res.lease;
+    return lease;
   }, [refreshLookups]);
 
   const deleteLease = useCallback(async (id: number) => {
-    await api("DELETE", `/api/leases/${id}`);
+    await data.deleteLease(id);
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Rent / payments ────────────────────────────────────────────────
-
   const listCharges = useCallback(async (period?: string): Promise<RentCharge[]> => {
-    const path = period ? `/api/rent-charges?period=${encodeURIComponent(period)}` : "/api/rent-charges";
-    const data = await api<{ charges: RentCharge[] }>("GET", path);
-    return data.charges;
+    return data.listCharges(period);
   }, []);
 
   const generateCharges = useCallback(async (period: string) => {
-    const data = await api<{ created: number; period: string }>("POST", "/api/rent-charges/generate", { period });
-    return data;
+    return data.generateCharges(period);
   }, []);
 
   const recordPayment = useCallback(async (input: {
@@ -202,75 +187,104 @@ export function useAppState() {
     notes?: string | null;
     paid_at?: string;
   }) => {
-    const res = await api<{ charge: RentCharge }>("POST", "/api/payments", input);
-    return res.charge;
+    return data.recordPayment(input);
   }, []);
 
-  // Vendor mutations ───────────────────────────────────────────────
-
-  const createVendor = useCallback(async (data: NewVendor) => {
-    const res = await api<{ vendor: Vendor }>("POST", "/api/vendors", data);
+  const createVendor = useCallback(async (input: NewVendor) => {
+    const vendor = await data.createVendor(input);
     await refreshLookups();
-    return res.vendor;
+    return vendor;
   }, [refreshLookups]);
 
   const updateVendor = useCallback(async (id: number, patch: Partial<NewVendor>) => {
-    const res = await api<{ vendor: Vendor }>("PUT", `/api/vendors/${id}`, patch);
+    const vendor = await data.updateVendor(id, patch);
     await refreshLookups();
-    return res.vendor;
+    return vendor;
   }, [refreshLookups]);
 
   const deleteVendor = useCallback(async (id: number) => {
-    await api("DELETE", `/api/vendors/${id}`);
+    await data.deleteVendor(id);
     await refreshLookups();
   }, [refreshLookups]);
 
-  // Work order mutations ───────────────────────────────────────────
-
-  const listWorkOrders = useCallback(async (params?: { status?: string; property_id?: number }): Promise<WorkOrder[]> => {
-    const qs = new URLSearchParams();
-    if (params?.status) qs.set("status", params.status);
-    if (params?.property_id) qs.set("property_id", String(params.property_id));
-    const path = qs.toString() ? `/api/work-orders?${qs.toString()}` : "/api/work-orders";
-    const data = await api<{ work_orders: WorkOrder[] }>("GET", path);
-    return data.work_orders;
+  const listWorkOrders = useCallback(async (params?: {
+    status?: string;
+    property_id?: number;
+  }): Promise<WorkOrder[]> => {
+    return data.listWorkOrders(params);
   }, []);
 
-  const createWorkOrder = useCallback(async (data: NewWorkOrder) => {
-    const res = await api<{ work_order: WorkOrder }>("POST", "/api/work-orders", data);
-    return res.work_order;
+  const createWorkOrder = useCallback(async (input: NewWorkOrder) => {
+    return data.createWorkOrder(input);
   }, []);
 
   const updateWorkOrder = useCallback(async (id: number, patch: Partial<NewWorkOrder>) => {
-    const res = await api<{ work_order: WorkOrder }>("PUT", `/api/work-orders/${id}`, patch);
-    return res.work_order;
+    return data.updateWorkOrder(id, patch);
   }, []);
 
   const deleteWorkOrder = useCallback(async (id: number) => {
-    await api("DELETE", `/api/work-orders/${id}`);
+    await data.deleteWorkOrder(id);
   }, []);
 
+  const createLandlord = useCallback(async (input: NewLandlord) => {
+    const landlord = await data.createLandlord(input);
+    await refreshLookups();
+    return landlord;
+  }, [refreshLookups]);
+
+  const updateLandlord = useCallback(async (id: number, patch: Partial<NewLandlord>) => {
+    const landlord = await data.updateLandlord(id, patch);
+    await refreshLookups();
+    return landlord;
+  }, [refreshLookups]);
+
+  const deleteLandlord = useCallback(async (id: number) => {
+    await data.deleteLandlord(id);
+    await refreshLookups();
+  }, [refreshLookups]);
+
   return {
-    // data
-    properties, vendors, settings,
-    loading, error, setError,
-    // refresh
+    properties,
+    landlords,
+    vendors,
+    settings,
+    loading,
+    error,
+    setError,
     refreshLookups,
-    // settings
     updateSettings,
-    // properties / units
-    createProperty, updateProperty, deleteProperty,
-    listUnits, createUnit, updateUnit, deleteUnit,
-    // tenants
-    listTenants, createTenant, updateTenant, deleteTenant,
-    // leases
-    listLeases, createLease, updateLease, deleteLease,
-    // rent
-    listCharges, generateCharges, recordPayment,
-    // vendors
-    createVendor, updateVendor, deleteVendor,
-    // work orders
-    listWorkOrders, createWorkOrder, updateWorkOrder, deleteWorkOrder,
+    createProperty,
+    updateProperty,
+    deleteProperty,
+    listUnits,
+    createUnit,
+    updateUnit,
+    deleteUnit,
+    listTenants,
+    createTenant,
+    updateTenant,
+    deleteTenant,
+    listLeases,
+    createLease,
+    updateLease,
+    deleteLease,
+    listCharges,
+    generateCharges,
+    recordPayment,
+    createVendor,
+    updateVendor,
+    deleteVendor,
+    listWorkOrders,
+    createWorkOrder,
+    updateWorkOrder,
+    deleteWorkOrder,
+    createLandlord,
+    updateLandlord,
+    deleteLandlord,
+    getProperty: data.getProperty,
+    getTenant: data.getTenant,
+    getDashboardSummary: data.getDashboardSummary,
+    listPayments: data.listPayments,
   };
 }
 

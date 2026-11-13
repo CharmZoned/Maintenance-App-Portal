@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
-import { api } from "@/api";
 import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,8 +40,8 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   async function load() {
     try {
       setLoading(true);
-      const [{ property: p }, ulist, wlist] = await Promise.all([
-        api<{ property: Property }>("GET", `/api/properties/${id}`),
+      const [p, ulist, wlist] = await Promise.all([
+        app.getProperty(id),
         app.listUnits(id),
         app.listWorkOrders({ property_id: id }),
       ]);
@@ -112,6 +111,11 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                 <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
                   <MapPin className="h-3 w-3" />
                   {[property.address, property.city, property.state, property.zip].filter(Boolean).join(", ")}
+                </p>
+              )}
+              {property.landlord_name && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Landlord: {property.landlord_name}
                 </p>
               )}
             </div>
