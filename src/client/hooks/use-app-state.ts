@@ -366,6 +366,10 @@ export function useAppState(
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
     listStaff: data.listStaff,
     getTenantHomeContext: data.getTenantHomeContext,
+    listPropertyDocuments: data.listPropertyDocuments,
+    uploadPropertyDocument: data.uploadPropertyDocument,
+    updatePropertyDocumentVisibility: data.updatePropertyDocumentVisibility,
+    deletePropertyDocument: data.deletePropertyDocument,
   };
 }
 

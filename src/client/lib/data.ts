@@ -45,6 +45,8 @@ import type {
   MaintenanceCategory,
   WorkOrderPriority,
   TenantHomeContext,
+  PropertyDocument,
+  DocumentVisibility,
 } from "../types";
 import type { AccountStatus, AppRole, Tables } from "../types.supabase";
 
@@ -1377,4 +1379,160 @@ export async function updateApplication(
 export async function deleteApplication(id: number): Promise<void> {
   const { error } = await supabase.from("Applications").delete().eq("id", id);
   if (error) throwSb(error);
+}
+
+// ── Property documents ────────────────────────────────────────────
+
+const DOC_BUCKET = "property-documents";
+
+function mapPropertyDocument(
+  row: Tables<"PropertyDocuments">,
+  extras?: { unit_name?: string | null; property_name?: string | null; url?: string | null },
+): PropertyDocument {
+  return {
+    id: row.id,
+    property_id: row.property_id,
+    unit_id: row.unit_id,
+    title: row.title,
+    file_name: row.file_name,
+    content_type: row.content_type,
+    byte_size: row.byte_size,
+    storage_path: row.storage_path,
+    visibility: (row.visibility as DocumentVisibility) || "staff",
+    uploaded_by_role: row.uploaded_by_role,
+    notes: row.notes,
+    created_at: row.created_at,
+    unit_name: extras?.unit_name ?? null,
+    property_name: extras?.property_name ?? null,
+    url: extras?.url ?? null,
+  };
+}
+
+async function signDocUrl(path: string): Promise<string | null> {
+  const { data } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, 3600);
+  return data?.signedUrl ?? null;
+}
+
+export async function listPropertyDocuments(params?: {
+  property_id?: number;
+}): Promise<PropertyDocument[]> {
+  let q = supabase
+    .from("PropertyDocuments")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (params?.property_id != null) q = q.eq("property_id", params.property_id);
+  const { data, error } = await q;
+  if (error) throwSb(error);
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  const unitIds = [...new Set(rows.map((r) => r.unit_id).filter((id): id is number => id != null))];
+  const propertyIds = [...new Set(rows.map((r) => r.property_id))];
+
+  const [{ data: units }, { data: props }] = await Promise.all([
+    unitIds.length
+      ? supabase.from("Units").select("id, unit_label").in("id", unitIds)
+      : Promise.resolve({ data: [] as { id: number; unit_label: string }[] }),
+    supabase.from("Properties").select("id, property_name").in("id", propertyIds),
+  ]);
+
+  const unitMap = new Map((units ?? []).map((u) => [u.id, u.unit_label]));
+  const propMap = new Map((props ?? []).map((p) => [p.id, p.property_name]));
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const url = await signDocUrl(row.storage_path);
+      return mapPropertyDocument(row, {
+        unit_name: row.unit_id != null ? unitMap.get(row.unit_id) ?? null : null,
+        property_name: propMap.get(row.property_id) ?? null,
+        url,
+      });
+    }),
+  );
+}
+
+export async function uploadPropertyDocument(input: {
+  property_id: number;
+  unit_id?: number | null;
+  title: string;
+  file: File;
+  visibility: DocumentVisibility;
+  notes?: string | null;
+}): Promise<PropertyDocument> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: roleRow } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const rawExt = input.file.name.includes(".") ? input.file.name.split(".").pop() : "bin";
+  const ext = (rawExt ?? "bin").toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+  const path = `${input.property_id}/${crypto.randomUUID()}.${ext}`;
+
+  const { error: upErr } = await supabase.storage.from(DOC_BUCKET).upload(path, input.file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: input.file.type || undefined,
+  });
+  if (upErr) throw new Error(upErr.message);
+
+  const { data, error } = await supabase
+    .from("PropertyDocuments")
+    .insert({
+      property_id: input.property_id,
+      unit_id: input.unit_id ?? null,
+      title: input.title.trim(),
+      file_name: input.file.name,
+      content_type: input.file.type || null,
+      byte_size: input.file.size,
+      storage_path: path,
+      visibility: input.visibility,
+      uploaded_by_user_id: user.id,
+      uploaded_by_role: roleRow?.role ?? null,
+      notes: input.notes?.trim() || null,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    await supabase.storage.from(DOC_BUCKET).remove([path]);
+    throwSb(error);
+  }
+
+  const url = await signDocUrl(path);
+  return mapPropertyDocument(data!, { url });
+}
+
+export async function updatePropertyDocumentVisibility(
+  id: number,
+  visibility: DocumentVisibility,
+): Promise<PropertyDocument> {
+  const { data, error } = await supabase
+    .from("PropertyDocuments")
+    .update({ visibility })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throwSb(error);
+  const url = await signDocUrl(data!.storage_path);
+  return mapPropertyDocument(data!, { url });
+}
+
+export async function deletePropertyDocument(id: number): Promise<void> {
+  const { data, error } = await supabase
+    .from("PropertyDocuments")
+    .select("storage_path")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throwSb(error);
+  if (!data) throw new Error("Document not found.");
+
+  const { error: delErr } = await supabase.from("PropertyDocuments").delete().eq("id", id);
+  if (delErr) throwSb(delErr);
+
+  await supabase.storage.from(DOC_BUCKET).remove([data.storage_path]);
 }

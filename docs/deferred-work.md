@@ -18,6 +18,9 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Automated RLS tests for tenant photo isolation + status history append-only | Regression safety | No harness yet (same as payment RPC tests) | When vitest/pgTAP lands |
 | Slim Users tenant-link query (id/name/email only) | Faster Users page | Phase 3 reused full `listTenants` enrich | Next Users UX pass |
 | Split work-order-dialog into staff edit / tenant detail / media panels | Maintainability | Phase 3 shipped one dialog for DoD | Next maintenance UX pass |
+| Landlord documents UI (list/download own property docs) | Completes landlord half of R5 in the portal | Landlord portal shell still deferred; Phase 5 shipped RLS for landlord visibility | When landlord MVP / shell is scoped |
+| Confirm/apply Phase 5 migration `20261113230000_phase5_property_documents.sql` on non-primary envs | Docs bucket + table available outside live Landlord Gopher | Applied to live during Phase 5 PR; other envs may lag | Before documents in that env |
+| Automated RLS tests for document visibility (tenant/staff/landlord isolation) | Regression safety | No harness yet | When vitest/pgTAP lands |
 | Invite-only Auth (disable public signup) | Tighter staff onboarding | Product chose public signup → pending for Phase 2 | If abuse or unwanted signups appear |
 | Paginate / status-filter `list_user_accounts_for_admin` | Faster Users page under large Auth fleets | Tiny fleets OK today; full `auth.users` scan on each load | When Auth user count grows or Users page feels slow |
 | Slim Applications unit-options query (avoid full `listUnits` graph on page mount) | Faster Applications page open | Unit select only needs id/label/property; full enrich is heavier | Next Applications UX pass or when unit count grows |
