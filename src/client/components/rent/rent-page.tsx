@@ -91,7 +91,7 @@ export function RentPage() {
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-          {charges.length > 0 ? (
+          {app.canMutatePortfolio && charges.length > 0 ? (
             <Button onClick={generate} disabled={generating}>
               <Sparkles className="h-4 w-4" /> Generate charges
             </Button>
@@ -131,9 +131,11 @@ export function RentPage() {
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
               Generate charges from active leases for this month.
             </p>
-            <Button className="mt-2" onClick={generate} disabled={generating}>
-              <Sparkles className="size-4" /> Generate charges
-            </Button>
+            {app.canMutatePortfolio && (
+              <Button className="mt-2" onClick={generate} disabled={generating}>
+                <Sparkles className="size-4" /> Generate charges
+              </Button>
+            )}
           </div>
         ) : (
           <Card className="overflow-hidden">
@@ -181,7 +183,7 @@ export function RentPage() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        {c.status !== "paid" && c.status !== "waived" && (
+                        {app.canMutatePortfolio && c.status !== "paid" && c.status !== "waived" && (
                           <Button size="sm" variant="outline" onClick={() => setPaymentTarget(c)}>
                             Record payment
                           </Button>

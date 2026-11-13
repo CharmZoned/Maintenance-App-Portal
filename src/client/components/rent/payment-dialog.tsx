@@ -103,7 +103,7 @@ export function PaymentDialog({ open, onOpenChange, charge, onSaved }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Record payment</DialogTitle>
+          <DialogTitle>{app.canMutatePortfolio ? "Record payment" : "Payment history"}</DialogTitle>
         </DialogHeader>
 
         <div className="rounded-md bg-muted/40 p-3 text-sm">
@@ -119,37 +119,39 @@ export function PaymentDialog({ open, onOpenChange, charge, onSaved }: Props) {
           </div>
         </div>
 
-        <div className="grid gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="pay-amount">Amount</Label>
-              <Input id="pay-amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        {app.canMutatePortfolio && (
+          <div className="grid gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="pay-amount">Amount</Label>
+                <Input id="pay-amount" type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              </div>
+              <div>
+                <Label htmlFor="pay-date">Paid on</Label>
+                <Input id="pay-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Method</Label>
+                <Select value={method} onValueChange={(v) => setMethod(v as PaymentMethod)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="pay-ref">Reference</Label>
+                <Input id="pay-ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Check #, transaction ID" />
+              </div>
             </div>
             <div>
-              <Label htmlFor="pay-date">Paid on</Label>
-              <Input id="pay-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+              <Label htmlFor="pay-notes">Notes</Label>
+              <Textarea id="pay-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Method</Label>
-              <Select value={method} onValueChange={(v) => setMethod(v as PaymentMethod)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {METHODS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="pay-ref">Reference</Label>
-              <Input id="pay-ref" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Check #, transaction ID" />
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="pay-notes">Notes</Label>
-            <Textarea id="pay-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-          </div>
-        </div>
+        )}
 
         {history.length > 0 && (
           <div className="mt-2">
@@ -162,14 +164,16 @@ export function PaymentDialog({ open, onOpenChange, charge, onSaved }: Props) {
                     <span className="text-muted-foreground"> · {formatDate(p.paid_at)} · {p.method}</span>
                     {p.reference && <span className="text-muted-foreground"> · {p.reference}</span>}
                   </div>
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground transition-colors duration-150 hover:text-destructive"
-                    onClick={() => setConfirming(p.id)}
-                    aria-label={`Remove the ${formatMoney(p.amount, app.settings.currency)} payment from ${formatDate(p.paid_at)}`}
-                  >
-                    Remove
-                  </button>
+                  {app.canMutatePortfolio && (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground transition-colors duration-150 hover:text-destructive"
+                      onClick={() => setConfirming(p.id)}
+                      aria-label={`Remove the ${formatMoney(p.amount, app.settings.currency)} payment from ${formatDate(p.paid_at)}`}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -178,9 +182,11 @@ export function PaymentDialog({ open, onOpenChange, charge, onSaved }: Props) {
 
         <DialogFooter className="mt-2">
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button type="button" onClick={save} disabled={saving || parseFloat(amount) <= 0}>
-            Record payment
-          </Button>
+          {app.canMutatePortfolio && (
+            <Button type="button" onClick={save} disabled={saving || parseFloat(amount) <= 0}>
+              Record payment
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -67,15 +67,6 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     setLandlords(lls);
   }, []);
 
-  const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
-    const body: Record<string, string> = {};
-    for (const [k, v] of Object.entries(patch)) {
-      if (v !== undefined) body[k] = String(v);
-    }
-    const res = await data.updateSettings(body);
-    setSettings(parseSettings(res));
-  }, []);
-
   useEffect(() => {
     if (!enabled) {
       setLoading(false);
@@ -93,59 +84,72 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     })();
   }, [refreshLookups, enabled]);
 
+  const requireAdmin = useCallback(() => {
+    if (!isAdmin) throw new Error("Only admins can change portfolio data.");
+  }, [isAdmin]);
+
   const createProperty = useCallback(async (input: NewProperty) => {
+    requireAdmin();
     const property = await data.createProperty(input);
     await refreshLookups();
     return property;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const updateProperty = useCallback(async (id: number, patch: Partial<NewProperty>) => {
+    requireAdmin();
     const property = await data.updateProperty(id, patch);
     await refreshLookups();
     return property;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const deleteProperty = useCallback(async (id: number) => {
+    requireAdmin();
     await data.deleteProperty(id);
     await refreshLookups();
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const listUnits = useCallback(async (propertyId?: number): Promise<Unit[]> => {
     return data.listUnits(propertyId);
   }, []);
 
   const createUnit = useCallback(async (input: NewUnit) => {
+    requireAdmin();
     const unit = await data.createUnit(input);
     await refreshLookups();
     return unit;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const updateUnit = useCallback(async (id: number, patch: Partial<NewUnit>) => {
+    requireAdmin();
     const unit = await data.updateUnit(id, patch);
     await refreshLookups();
     return unit;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const deleteUnit = useCallback(async (id: number) => {
+    requireAdmin();
     await data.deleteUnit(id);
     await refreshLookups();
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const listTenants = useCallback(async (q?: string): Promise<Tenant[]> => {
     return data.listTenants(q);
   }, []);
 
   const createTenant = useCallback(async (input: NewTenant) => {
+    requireAdmin();
     return data.createTenant(input);
-  }, []);
+  }, [requireAdmin]);
 
   const updateTenant = useCallback(async (id: number, patch: Partial<NewTenant>) => {
+    requireAdmin();
     return data.updateTenant(id, patch);
-  }, []);
+  }, [requireAdmin]);
 
   const deleteTenant = useCallback(async (id: number) => {
+    requireAdmin();
     await data.deleteTenant(id);
-  }, []);
+  }, [requireAdmin]);
 
   const listLeases = useCallback(async (params?: {
     tenant_id?: number;
@@ -156,29 +160,33 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
   }, []);
 
   const createLease = useCallback(async (input: NewLease) => {
+    requireAdmin();
     const lease = await data.createLease(input);
     await refreshLookups();
     return lease;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const updateLease = useCallback(async (id: number, patch: Partial<NewLease>) => {
+    requireAdmin();
     const lease = await data.updateLease(id, patch);
     await refreshLookups();
     return lease;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const deleteLease = useCallback(async (id: number) => {
+    requireAdmin();
     await data.deleteLease(id);
     await refreshLookups();
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const listCharges = useCallback(async (period?: string): Promise<RentCharge[]> => {
     return data.listCharges(period);
   }, []);
 
   const generateCharges = useCallback(async (period: string) => {
+    requireAdmin();
     return data.generateCharges(period);
-  }, []);
+  }, [requireAdmin]);
 
   const recordPayment = useCallback(async (input: {
     charge_id: number;
@@ -188,29 +196,34 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
     notes?: string | null;
     paid_at?: string;
   }) => {
+    requireAdmin();
     return data.recordPayment(input);
-  }, []);
+  }, [requireAdmin]);
 
   const deletePayment = useCallback(async (paymentId: number) => {
+    requireAdmin();
     return data.deletePayment(paymentId);
-  }, []);
+  }, [requireAdmin]);
 
   const createVendor = useCallback(async (input: NewVendor) => {
+    requireAdmin();
     const vendor = await data.createVendor(input);
     await refreshLookups();
     return vendor;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const updateVendor = useCallback(async (id: number, patch: Partial<NewVendor>) => {
+    requireAdmin();
     const vendor = await data.updateVendor(id, patch);
     await refreshLookups();
     return vendor;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const deleteVendor = useCallback(async (id: number) => {
+    requireAdmin();
     await data.deleteVendor(id);
     await refreshLookups();
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const listWorkOrders = useCallback(async (params?: {
     status?: string;
@@ -234,24 +247,39 @@ export function useAppState(enabled: boolean, opts?: { isAdmin?: boolean }) {
   }, [isAdmin]);
 
   const createLandlord = useCallback(async (input: NewLandlord) => {
+    requireAdmin();
     const landlord = await data.createLandlord(input);
     await refreshLookups();
     return landlord;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const updateLandlord = useCallback(async (id: number, patch: Partial<NewLandlord>) => {
+    requireAdmin();
     const landlord = await data.updateLandlord(id, patch);
     await refreshLookups();
     return landlord;
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
 
   const deleteLandlord = useCallback(async (id: number) => {
+    requireAdmin();
     await data.deleteLandlord(id);
     await refreshLookups();
-  }, [refreshLookups]);
+  }, [refreshLookups, requireAdmin]);
+
+  const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
+    requireAdmin();
+    const body: Record<string, string> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v !== undefined) body[k] = String(v);
+    }
+    const res = await data.updateSettings(body);
+    setSettings(parseSettings(res));
+  }, [requireAdmin]);
 
   return {
     isAdmin,
+    /** Portfolio create/update/delete (landlords, properties, rent, vendors, settings, …). */
+    canMutatePortfolio: isAdmin,
     /** Admin: full MR CRUD. Maintenance staff: update assigned only (RLS). */
     canCreateWorkOrders: isAdmin,
     canDeleteWorkOrders: isAdmin,

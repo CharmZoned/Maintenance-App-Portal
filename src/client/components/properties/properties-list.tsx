@@ -17,7 +17,7 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export function PropertiesList({ navigate }: { navigate: (to: string) => void }) {
-  const { properties } = useApp();
+  const { properties, canMutatePortfolio } = useApp();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Property | undefined>(undefined);
 
@@ -29,7 +29,7 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
       title="Properties"
       meta={`${properties.length} ${properties.length === 1 ? "property" : "properties"} · ${totalUnits} ${totalUnits === 1 ? "unit" : "units"} · ${occupied}/${totalUnits || 0} occupied`}
       actions={
-        properties.length > 0 ? (
+        canMutatePortfolio && properties.length > 0 ? (
           <Button onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
             <Plus className="h-4 w-4" />
             New property
@@ -44,9 +44,11 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
             <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
               Add your first property to start managing units, leases, and rent.
             </p>
-            <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
-              <Plus className="h-4 w-4" /> New property
-            </Button>
+            {canMutatePortfolio && (
+              <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
+                <Plus className="h-4 w-4" /> New property
+              </Button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -86,7 +88,7 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
                   <div className="mt-3 flex items-center justify-between">
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); setEditing(p); setDialogOpen(true); }}
+                      onClick={(e) => { e.stopPropagation(); if (!canMutatePortfolio) return; setEditing(p); setDialogOpen(true); }}
                       className="text-xs text-muted-foreground hover:text-foreground"
                     >
                       Edit

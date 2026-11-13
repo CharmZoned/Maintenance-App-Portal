@@ -111,7 +111,7 @@ export function LandlordDialog({ open, onOpenChange, landlord, onSaved }: Props)
             </div>
           </div>
           <DialogFooter className="gap-2 sm:justify-between">
-            {landlord ? (
+            {landlord && app.canMutatePortfolio ? (
               <Button type="button" variant="destructive" onClick={() => setConfirming(true)}>
                 Delete
               </Button>
@@ -122,9 +122,11 @@ export function LandlordDialog({ open, onOpenChange, landlord, onSaved }: Props)
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="button" onClick={() => void save()} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
+              {app.canMutatePortfolio && (
+                <Button type="button" onClick={() => void save()} disabled={saving}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              )}
             </div>
           </DialogFooter>
         </DialogContent>

@@ -8,7 +8,7 @@ import { LandlordDialog } from "./landlord-dialog";
 import type { Landlord } from "@/types";
 
 export function LandlordsPage() {
-  const { landlords } = useApp();
+  const { landlords, canMutatePortfolio } = useApp();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Landlord | undefined>(undefined);
 
@@ -17,15 +17,17 @@ export function LandlordsPage() {
       title="Landlords"
       meta={`${landlords.length} ${landlords.length === 1 ? "landlord" : "landlords"}`}
       actions={
-        <Button
-          onClick={() => {
-            setEditing(undefined);
-            setOpen(true);
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          New landlord
-        </Button>
+        canMutatePortfolio ? (
+          <Button
+            onClick={() => {
+              setEditing(undefined);
+              setOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            New landlord
+          </Button>
+        ) : null
       }
     >
       {landlords.length === 0 ? (
@@ -52,6 +54,7 @@ export function LandlordsPage() {
               key={l.id}
               className="cursor-pointer p-4 transition hover:border-emerald-300"
               onClick={() => {
+                if (!canMutatePortfolio) return;
                 setEditing(l);
                 setOpen(true);
               }}

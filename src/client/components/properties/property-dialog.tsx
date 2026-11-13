@@ -184,15 +184,17 @@ export function PropertyDialog({ open, onOpenChange, property, onSaved }: Props)
         </div>
 
         <DialogFooter className="mt-2">
-          {property && (
+          {property && app.canMutatePortfolio && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
               Delete
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !name.trim() || !landlordId}>
-            {property ? "Save changes" : "Create property"}
-          </Button>
+          {app.canMutatePortfolio && (
+            <Button type="button" onClick={save} disabled={saving || !name.trim() || !landlordId}>
+              {property ? "Save changes" : "Create property"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

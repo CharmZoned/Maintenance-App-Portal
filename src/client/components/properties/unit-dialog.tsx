@@ -133,15 +133,17 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
           </div>
         </div>
         <DialogFooter className="mt-2">
-          {unit && (
+          {unit && app.canMutatePortfolio && (
             <Button type="button" variant="destructive" className="sm:mr-auto" onClick={() => setConfirming(true)}>
               Delete
             </Button>
           )}
           <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" onClick={save} disabled={saving || !name.trim()}>
-            {unit ? "Save changes" : "Create unit"}
-          </Button>
+          {app.canMutatePortfolio && (
+            <Button type="button" onClick={save} disabled={saving || !name.trim()}>
+              {unit ? "Save changes" : "Create unit"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
