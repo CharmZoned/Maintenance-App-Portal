@@ -4,6 +4,8 @@
 **URL:** `https://bgjkjtfgrfiszbzatriq.supabase.co`  
 **Verified:** 2026-11-13 via Supabase MCP (live introspection)
 
+**Ops:** Never apply live DDL without a matching file under `supabase/migrations/` on a branch/PR first. Prefer staging. See [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).
+
 Shared with the marketing site (`LandlordGopherWebsite`). Website uses service-role inserts into `inquiries` only — do not add anon policies that expose inquiries.
 
 ---
