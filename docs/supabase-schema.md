@@ -19,7 +19,7 @@ Shared with the marketing site (`LandlordGopherWebsite`). Website uses service-r
 | `admin` | none (full access via RLS) |
 | `landlord` | `landlord_id` → `Landlords` |
 | `tenant` | `tenant_id` → `Tenants` |
-| `maintenance` | `staff_id` → `Staff` (staff / maintenance workers) |
+| `maintenance` | `staff_id` → `Staff` when linked; may be null while `pending`/`rejected`/`suspended` (signup queue) |
 
 Authorization reads `user_roles`, never Auth `user_metadata`. JWT claims are enriched by `public.custom_access_token_hook` (`user_role`, `landlord_id`, `tenant_id`, `staff_id`).
 
@@ -41,7 +41,7 @@ All domain tables below have **RLS enabled**. IDs are `bigint` identity (`GENERA
 | `created_at` | timestamptz | |
 | `account_status` | text | `pending \| approved \| rejected \| suspended`; default `pending`. Bootstrap admins set to `approved`. App gate + SQL helpers require `approved`. |
 
-CHECK `user_roles_subject_matches_role`: admin has no link ids; landlord/tenant/maintenance require their link id. **Exception (WS-B):** `maintenance` may omit `staff_id` when `account_status` is `pending`/`rejected`/`suspended` (public-signup approval queue). Approved maintenance still requires `staff_id`.
+CHECK `user_roles_subject_matches_role`: admin has no link ids; landlord/tenant always require their link id; `maintenance` requires `staff_id` when `approved`, and may omit it only for `pending`/`rejected`/`suspended` (public-signup approval queue).
 
 Policies: select own row (`authenticated`); select all for `supabase_auth_admin` (hook).  
 **Phase 2:** no client UPDATE policies — admins change status/role via SECURITY DEFINER RPCs `list_user_accounts_for_admin`, `set_account_status`, `admin_set_user_role` (email from `auth.users`).
@@ -228,5 +228,5 @@ select private.assign_admin('you@example.com');
 | Function | Purpose |
 |----------|---------|
 | `list_user_accounts_for_admin()` | Auth users + `user_roles` + email |
-| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended`. Approve requires linked role (LGA-18). Non-approve UPDATEs existing row; INSERTs unlinked maintenance queue row only when missing |
+| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended`. Approve requires admin, or maintenance/tenant/landlord with its link id (LGA-18). Non-approve UPDATEs existing row (keeps links); INSERTs unlinked maintenance queue row only when missing |
 | `admin_set_user_role(user_id, role, landlord_id?, tenant_id?, staff_id?)` | Role + link-id assignment |
