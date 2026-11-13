@@ -52,13 +52,23 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
         permission_to_enter: permission,
         priority,
       });
-      for (const file of files.slice(0, 5)) {
-        await app.uploadMaintenancePhoto(created.id, file);
+      let photoFail = false;
+      if (files.length) {
+        try {
+          for (const file of files.slice(0, 5)) {
+            await app.uploadMaintenancePhoto(created.id, file);
+          }
+        } catch (photoErr) {
+          photoFail = true;
+          app.setError((photoErr as Error).message);
+        }
       }
       app.setNotice(
-        files.length
-          ? "Request submitted with photos. Staff will update status in the portal."
-          : "Request submitted. Staff will update status in the portal.",
+        photoFail
+          ? "Request submitted, but photo upload failed — open the request and retry photos."
+          : files.length
+            ? "Request submitted with photos. Staff will update status in the portal."
+            : "Request submitted. Staff will update status in the portal.",
       );
       onSaved?.();
       onOpenChange(false);

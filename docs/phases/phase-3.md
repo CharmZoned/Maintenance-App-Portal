@@ -26,7 +26,8 @@
 - `set_account_status` / `admin_set_user_role`: approve linked tenants (`tenant` + `tenant_id`)
 - Harden `current_tenant_unit_id` / `current_tenant_property_id` (approved + tenant role)
 - FORCE RLS on Photos / Comments / StatusHistory
-- Existing tenant insert RLS + `maintenance-photos` storage policies reused (unchanged)
+- Tenant insert WITH CHECK tightened (property_id + forbid vendor/cost/notes); photo path/author + comment author bound to caller
+- Existing `maintenance-photos` storage policies reused
 
 ### FE
 

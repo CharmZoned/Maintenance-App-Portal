@@ -876,17 +876,33 @@ export async function submitTenantMaintenanceRequest(input: {
   return mapWorkOrder(data!);
 }
 
-export async function updateWorkOrder(id: number, patch: Partial<NewWorkOrder>): Promise<WorkOrder> {
+export async function updateWorkOrder(
+  id: number,
+  patch: Partial<NewWorkOrder>,
+  opts?: { previousStatus?: WorkOrderStatus },
+): Promise<WorkOrder> {
   const row: Record<string, unknown> = {};
   if (patch.title !== undefined) row.title = patch.title;
-  if (patch.description !== undefined) row.description = patch.description?.trim() || patch.title || "";
+  if (patch.description !== undefined) {
+    const next = patch.description?.trim();
+    // Never coerce empty description to title — protect_maintenance_request blocks non-admin description changes.
+    if (next) row.description = next;
+  }
   if (patch.category !== undefined) row.category = patch.category;
   if (patch.permission_to_enter !== undefined) row.permission_to_enter = patch.permission_to_enter;
   if (patch.priority !== undefined) row.priority = workOrderPriorityToDb(patch.priority);
   if (patch.status !== undefined) {
     row.status = workOrderStatusToDb(patch.status);
-    if (patch.status === "closed") row.closed_at = new Date().toISOString();
-    if (patch.status === "in_progress") row.started_at = new Date().toISOString();
+    const prev = opts?.previousStatus;
+    if (patch.status === "closed" && prev !== "closed") {
+      row.closed_at = new Date().toISOString();
+    }
+    if (patch.status === "in_progress" && prev !== "in_progress") {
+      row.started_at = new Date().toISOString();
+    }
+    if (prev === "closed" && patch.status !== "closed") {
+      row.closed_at = null;
+    }
   }
   if (patch.property_id !== undefined) row.property_id = patch.property_id;
   if (patch.unit_id !== undefined) row.unit_id = patch.unit_id;
@@ -922,22 +938,22 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
     .order("created_at", { ascending: true });
   if (error) throwSb(error);
   const rows = data ?? [];
-  const withUrls: MaintenancePhoto[] = [];
-  for (const row of rows) {
-    const { data: signed } = await supabase.storage
-      .from(PHOTO_BUCKET)
-      .createSignedUrl(row.storage_path, 3600);
-    withUrls.push({
-      id: row.id,
-      maintenance_request_id: row.maintenance_request_id,
-      storage_path: row.storage_path,
-      caption: row.caption,
-      created_at: row.created_at,
-      uploaded_by_role: row.uploaded_by_role,
-      url: signed?.signedUrl ?? null,
-    });
-  }
-  return withUrls;
+  return Promise.all(
+    rows.map(async (row) => {
+      const { data: signed } = await supabase.storage
+        .from(PHOTO_BUCKET)
+        .createSignedUrl(row.storage_path, 3600);
+      return {
+        id: row.id,
+        maintenance_request_id: row.maintenance_request_id,
+        storage_path: row.storage_path,
+        caption: row.caption,
+        created_at: row.created_at,
+        uploaded_by_role: row.uploaded_by_role,
+        url: signed?.signedUrl ?? null,
+      };
+    }),
+  );
 }
 
 export async function uploadMaintenancePhoto(
@@ -956,7 +972,8 @@ export async function uploadMaintenancePhoto(
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const rawExt = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
+  const ext = (rawExt ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${requestId}/${crypto.randomUUID()}.${ext}`;
 
   const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {

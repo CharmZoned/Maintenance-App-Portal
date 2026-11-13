@@ -169,17 +169,21 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
 
   async function save() {
     if (!title.trim()) return;
-    if (!app.isAdmin && status === "scheduled") {
+    const prevStatus = workOrder?.status;
+    const transitioningToScheduled = status === "scheduled" && prevStatus !== "scheduled";
+    const prevSched = workOrder?.scheduled_at?.slice(0, 10) ?? "";
+    const schedChanged = scheduledAt !== prevSched;
+    if (!app.isAdmin && transitioningToScheduled) {
       app.setError("Only admins can Accept & schedule.");
       return;
     }
-    if (!app.isAdmin && scheduledAt && scheduledAt !== (workOrder?.scheduled_at?.slice(0, 10) ?? "")) {
+    if (!app.isAdmin && schedChanged) {
       app.setError("Only admins can set the scheduled date.");
       return;
     }
     setSaving(true);
     try {
-      const payload = {
+      const payload: Parameters<typeof app.updateWorkOrder>[1] & { title: string } = {
         property_id: propertyId ? Number(propertyId) : null,
         unit_id: unitId ? Number(unitId) : null,
         vendor_id: vendorId ? Number(vendorId) : null,
@@ -189,23 +193,38 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         priority,
         status,
         permission_to_enter: permission,
-        scheduled_at: scheduledAt || null,
         cost: cost ? parseFloat(cost) : null,
         notes: notes.trim() || null,
       };
+      // Only admins send scheduled_at — avoids date-only rewrite tripping protect trigger for staff.
+      if (app.isAdmin) {
+        payload.scheduled_at = scheduledAt || null;
+      }
       let id = workOrder?.id;
       if (workOrder) {
-        await app.updateWorkOrder(workOrder.id, payload);
+        await app.updateWorkOrder(workOrder.id, payload, { previousStatus: prevStatus });
       } else {
         const created = await app.createWorkOrder(payload);
         id = created.id;
       }
-      if (id != null) {
-        for (const file of photoFiles.slice(0, 5)) {
-          await app.uploadMaintenancePhoto(id, file);
+      let photoFail = false;
+      if (id != null && photoFiles.length) {
+        try {
+          for (const file of photoFiles.slice(0, 5)) {
+            await app.uploadMaintenancePhoto(id, file);
+          }
+        } catch (photoErr) {
+          photoFail = true;
+          app.setError((photoErr as Error).message);
         }
       }
-      app.setNotice(workOrder ? "Work order saved." : "Work order created.");
+      app.setNotice(
+        photoFail
+          ? "Work order saved, but photo upload failed — retry from the request."
+          : workOrder
+            ? "Work order saved."
+            : "Work order created.",
+      );
       onSaved?.();
       onOpenChange(false);
     } catch (err) {

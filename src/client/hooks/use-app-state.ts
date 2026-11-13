@@ -258,9 +258,16 @@ export function useAppState(
     [isTenant],
   );
 
-  const updateWorkOrder = useCallback(async (id: number, patch: Partial<NewWorkOrder>) => {
-    return data.updateWorkOrder(id, patch);
-  }, []);
+  const updateWorkOrder = useCallback(
+    async (
+      id: number,
+      patch: Partial<NewWorkOrder>,
+      opts?: { previousStatus?: WorkOrder["status"] },
+    ) => {
+      return data.updateWorkOrder(id, patch, opts);
+    },
+    [],
+  );
 
   const deleteWorkOrder = useCallback(async (id: number) => {
     if (!isAdmin) throw new Error("Only admins can delete maintenance requests.");
