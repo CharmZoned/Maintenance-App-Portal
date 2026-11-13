@@ -1,20 +1,26 @@
 # Phase 2 — Account approval + Applications UI (R2, R8)
 
-**Status:** Planning (this document). Feature implementation starts only after this plan is accepted and Phase 1 MVP is merged (or stacked underneath).  
-**Depends on:** Phase 1 Auth + `user_roles.account_status` + approved-only RLS helpers (branch `cursor/phase0-phase1-mvp-8ed9`).  
-**Out of scope here:** Tenant maintenance submit (Phase 3), website CTA (Phase 4), documents, notifications, full performance rewrite of `data.ts`.
+**Status:** Planning with locked product decisions (2026-11-13). Feature work starts after the Nov 9 maintenance port onto `master`.  
+**Depends on:** Phase 1 Auth + `user_roles.account_status` + approved-only RLS helpers; port of `cursor/maintenance-work-orders-33a0`.  
+**Out of scope here:** Tenant maintenance submit (Phase 3), website CTA (Phase 4), documents, notifications, messaging (Phase 2.5), full performance rewrite of `data.ts`.
+
+**Locked for this phase**
+
+- Signup → Supabase **email verification** → `account_status = pending` until **admin** approves
+- **Only admin** may approve / reject / suspend accounts (not maintenance role)
+- Related (Nov 9 port): **only admin** may OK / Accept & schedule maintenance orders
 
 ---
 
 ## Goal
 
-Pending users cannot use the portal; admins can **approve / reject / suspend** accounts; rental **Applications** UI is clearly separate from account approval.
+Pending users cannot use the portal; **admins** can **approve / reject / suspend** accounts; rental **Applications** UI is clearly separate from account approval.
 
 **DoD**
 
-- [ ] Signup (or invite) lands in `account_status = pending`
+- [ ] Signup with email verification; verified users land in `account_status = pending`
 - [ ] Pending / rejected / suspended cannot load portfolio data (UI + RLS already partially done in Phase 1 — keep hardened)
-- [ ] Admin Users page can list users by status and change status
+- [ ] Admin Users page can list users by status and change status (**admin-only**)
 - [ ] Applications list/detail exists and is labeled as rental applicants (not the approval queue)
 - [ ] QA checklist signed off
 

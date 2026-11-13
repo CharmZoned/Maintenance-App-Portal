@@ -5,13 +5,27 @@
 | Item | Status |
 |------|--------|
 | Default branches | `master` and `main` are aligned at the same tip |
-| Open PRs | None |
 | Phase 0–1 | Merged (PR #1) |
 | Cursor review skills | Merged (PR #2) under `.cursor/skills/` |
-| Phase 2 planning | On default branch — see [`docs/phases/phase-2.md`](phases/phase-2.md) |
-| Phase 2 feature work | Not started — wait for go-ahead |
+| Phase 2 planning detail | [`docs/phases/phase-2.md`](phases/phase-2.md) — never replace this tracker with a planning stub |
+| Phase 2 feature work | Not started — after Nov 9 maintenance port |
+| Next engineering | Port `cursor/maintenance-work-orders-33a0` → admin approval UI |
 
-**Verified on tip:** `pnpm typecheck` and `pnpm build` succeed.
+**Verified on tip:** `pnpm typecheck` and `pnpm build` succeed (re-check after each PR).
+
+---
+
+## Product decisions (locked 2026-11-13)
+
+| Topic | Decision |
+|-------|----------|
+| Document visibility | **Admin only** sets visibility to `tenant`, `staff`, or `landlord`. |
+| OK / Accept orders | **Admin only** can OK / Accept & schedule maintenance orders. |
+| Account approval | **Admin only** approve / reject / suspend (`account_status`). |
+| Sign-up | Email signup → Supabase **email verification** → `account_status = pending` until admin approves. |
+| Messaging | Draft **Phase 2.5**: in-portal threads for staff↔tenant and staff↔landlord (not maintenance comments). |
+| Mobile / web push | **Defer native push.** Soft browser/in-app permission **popup placeholder** now; replaceable later. Email + in-app alerts are the real channel first. |
+| Tracker edits | Additive patches only — do not merge Phase 2 planning stubs over this file. |
 
 ---
 
@@ -52,14 +66,15 @@ Do not treat README checklists as done. Status is vs **this app’s code**, with
 
 | ID | Description | Status | Evidence | Remaining work / acceptance |
 |----|-------------|--------|----------|-----------------------------|
-| **R1** Accounts and login | Missing in app | No users/passwords/sessions in portal; Supabase Auth exists platform-side; `user_roles` + `handle_new_user` in DB | Wire `@supabase/supabase-js`, signup/login/verify/reset/logout UI; map Auth user → `user_roles` + Staff/Landlord/Tenant row; AC: unauthenticated users cannot load portfolio data |
-| **R2** Account approval | Missing | No pending/approve/reject/suspend; `Applications` is rental applicants (API in Hono, **no UI**); Supabase `Applications` has RLS but no policies | Add `account_status` (or equivalent) + staff approval UI; do **not** overload rental Applications; AC: new accounts blocked until approved (except bootstrap admin) |
-| **R3** Properties and units | Partial in app; stronger in Supabase | App: CRUD properties/units + lease→tenant. No landlord entity in D1. Supabase: `Landlords` + `Properties.landlord_id` already | Point UI at Supabase; require landlord on property create; staff landlord management screens; AC: every property has landlord; units CRUD under property |
-| **R4** Maintenance requests | Partial | App work orders: description, priority, statuses open→cancelled; staff-only; no category/photos/history UI. Supabase: `MaintenanceRequests` with category, photos, comments, tenant insert RLS | Map work-order UI to Supabase model; tenant submit path; photo upload to bucket; status history (table or comment audit); AC: tenant submits with category+photos; staff updates status with trail |
-| **R5** Property documents | Missing | No documents table/routes/storage beyond maintenance photos | New `PropertyDocuments` (+ Storage bucket) + staff upload/list/download; AC: staff attach docs to property/unit with RLS |
-| **R6** Notifications | Missing | No email/push/in-app | Start with in-app + email on request create/status change (Resend/Supabase); push later; AC: staff alerted on new tenant request |
-| **R7** Permissions | Missing in app; partial in DB | All Hono routes unauthenticated. Supabase RLS present for landlords/properties/units/tenants/staff/maintenance/user_roles; **gaps** on leases/rent/vendors/settings/applications | Kill open D1 API or protect it; client uses user JWT; fill missing RLS; AC: role A cannot read role B’s rows |
-| **R8** Admin web portal | Partial | Dashboard, properties, tenants, leases, rent, maintenance, settings exist; no users/approvals/messages/documents; not staff-gated | Auth gate + role-based nav; user/approval admin; documents; optional messages; AC: only approved staff/admin reach admin routes |
+| **R1** Accounts and login | Partial (Phase 1) | Supabase Auth + gates landed; signup/email-verify UX still thin | Complete signup → **email verification** → pending; login/reset; map Auth → `user_roles` + domain row; AC: unverified limited; unauthenticated cannot load portfolio |
+| **R2** Account approval | Partial (column + gate; no admin UI) | `account_status` + RLS helpers exist; no Users approval screen | **Admin-only** approve / reject / suspend UI + policies; do **not** overload rental Applications; AC: new accounts blocked until admin approves (bootstrap admin excepted) |
+| **R3** Properties and units | Partial | Phase 1 Supabase portfolio + landlords | Keep landlord-required properties; AC: every property has landlord; units CRUD under property |
+| **R4** Maintenance requests | Partial | Basic WO UI; Nov 9 branch has photos/comments/Accept & schedule | Port Nov 9 into SPA; tenant submit later (Phase 3); **admin-only** OK / Accept & schedule; AC: photos+comments+trail; only admin OKs orders |
+| **R5** Property documents | Missing | No documents beyond maintenance photos | `PropertyDocuments` + bucket; **admin-only** visibility `tenant`\|`staff`\|`landlord`; tenants read `tenant`-visible for their lease/unit; AC: visibility RLS enforced |
+| **R6** Notifications | Missing | No email/push/in-app | Email + in-app on create/status change; soft **permission popup placeholder** (swappable); **native/mobile push deferred**; AC: staff alerted on new tenant request |
+| **R7** Permissions | Partial | JWT + RLS; mutate UI gaps for non-admin | Fill RLS gaps; gate mutate UI; AC: role A cannot read/write role B’s rows; admin-only for status, order OK, doc visibility |
+| **R8** Admin web portal | Partial | Portfolio screens exist; no users/approvals/messages/documents | Auth gate + role-based nav; admin Users/approval; documents; messaging; AC: only approved roles reach their routes |
+| **R9** Messaging (draft) | Missing | No threads | Phase **2.5** draft: staff↔tenant and staff↔landlord threads + RLS; not WO comments; AC: parties only see their threads |
 
 **Conflicts / outdated items**
 - Your gap table matches the **portal app**, but understates Supabase (landlords, category, photos, roles, RLS helpers already exist).
@@ -194,19 +209,35 @@ flowchart LR
 
 ## Phase 2 — Account approval + Applications UI (R2, R8)
 
-**Detail plan:** [`docs/phases/phase-2.md`](phases/phase-2.md) (includes Phase 1 leftovers checklist).
+**Detail plan:** [`docs/phases/phase-2.md`](phases/phase-2.md) (includes Phase 1 leftovers checklist).  
+**Prerequisite:** surgical port of Nov 9 maintenance (`cursor/maintenance-work-orders-33a0`) onto `master` first.
 
 **Agents:** BE (status enforcement + admin RPCs/policies) → FE (approval queue + Applications screens) → QA.
 
 | Step | Agent | Work |
 |------|-------|------|
-| P2a | BE | Enforce `account_status`: pending users blocked by RLS or Edge gate; admin-only update policies; optional `approve_user` RPC |
-| P2b | FE | Admin “Users” page: pending / approve / reject / suspend; signup lands in pending |
+| P2a | BE | Enforce `account_status`; **admin-only** update policies / `approve_user` RPC; email-verify + pending path |
+| P2b | FE | Admin “Users” page: pending / approve / reject / suspend; signup → verify → pending |
 | P2c | FE | Applications list/detail (rental applicants) — clearly labeled; not the approval queue |
-| P2d | QA | Pending cannot load data; approve unlocks; reject/suspend stick |
+| P2d | QA | Unverified/pending cannot load data; admin approve unlocks; reject/suspend stick; non-admin cannot change status |
 
 **Parallel:** P2c Applications UI can run beside P2b once read policies exist.  
-**DoD:** Pending users cannot use portal; staff can approve; Applications UI separate from account approval.
+**DoD:** Pending users cannot use portal; **only admin** can approve; Applications UI separate from account approval.
+
+---
+
+## Phase 2.5 — Messaging (R9) — draft
+
+**Agents:** BE (threads/messages tables + RLS) → FE (inbox + thread UI) → QA.
+
+| Step | Agent | Work |
+|------|-------|------|
+| P2.5a | BE | `MessageThreads` / `Messages` (names TBD); participants staff↔tenant and staff↔landlord; RLS |
+| P2.5b | FE | Inbox, thread view, compose; deep-link from tenant/landlord/maintenance context where useful |
+| P2.5c | QA | No cross-thread leakage; maintenance comments remain separate |
+
+**Start after:** Phase 2 admin approval (D).  
+**DoD:** Staff can message tenants and landlords in-app with RLS.
 
 ---
 
@@ -246,37 +277,37 @@ flowchart LR
 
 | Step | Agent | Work |
 |------|-------|------|
-| P5a | BE | `PropertyDocuments` table; private `property-documents` bucket; staff/admin/landlord policies |
-| P5b | FE | Upload/list/download on property (and unit if linked) |
-| P5c | QA | Tenant cannot read staff-only docs; landlord scoped |
+| P5a | BE | `PropertyDocuments` + visibility enum `tenant`\|`staff`\|`landlord`; private bucket; **only admin** may set/change visibility; read policies by role |
+| P5b | FE | Upload/list/download; admin visibility control; tenant sees only `tenant`-visible for their lease/unit |
+| P5c | QA | Non-admin cannot change visibility; tenant cannot read staff/landlord-only docs; landlord scoped to own properties |
 
-**DoD:** Staff attach docs to property/unit with RLS.
+**DoD:** Docs attached with admin-controlled visibility; tenants can access tenant-visible docs.
 
 ---
 
 ## Phase 6 — Notifications (R6)
 
-**Agents:** BE (trigger/Edge Function + email provider) → FE (optional in-app bell) → QA.
+**Agents:** BE (trigger/Edge Function + email provider) → FE (in-app bell + soft permission popup) → QA.
 
 | Step | Agent | Work |
 |------|-------|------|
 | P6a | BE | On MaintenanceRequests insert/status change → email staff where `gets_request_alerts`; secrets in host env |
-| P6b | FE | Optional in-app notification list (DB table if needed) |
-| P6c | QA | Alert fires once per event; disabled flag respected |
+| P6b | FE | In-app notification list; **soft browser/in-app permission popup** as a replaceable placeholder (no native push yet) |
+| P6c | QA | Alert fires once per event; disabled flag respected; popup can be dismissed without breaking email/in-app |
 
-**DoD:** Configurable staff email alerts on new/updated requests; push deferred.
+**DoD:** Configurable staff email + in-app alerts; native/mobile push deferred; popup is swappable later.
 
 ---
 
-## Coordinator runbook (execute time)
+## Coordinator runbook (next)
 
-1. Phase 0 docs PR → merge.
-2. Spawn **BE P1a** + **FE P1a** in parallel.
-3. On BE P1a merge: spawn **BE P1b**, then **FE P1b** (stacked), then **FE P1c**, then **QA P1**.
-4. User reviews Phase 1 → spawn Phase 2 agents (and optionally Phase 4 WEB).
-5. Continue Phase 3 → 5 → 6 with the same BE→FE→QA pattern.
+1. Land docs PR with locked decisions (this change).
+2. Port Nov 9 maintenance onto `master` (admin-only Accept & schedule).
+3. Phase 2 admin approval + signup/verify; then Applications UI.
+4. Phase 2.5 messaging draft implementation.
+5. Continue Phase 3 → 4 → 5 → 6 (push remains deferred / popup placeholder).
 
-**Open questions still useful (non-blocking for Phase 1):**
-1. Portal host target (Cloudflare Pages vs Vercel) — recommend Cloudflare Pages next to current Workers setup; tradeoff: website is Next.js/Vercel-friendly.
-2. Email provider for Phase 6 (Resend vs Supabase) — recommend Resend; tradeoff: extra vendor vs built-in limits.
-3. Tenant UI in same SPA vs subdomain — recommend same SPA with role-based routes for MVP.
+**Still useful (non-blocking):**
+1. Portal host (Cloudflare Pages vs Vercel).
+2. Email provider for Phase 6 (Resend vs Supabase) — recommend Resend.
+3. Tenant UI in same SPA vs subdomain — recommend same SPA.
