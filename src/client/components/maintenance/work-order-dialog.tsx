@@ -38,12 +38,17 @@ const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
   { value: "urgent", label: "Urgent" },
 ];
 
-const STAFF_STATUSES: { value: WorkOrderStatus; label: string }[] = [
-  { value: "open", label: "Open" },
-  { value: "in_progress", label: "In progress" },
-  { value: "on_hold", label: "On hold" },
-  { value: "closed", label: "Closed" },
-];
+function staffStatusOptions(hasAssignee: boolean): { value: WorkOrderStatus; label: string }[] {
+  const base: { value: WorkOrderStatus; label: string }[] = [
+    { value: "open", label: "Open" },
+    { value: "on_hold", label: "On hold" },
+    { value: "closed", label: "Closed" },
+  ];
+  if (hasAssignee) {
+    base.splice(1, 0, { value: "in_progress", label: "In progress" });
+  }
+  return base;
+}
 
 const ADMIN_STATUSES: { value: WorkOrderStatus; label: string }[] = [
   { value: "open", label: "Open" },
@@ -86,14 +91,17 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
 
   const listUnits = app.listUnits;
   const setError = app.setError;
-  const statusOptions = app.isAdmin ? ADMIN_STATUSES : STAFF_STATUSES;
+  const hasAssignee = Boolean(assignedStaffId || workOrder?.assigned_staff_id);
+  const statusOptions = app.isAdmin
+    ? ADMIN_STATUSES
+    : staffStatusOptions(hasAssignee || status === "in_progress" || status === "scheduled");
   const isCreate = !workOrder;
   const readOnlyCore = Boolean(workOrder) && !app.isAdmin;
   const showAccept =
     Boolean(workOrder) &&
     app.canAcceptAndSchedule &&
     !app.isTenant &&
-    (workOrder?.status === "open" || status === "open");
+    workOrder?.status === "open";
 
   useEffect(() => {
     if (!open || app.isTenant) return;
@@ -200,8 +208,12 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   }, [photoPreviews]);
 
   function companionError(): string | null {
-    if (status === "scheduled") {
-      if (!app.isAdmin) return "Only admins can Accept & schedule.";
+    const prev = workOrder?.status;
+    const enteringScheduled = status === "scheduled" && prev !== "scheduled";
+    if (enteringScheduled && !app.isAdmin) {
+      return "Only admins can Accept & schedule.";
+    }
+    if (status === "scheduled" && app.isAdmin) {
       if (!assignedStaffId) return "Scheduled requests need an assigned staff member.";
       if (!scheduledAt) return "Scheduled requests need a date.";
     }
@@ -555,7 +567,11 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label>Status</Label>
-                    <Select value={status} onValueChange={(v) => setStatus(v as WorkOrderStatus)}>
+                    <Select
+                      value={isCreate ? "open" : status}
+                      onValueChange={(v) => setStatus(v as WorkOrderStatus)}
+                      disabled={isCreate}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -570,6 +586,16 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                         )}
                       </SelectContent>
                     </Select>
+                    {isCreate && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        New requests start Open — use Accept &amp; schedule after create.
+                      </p>
+                    )}
+                    {!app.isAdmin && !hasAssignee && !isCreate && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        In progress unlocks after an admin assigns staff.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label>Vendor</Label>

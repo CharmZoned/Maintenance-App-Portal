@@ -790,6 +790,7 @@ export async function listWorkOrders(params?: {
 }
 
 export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
+  // New WOs start Open — companion-heavy statuses go through update / Accept & schedule.
   const { data, error } = await supabase
     .from("MaintenanceRequests")
     .insert({
@@ -797,16 +798,21 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
       description: input.description?.trim() || input.title,
       category: (input.category as string) || "General repair",
       priority: workOrderPriorityToDb(input.priority ?? "normal"),
-      status: workOrderStatusToDb(input.status ?? "open"),
+      status: "Open",
       property_id: input.property_id ?? null,
       unit_id: input.unit_id ?? null,
       vendor_id: input.vendor_id ?? null,
       submitted_by_tenant_id: input.tenant_id ?? null,
-      assigned_staff_id: input.assigned_staff_id ?? null,
-      scheduled_for: input.scheduled_at ?? null,
+      assigned_staff_id: null,
+      scheduled_for: null,
       cost: input.cost ?? null,
       notes: input.notes ?? null,
       permission_to_enter: input.permission_to_enter ?? false,
+      resolution_notes: null,
+      hold_reason: null,
+      next_follow_up_date: null,
+      started_at: null,
+      closed_at: null,
     })
     .select("*")
     .single();
@@ -900,7 +906,7 @@ export async function updateWorkOrder(
     }
     // Companion CHECK: Closed needs closed_at; any other status needs closed_at null
     if (patch.status === "closed") {
-      row.closed_at = new Date().toISOString();
+      if (prev !== "closed") row.closed_at = new Date().toISOString();
     } else {
       row.closed_at = null;
     }
