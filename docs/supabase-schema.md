@@ -49,7 +49,8 @@ Policies: select own row (`authenticated`); select all for `supabase_auth_admin`
 Key columns: `id`, `source_id`, `first_name`, `last_name`, `company_name`, `email` NOT NULL, `mobile_phone`, `preferred_contact`, `notes`, `is_test_data`, `created_at`.
 
 **RLS (pre-Phase 1):** select for admin / self landlord / tenant-of-landlord / staff-who-sees-landlord.  
-**Phase 1 adds:** admin insert/update/delete.
+**Phase 1 adds:** admin insert/update/delete policies.  
+**WS-A (`20261114010000`):** `authenticated` table GRANT INSERT/UPDATE/DELETE (+ identity sequence USAGE/SELECT) — policies existed but privileges were still SELECT-only on live/emulator baseline. Same grant for `Properties`, `Units`, `Tenants`.
 
 ### `Properties`
 
@@ -113,6 +114,7 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 
 - SELECT: admin / submitting tenant / assigned staff / landlord owns unit (`maintenance_requests_select`)
 - UPDATE: USING `private.can_update_maintenance_request(id)`; WITH CHECK on the NEW row — admin or assigned maintenance only (`maintenance_requests_update`, LGA-19)
+- DELETE: admin (`maintenance_requests_admin_delete`); **WS-A** adds `GRANT DELETE` to `authenticated` (policy existed; privilege missing)
 - Comments SELECT: `can_select_maintenance_request` + visibility rules (`maintenance_comments_select`)
 - Photos / comments mutate via `can_upload_maintenance_photo` / `can_update_maintenance_request` (and tenant comment path)
 

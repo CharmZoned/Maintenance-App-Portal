@@ -31,6 +31,8 @@ Verified via Supabase MCP (2026-11-13). Later phase migrations may `CREATE OR RE
 | `maintenance_requests_update` | UPDATE | `can_update_maintenance_request(id)` (USING + WITH CHECK) |
 | `maintenance_requests_admin_delete` | DELETE | `is_admin()` |
 
+**Privileges (table GRANT, separate from RLS):** Through Oct 2026 baseline, `authenticated` had SELECT/INSERT/UPDATE on `MaintenanceRequests` but **no DELETE**. WS-A migration `20261114010000_fix_authenticated_portfolio_and_mr_grants.sql` adds `GRANT DELETE` (and portfolio INSERT/UPDATE/DELETE on Landlords/Properties/Units/Tenants + sequences). Apply to live only after that file is on a PR/`master` — see `docs/ops/schema-migrations.md`.
+
 ### `MaintenanceRequestComments`
 
 | Policy | Cmd | Predicate (summary) |
