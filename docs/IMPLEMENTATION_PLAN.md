@@ -134,7 +134,7 @@ Branches: `cursor/phaseN-<topic>-0924` (or existing `-8ed9` series). Stack depen
 **Remaining (Phase 1.5, not Phase 2 product):**
 - ~~Gate portfolio mutate UI on `isAdmin`~~ / ~~lease-dialog effect~~ — done on `master` (`3fc7a64`).
 - ~~Payment ledger RPC, `FORCE ROW LEVEL SECURITY`, narrow `vendors_select`~~ — Phase 1.5 migration.
-- Should/Perf leftovers (generateCharges soft-fail, dashboard N+1) — optional.
+- Parked Should/Perf (RPC tests, generateCharges soft-fail, dashboard N+1) — [`docs/deferred-work.md`](deferred-work.md).
 - Manual QA checklist in phase-1.md (env + seeded admin).
 
 **Out of scope (still later phases):** approval queue UI, tenant submit, website repo, documents, notifications.

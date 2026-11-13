@@ -81,7 +81,7 @@ Charges: `lease_id`, `period` (`YYYY-MM`), `due_date`, `amount`, `amount_paid`, 
 Payments: `charge_id`, `paid_at`, `amount`, `method`, `reference`, `notes`.
 
 Same advisor gap → Phase 1 policies.  
-**Phase 1.5:** `FORCE ROW LEVEL SECURITY`; portal mutates via RPCs `public.record_payment` / `public.delete_payment` (admin-only, atomic `amount_paid` + status).
+**Phase 1.5:** `FORCE ROW LEVEL SECURITY`; portal mutates via RPCs `public.record_payment` / `public.delete_payment` (admin-only; `amount_paid`/`status` from `SUM(Payments)`). Authenticated Payment INSERT/UPDATE/DELETE policies dropped — use RPCs only (SELECT kept for history).
 
 ### `Vendors`
 

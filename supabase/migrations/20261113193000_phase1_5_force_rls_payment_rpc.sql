@@ -81,7 +81,11 @@ BEGIN
     COALESCE(p_paid_at, now())
   );
 
-  new_paid := COALESCE(charge.amount_paid, 0) + p_amount;
+  -- Always recompute from ledger rows (heals prior drift; matches delete_payment)
+  SELECT COALESCE(sum(amount), 0) INTO new_paid
+  FROM public."Payments"
+  WHERE charge_id = p_charge_id;
+
   new_status := private.rent_charge_status_for_paid(
     COALESCE(charge.amount, 0)::numeric,
     new_paid,
@@ -169,7 +173,13 @@ REVOKE ALL ON FUNCTION public.delete_payment(bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.record_payment(bigint, numeric, text, text, text, timestamptz) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_payment(bigint) TO authenticated;
 
+-- Authenticated path must use RPCs; keep SELECT for history UI.
+-- SECURITY DEFINER RPCs still write as owner. Service role / SQL Editor bypass RLS.
+DROP POLICY IF EXISTS payments_admin_insert ON public."Payments";
+DROP POLICY IF EXISTS payments_admin_update ON public."Payments";
+DROP POLICY IF EXISTS payments_admin_delete ON public."Payments";
+
 COMMENT ON FUNCTION public.record_payment IS
-  'Phase 1.5: admin-only atomic payment insert + RentCharges.amount_paid/status update.';
+  'Phase 1.5: admin-only atomic payment insert + RentCharges.amount_paid/status from SUM(Payments).';
 COMMENT ON FUNCTION public.delete_payment IS
-  'Phase 1.5: admin-only atomic payment delete + RentCharges balance recompute.';
+  'Phase 1.5: admin-only atomic payment delete + RentCharges balance from SUM(Payments).';

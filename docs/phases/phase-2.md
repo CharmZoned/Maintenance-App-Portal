@@ -29,10 +29,11 @@ Pending users cannot use the portal; admins can **approve / reject / suspend** a
 | Medium | Payment ledger RPC (record + delete) | **Done** Phase 1.5 — `public.record_payment` / `delete_payment` |
 | Medium | `FORCE ROW LEVEL SECURITY` on Phase 1 tables | **Done** Phase 1.5 — Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings |
 | Medium | Narrow `vendors_select` for landlords | **Done** Phase 1.5 — staff/admin only |
-| Should | Soft-fail bootstrap / `generateCharges` error swallowing | Surface failures via popup/toast |
-| Perf | Dashboard / charges N+1 | Defer unless blocking; not Phase 2 DoD |
+| Should | Soft-fail bootstrap / `generateCharges` error swallowing | Tracked in [`docs/deferred-work.md`](../deferred-work.md) |
+| Perf | Dashboard / charges N+1 | Tracked in [`docs/deferred-work.md`](../deferred-work.md) |
+| Should | Payment ledger / status RPC tests | Tracked in [`docs/deferred-work.md`](../deferred-work.md) |
 
-Track as Cursor Project task **Phase 1.5** (**LGA-6**). High + lease-dialog + Medium items done; Should/Perf optional before multi-staff.
+Track as Cursor Project task **Phase 1.5** (**LGA-6**). High + lease-dialog + Medium items done; parked Should/Perf → [`deferred-work.md`](../deferred-work.md).
 
 ---
 
