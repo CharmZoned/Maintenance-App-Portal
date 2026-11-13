@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
 import { UnitDialog } from "./unit-dialog";
+import { PropertyDocumentsPanel } from "./property-documents-panel";
 import { WorkOrderDialog } from "../maintenance/work-order-dialog";
 import type { Property, Unit, WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
@@ -210,6 +211,8 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
             </Card>
           )}
         </section>
+
+        <PropertyDocumentsPanel propertyId={property.id} units={units} />
 
       <PropertyDialog
         open={editingProperty}

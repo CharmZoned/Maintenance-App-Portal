@@ -13,7 +13,8 @@
 | Plan revision (Phase 0–1 done + defer notify) | Merged (PR #3) |
 | Phase 1.5 / deferred tracking | Merged (PRs #5–#7, #9) |
 | Phase 2 feature work | Merged (PR #8) |
-| Phase 3 tenant maintenance | Branch `cursor/phase3-tenant-maintenance-0924` (LGA-8) |
+| Phase 3 tenant maintenance | Merged (PR #10) |
+| Phase 5 property documents | Branch `cursor/phase5-property-documents-0924` (LGA-10) |
 | Nov 9 WO port | Covered by Phase 3 status/photos UI (or deferred leftovers) |
 
 ## Status snapshot
@@ -24,9 +25,9 @@
 | **1** | Auth, RLS, Supabase data cutover, landlords | **Done** (merged via PR #1; optional manual QA + small leftovers remain) |
 | **1.5** | Phase 1 follow-ups (UX AuthZ + lease-dialog) | **Done** (merged; residual polish in deferred-work) |
 | **2** | Account approval UI + Applications UI | **Done** (merged PR #8) |
-| **3** | Tenant maintenance + photos + status history | Implemented (branch / PR — merge next) |
+| **3** | Tenant maintenance + photos + status history | **Done** (merged PR #10) |
 | **4** | Website CTA + shared Auth links | Planned (can overlap Phase 2 once portal URL is stable) |
-| **5** | Property documents | Planned |
+| **5** | Property documents | Implemented (branch `cursor/phase5-property-documents-0924`) |
 | **6** | Email / push / messaging notifications | **Deferred** — use in-app popups/toasts for now |
 
 ```mermaid
@@ -80,7 +81,7 @@ Status reflects **shipped portal code on `master`**, not the original gap table.
 | **R2** | Account approval | **Partial** | `account_status` column; unapproved users blocked in UI + RLS helpers | No admin Users queue (approve/reject/suspend); no Applications UI → **Phase 2** |
 | **R3** | Properties and units | **Done (staff MVP)** | Landlords CRUD; properties require `landlord_id`; units/tenants/leases on Supabase | Landlord self-serve portal later (out of MVP); keep polishing via normal CRUD |
 | **R4** | Maintenance requests | **Mostly done (Phase 3)** | Staff WOs + tenant submit/photos/status history/comments on branch | Merge Phase 3; optional richer Accept & schedule UX (deferred) |
-| **R5** | Property documents | **Not started** | — | Upload/store/list with visibility → **Phase 5** |
+| **R5** | Property documents | **Partial (Phase 5)** | Table + bucket + RLS; staff/admin UI; tenant Documents page | Landlord portal docs UI deferred |
 | **R6** | Notifications / messaging | **Deferred** | — | No email, push, or messaging. Use **popups/toasts** in the web app for operator feedback until Phase 6 is reopened |
 | **R7** | Permissions | **Mostly done** | Auth required; JWT client; RLS on core tables; D1 API retired | Applications RLS; leftover AuthZ UX for `maintenance` role mutates; optional FORCE RLS → **Phase 1.5 / 2** |
 | **R8** | Admin web portal | **Partial** | Staff/admin auth gate + portfolio screens | Users/approvals, Applications, documents; not a public unauthenticated dashboard anymore → **Phase 2** then **5** |
@@ -99,7 +100,7 @@ Create/update Project tasks so the list tracks planned work (not the old “ever
 | Phase 2 — Account approval + Applications UI (R2, R8) | Queued | Next major product phase |
 | Phase 3 — Tenant maintenance + photos + history (R4) | In progress / PR | Branch `cursor/phase3-tenant-maintenance-0924` |
 | Phase 4 — Website CTA + shared Auth (portal URL) | Queued | Can overlap Phase 2 |
-| Phase 5 — Property documents (R5) | Queued | After Phase 3 preferred |
+| Phase 5 — Property documents (R5) | In progress / review | Branch `cursor/phase5-property-documents-0924` |
 | Phase 6 — Email / push / messaging (R6) | **Canceled / Deferred** | Explicit hold; popups only for now |
 | R3 Properties & units (staff) | **Done** | Covered by Phase 1 |
 | R7 Permissions (core) | **Done** (with known leftovers in 1.5) | Covered by Phase 1 |
@@ -186,13 +187,15 @@ Near-term alerts = **in-app popups/toasts**, not email/push.
 
 ---
 
-## Phase 5 — Property documents (R5)
+## Phase 5 — Property documents (R5) — IMPLEMENTED (PR pending)
 
-| Step | Agent | Work |
-|------|-------|------|
-| P5a | BE | `PropertyDocuments` + private bucket; admin visibility `tenant`\|`staff`\|`landlord` |
-| P5b | FE | Upload/list/download on property (and unit if linked) |
-| P5c | QA | Tenant only reads tenant-visible docs; landlord scoped |
+| Step | Agent | Work | Done |
+|------|-------|------|------|
+| P5a | BE | `PropertyDocuments` + private bucket; admin visibility `tenant`\|`staff`\|`landlord` | [x] |
+| P5b | FE | Upload/list/download on property (and unit if linked); tenant Documents page | [x] |
+| P5c | QA | Tenant only reads tenant-visible docs; landlord scoped (RLS) | [x] |
+
+**Detail:** [`docs/phases/phase-5.md`](phases/phase-5.md)
 
 ---
 

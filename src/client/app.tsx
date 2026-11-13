@@ -14,6 +14,7 @@ import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
+import { TenantDocumentsPage } from "./components/documents/tenant-documents-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { LandlordsPage } from "./components/landlords/landlords-page";
 import { ApplicationsPage } from "./components/applications/applications-page";
@@ -41,6 +42,7 @@ const ADMIN_ITEMS: AppNavItem[] = [
 ];
 const TENANT_NAV: AppNavItem[] = [
   { id: "maintenance", label: "My requests", href: "/maintenance", home: true, icon: "list-checks", color: "orange" },
+  { id: "documents", label: "Documents", href: "/documents", icon: "clipboard-list", color: "blue" },
 ];
 
 function activeFor(route: Route): string {
@@ -77,7 +79,7 @@ export function App() {
 
   useEffect(() => {
     if (!ready || !isTenant) return;
-    if (route.name !== "maintenance") {
+    if (route.name !== "maintenance" && route.name !== "documents") {
       navigate("/maintenance");
     }
   }, [ready, isTenant, route.name, navigate]);
@@ -226,7 +228,8 @@ export function App() {
           ) : isTenant ? (
             <>
               {route.name === "maintenance" && <MaintenancePage />}
-              {route.name !== "maintenance" && (
+              {route.name === "documents" && <TenantDocumentsPage />}
+              {route.name !== "maintenance" && route.name !== "documents" && (
                 <Placeholder title="Tenant portal" message="Use My requests to submit and track maintenance." />
               )}
             </>
