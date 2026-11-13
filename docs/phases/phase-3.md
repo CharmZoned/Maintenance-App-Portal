@@ -51,7 +51,7 @@
 | 5 | Staff sets Scheduled | Denied (UI + protect trigger) |
 | 6 | Admin Accept & schedule | Status Scheduled + date; history row |
 | 7 | Internal comment | Tenant cannot see; staff/admin can |
-| 8 | Landlord still blocked from portal | Forbidden until landlord shell ships |
+| 8 | Landlord with Landlord link approved | Thin read-only shell (Properties + Maintenance); write ACL → LGA-19 |
 
 ---
 
