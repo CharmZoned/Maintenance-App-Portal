@@ -5,22 +5,36 @@ import { Label } from "@/components/ui/label";
 
 interface Props {
   onLogin: (email: string, password: string) => Promise<void>;
+  onSignup: (email: string, password: string) => Promise<"session" | "confirm">;
   onForgot: () => void;
   error: string | null;
   configured: boolean;
 }
 
-export function LoginPage({ onLogin, onForgot, error, configured }: Props) {
+export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Props) {
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [info, setInfo] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) return;
     setBusy(true);
+    setInfo(null);
     try {
-      await onLogin(email.trim(), password);
+      if (mode === "login") {
+        await onLogin(email.trim(), password);
+      } else {
+        const result = await onSignup(email.trim(), password);
+        if (result === "confirm") {
+          setInfo(
+            "Check your email to verify your account. After verification your status is pending until an admin approves you.",
+          );
+        }
+        // session path: auth gate will show unapproved / pending
+      }
     } catch {
       /* surfaced via error prop */
     } finally {
@@ -34,7 +48,9 @@ export function LoginPage({ onLogin, onForgot, error, configured }: Props) {
         <div className="space-y-1 text-center">
           <p className="text-sm font-medium tracking-wide text-emerald-800">Landlord Gopher</p>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">LG Maintenance Portal</h1>
-          <p className="text-sm text-muted-foreground">Staff and admin sign-in</p>
+          <p className="text-sm text-muted-foreground">
+            {mode === "login" ? "Staff and admin sign-in" : "Create an account (pending approval)"}
+          </p>
         </div>
 
         <form onSubmit={submit} className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -46,6 +62,9 @@ export function LoginPage({ onLogin, onForgot, error, configured }: Props) {
           )}
           {error && (
             <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>
+          )}
+          {info && (
+            <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{info}</p>
           )}
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -63,21 +82,45 @@ export function LoginPage({ onLogin, onForgot, error, configured }: Props) {
             <Input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              minLength={6}
             />
           </div>
           <Button type="submit" className="w-full" disabled={busy || !configured}>
-            {busy ? "Signing in…" : "Sign in"}
+            {busy
+              ? mode === "login"
+                ? "Signing in…"
+                : "Creating account…"
+              : mode === "login"
+                ? "Sign in"
+                : "Sign up"}
           </Button>
+          {mode === "login" ? (
+            <button
+              type="button"
+              className="w-full text-center text-sm text-emerald-800 underline-offset-2 hover:underline"
+              onClick={onForgot}
+            >
+              Forgot password?
+            </button>
+          ) : (
+            <p className="text-center text-xs text-muted-foreground">
+              After email verification an admin must approve your account before you can use the
+              portal.
+            </p>
+          )}
           <button
             type="button"
-            className="w-full text-center text-sm text-emerald-800 underline-offset-2 hover:underline"
-            onClick={onForgot}
+            className="w-full text-center text-sm text-slate-600 underline-offset-2 hover:underline"
+            onClick={() => {
+              setMode(mode === "login" ? "signup" : "login");
+              setInfo(null);
+            }}
           >
-            Forgot password?
+            {mode === "login" ? "Need an account? Sign up" : "Already have an account? Sign in"}
           </button>
         </form>
       </div>

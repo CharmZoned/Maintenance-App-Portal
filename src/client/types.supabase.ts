@@ -392,6 +392,40 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["MaintenanceRequests"]["Insert"]>;
         Relationships: [];
       };
+      Applications: {
+        Row: {
+          id: number;
+          created_at: string;
+          unit_id: number | null;
+          first_name: string;
+          last_name: string;
+          email: string | null;
+          phone: string | null;
+          monthly_income: number | null;
+          employer: string | null;
+          desired_move_in: string | null;
+          status: string;
+          notes: string | null;
+          is_test_data: boolean;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          unit_id?: number | null;
+          first_name: string;
+          last_name: string;
+          email?: string | null;
+          phone?: string | null;
+          monthly_income?: number | null;
+          employer?: string | null;
+          desired_move_in?: string | null;
+          status?: string;
+          notes?: string | null;
+          is_test_data?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["Applications"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -409,6 +443,33 @@ export interface Database {
       delete_payment: {
         Args: { p_payment_id: number };
         Returns: Database["public"]["Tables"]["RentCharges"]["Row"];
+      };
+      list_user_accounts_for_admin: {
+        Args: Record<string, never>;
+        Returns: {
+          user_id: string;
+          email: string | null;
+          role: AppRole | null;
+          landlord_id: number | null;
+          tenant_id: number | null;
+          staff_id: number | null;
+          account_status: AccountStatus;
+          created_at: string;
+        }[];
+      };
+      set_account_status: {
+        Args: { p_user_id: string; p_status: string };
+        Returns: Database["public"]["Tables"]["user_roles"]["Row"];
+      };
+      admin_set_user_role: {
+        Args: {
+          p_user_id: string;
+          p_role: AppRole;
+          p_landlord_id?: number | null;
+          p_tenant_id?: number | null;
+          p_staff_id?: number | null;
+        };
+        Returns: Database["public"]["Tables"]["user_roles"]["Row"];
       };
     };
     Enums: { app_role: AppRole };

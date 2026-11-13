@@ -1,6 +1,6 @@
 # Phase 2 — Account approval + Applications UI (R2, R8)
 
-**Status:** Next product phase (planning ready). Phase 1.5 High/Must/Medium leftovers are done (see table); only Should/Perf remain.  
+**Status:** Implemented on branch `cursor/phase2-account-approval-0924` (LGA-7).  
 **Depends on:** Phase 1 Auth + `user_roles.account_status` + approved-only RLS helpers (**done** on `master`).  
 **Out of scope here:** Tenant maintenance submit (Phase 3), website CTA (Phase 4), documents (Phase 5), email/push/messaging (Phase 6 **deferred** — use popups/toasts).
 
@@ -12,11 +12,11 @@ Pending users cannot use the portal; admins can **approve / reject / suspend** a
 
 **DoD**
 
-- [ ] Signup (or invite) lands in `account_status = pending` after email verification
-- [ ] Pending / rejected / suspended cannot load portfolio data (UI + RLS — partially done in Phase 1)
-- [ ] Admin Users page can list users by status and change status
-- [ ] Applications list/detail exists and is labeled as rental applicants (not the approval queue)
-- [ ] QA checklist signed off
+- [x] Signup (or invite) lands in `account_status = pending` after email verification
+- [x] Pending / rejected / suspended cannot load portfolio data (UI + RLS — Phase 1 helpers + Phase 2 UX)
+- [x] Admin Users page can list users by status and change status
+- [x] Applications list/detail exists and is labeled as rental applicants (not the approval queue)
+- [ ] QA checklist signed off (manual env checks; `pnpm typecheck` / `pnpm build` in PR)
 
 ---
 
@@ -66,32 +66,32 @@ flowchart LR
 
 ### P2a — BE: Status policies + admin update path
 
-- [ ] Admin-only policies (or SECURITY DEFINER RPC) to update `user_roles.account_status`
-- [ ] Ensure non-admins cannot self-approve
-- [ ] Optional RPC `approve_user` / `set_account_status`
-- [ ] Applications: add read (and admin write) RLS — table currently RLS-on, no policies
-- [ ] Migration under `supabase/migrations/`; update `docs/supabase-schema.md`
-- [ ] Do **not** break `inquiries`
+- [x] Admin-only policies (or SECURITY DEFINER RPC) to update `user_roles.account_status`
+- [x] Ensure non-admins cannot self-approve
+- [x] Optional RPC `approve_user` / `set_account_status` (+ `list_user_accounts_for_admin`, `admin_set_user_role`)
+- [x] Applications: add read (and admin write) RLS — staff/admin CRUD; delete admin-only; FORCE RLS
+- [x] Migration under `supabase/migrations/`; update `docs/supabase-schema.md`
+- [x] Do **not** break `inquiries`
 
 **Acceptance:** Admin can change status via SQL/RPC; pending JWT cannot SELECT portfolio; Applications selectable by admin.
 
 ### P2b — FE: Users / approval queue
 
-- [ ] Admin-only nav **Users**
-- [ ] List `user_roles` (+ email via safe view/RPC — never service role in client)
-- [ ] Filters: pending / approved / rejected / suspended
-- [ ] Actions: Approve, Reject, Suspend (and optionally Re-approve) with confirm **popups**
-- [ ] Signup → email verify → `pending`; copy explains wait for approval
-- [ ] After approve, prompt refresh / re-login
+- [x] Admin-only nav **Users**
+- [x] List `user_roles` (+ email via safe view/RPC — never service role in client)
+- [x] Filters: pending / approved / rejected / suspended
+- [x] Actions: Approve, Reject, Suspend (and optionally Re-approve) with confirm **popups**
+- [x] Signup → email verify → `pending`; copy explains wait for approval
+- [x] After approve, prompt refresh / re-login (“Check again” on blocked page)
 
 **Acceptance:** Admin clears pending queue; pending user blocked until approved.
 
 ### P2c — FE: Applications (rental applicants)
 
-- [ ] Nav/page **Applications** labeled "Rental applications"
-- [ ] List/detail for `Applications` (status, unit, contact, notes)
-- [ ] Staff/admin create/edit/update status
-- [ ] Empty states; no confusion with Users page
+- [x] Nav/page **Applications** labeled "Rental applications"
+- [x] List/detail for `Applications` (status, unit, contact, notes)
+- [x] Staff/admin create/edit/update status
+- [x] Empty states; no confusion with Users page
 
 ### P2d — QA
 
@@ -106,8 +106,8 @@ flowchart LR
 
 ---
 
-## Open questions (non-blocking)
+## Open questions (resolved in P2a)
 
-1. Public signup vs invite-only Auth for staff?
-2. How to show Auth email in Users list without service role?
-3. Should landlords appear in the same Users queue or only staff/admin applicants?
+1. **Public signup vs invite-only:** Public email signup enabled in portal UI; unmatched emails get pending `maintenance` via `handle_new_user`.
+2. **Email in Users list:** `list_user_accounts_for_admin()` SECURITY DEFINER joins `auth.users` (no service role in client).
+3. **Landlords in same queue:** Yes — all Auth users listed; filter by status; role/link editable.

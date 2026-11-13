@@ -9,6 +9,7 @@ import {
   mapPayment,
   mapVendor,
   mapWorkOrder,
+  mapApplication,
   propertyToInsert,
   unitStatusToDb,
   workOrderStatusToDb,
@@ -24,6 +25,7 @@ import type {
   Payment,
   Vendor,
   WorkOrder,
+  Application,
   NewProperty,
   NewUnit,
   NewTenant,
@@ -31,11 +33,32 @@ import type {
   NewWorkOrder,
   NewVendor,
   NewLandlord,
+  NewApplication,
   DashboardSummary,
   UnitStatus,
   WorkOrderStatus,
+  ApplicationStatus,
 } from "../types";
-import type { Tables } from "../types.supabase";
+import type { AccountStatus, AppRole, Tables } from "../types.supabase";
+
+export interface UserAccountRow {
+  user_id: string;
+  email: string | null;
+  role: AppRole | null;
+  landlord_id: number | null;
+  tenant_id: number | null;
+  staff_id: number | null;
+  account_status: AccountStatus;
+  created_at: string;
+}
+
+export interface StaffMember {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  job_title: string | null;
+}
 
 function throwSb(error: { message: string } | null): never {
   throw new Error(error?.message || "Supabase request failed");
@@ -883,3 +906,145 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 }
 
 void assertOk;
+
+// ── Staff (admin role linking) ────────────────────────────────────
+
+export async function listStaff(): Promise<StaffMember[]> {
+  const { data, error } = await supabase
+    .from("Staff")
+    .select("id, first_name, last_name, email, job_title")
+    .order("last_name");
+  if (error) throwSb(error);
+  return (data ?? []).map((s) => ({
+    id: s.id,
+    first_name: s.first_name,
+    last_name: s.last_name,
+    email: s.email,
+    job_title: s.job_title,
+  }));
+}
+
+// ── User accounts (admin approval queue) ──────────────────────────
+
+export async function listUserAccounts(): Promise<UserAccountRow[]> {
+  const { data, error } = await supabase.rpc("list_user_accounts_for_admin");
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    user_id: row.user_id,
+    email: row.email,
+    role: row.role,
+    landlord_id: row.landlord_id,
+    tenant_id: row.tenant_id,
+    staff_id: row.staff_id,
+    account_status: (row.account_status || "pending") as AccountStatus,
+    created_at: row.created_at,
+  }));
+}
+
+export async function setAccountStatus(
+  userId: string,
+  status: AccountStatus,
+): Promise<Tables<"user_roles">> {
+  const { data, error } = await supabase.rpc("set_account_status", {
+    p_user_id: userId,
+    p_status: status,
+  });
+  if (error) throwSb(error);
+  return data!;
+}
+
+export async function adminSetUserRole(
+  userId: string,
+  role: AppRole,
+  links?: { landlord_id?: number | null; tenant_id?: number | null; staff_id?: number | null },
+): Promise<Tables<"user_roles">> {
+  const { data, error } = await supabase.rpc("admin_set_user_role", {
+    p_user_id: userId,
+    p_role: role,
+    p_landlord_id: links?.landlord_id ?? null,
+    p_tenant_id: links?.tenant_id ?? null,
+    p_staff_id: links?.staff_id ?? null,
+  });
+  if (error) throwSb(error);
+  return data!;
+}
+
+// ── Applications (rental applicants — not account approval) ───────
+
+export async function listApplications(status?: ApplicationStatus | "all"): Promise<Application[]> {
+  let q = supabase.from("Applications").select("*").order("created_at", { ascending: false });
+  if (status && status !== "all") q = q.eq("status", status);
+  const { data: rows, error } = await q;
+  if (error) throwSb(error);
+
+  const unitIds = [...new Set((rows ?? []).map((r) => r.unit_id).filter(Boolean))] as number[];
+  const { data: units } = unitIds.length
+    ? await supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
+    : { data: [] as { id: number; unit_label: string; property_id: number }[] };
+  const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
+  const propIds = [...new Set((units ?? []).map((u) => u.property_id))];
+  const { data: props } = propIds.length
+    ? await supabase.from("Properties").select("id, property_name").in("id", propIds)
+    : { data: [] as { id: number; property_name: string | null }[] };
+  const propMap = new Map((props ?? []).map((p) => [p.id, p]));
+
+  return (rows ?? []).map((row) => {
+    const unit = row.unit_id != null ? unitMap.get(row.unit_id) : undefined;
+    const prop = unit ? propMap.get(unit.property_id) : undefined;
+    return mapApplication(row, {
+      unit_name: unit?.unit_label ?? null,
+      property_name: prop?.property_name ?? null,
+    });
+  });
+}
+
+export async function createApplication(input: NewApplication): Promise<Application> {
+  const { data, error } = await supabase
+    .from("Applications")
+    .insert({
+      first_name: input.first_name,
+      last_name: input.last_name,
+      email: input.email ?? null,
+      phone: input.phone ?? null,
+      unit_id: input.unit_id ?? null,
+      monthly_income: input.monthly_income ?? null,
+      employer: input.employer ?? null,
+      desired_move_in: input.desired_move_in ?? null,
+      status: input.status ?? "new",
+      notes: input.notes ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throwSb(error);
+  return mapApplication(data!);
+}
+
+export async function updateApplication(
+  id: number,
+  patch: Partial<NewApplication>,
+): Promise<Application> {
+  const row: Record<string, unknown> = {};
+  if (patch.first_name !== undefined) row.first_name = patch.first_name;
+  if (patch.last_name !== undefined) row.last_name = patch.last_name;
+  if (patch.email !== undefined) row.email = patch.email;
+  if (patch.phone !== undefined) row.phone = patch.phone;
+  if (patch.unit_id !== undefined) row.unit_id = patch.unit_id;
+  if (patch.monthly_income !== undefined) row.monthly_income = patch.monthly_income;
+  if (patch.employer !== undefined) row.employer = patch.employer;
+  if (patch.desired_move_in !== undefined) row.desired_move_in = patch.desired_move_in;
+  if (patch.status !== undefined) row.status = patch.status;
+  if (patch.notes !== undefined) row.notes = patch.notes;
+  const { data, error } = await supabase
+    .from("Applications")
+    .update(row as never)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throwSb(error);
+  return mapApplication(data!);
+}
+
+export async function deleteApplication(id: number): Promise<void> {
+  const { error } = await supabase.from("Applications").delete().eq("id", id);
+  if (error) throwSb(error);
+}
