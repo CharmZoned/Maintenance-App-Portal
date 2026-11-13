@@ -4,6 +4,7 @@ import type {
   PropertyType,
   Unit,
   UnitStatus,
+  UnitReadiness,
   Tenant,
   Lease,
   LeaseStatus,
@@ -20,7 +21,13 @@ import type {
   ApplicationStatus,
   MaintenanceCategory,
 } from "../types";
-import { isMaintenanceCategory, isWorkOrderStatus } from "../types";
+import {
+  isMaintenanceCategory,
+  isPropertyType,
+  isUnitReadiness,
+  isUnitStatus,
+  isWorkOrderStatus,
+} from "../types";
 import type { Tables } from "../types.supabase";
 
 type SbProperty = Tables<"Properties">;
@@ -34,16 +41,40 @@ type SbMr = Tables<"MaintenanceRequests">;
 type SbLandlord = Tables<"Landlords">;
 type SbApplication = Tables<"Applications">;
 
+/** Normalize Title Case / kebab / snake labels to snake_case keys. */
 function lowerStatus(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, "_");
+  return s.trim().toLowerCase().replace(/[-\s]+/g, "_");
 }
 
+/** Live CHECK: Occupied | Vacant only. */
 const UNIT_STATUS_TO_DB: Record<UnitStatus, string> = {
   vacant: "Vacant",
   occupied: "Occupied",
-  turnover: "Turnover",
-  unavailable: "Unavailable",
 };
+
+/** Live CHECK: Ready | Turnover Needed | Turnover In Progress | Rehab Needed | Rehab In Progress */
+const UNIT_READINESS_TO_DB: Record<UnitReadiness, string> = {
+  ready: "Ready",
+  turnover_needed: "Turnover Needed",
+  turnover_in_progress: "Turnover In Progress",
+  rehab_needed: "Rehab Needed",
+  rehab_in_progress: "Rehab In Progress",
+};
+
+/** Live CHECK: Single-family | Multi-family | Condo | Townhouse | Apartment building | Commercial | Other */
+const PROPERTY_TYPE_TO_DB: Record<PropertyType, string> = {
+  single_family: "Single-family",
+  multi_family: "Multi-family",
+  condo: "Condo",
+  townhouse: "Townhouse",
+  apartment_building: "Apartment building",
+  commercial: "Commercial",
+  other: "Other",
+};
+
+const PROPERTY_TYPE_FROM_DB: Record<string, PropertyType> = Object.fromEntries(
+  Object.entries(PROPERTY_TYPE_TO_DB).map(([ui, db]) => [db, ui as PropertyType]),
+) as Record<string, PropertyType>;
 
 /** Live CHECK: Open | Scheduled | In Progress | On Hold | Closed */
 const WO_STATUS_TO_DB: Record<WorkOrderStatus, string> = {
@@ -75,6 +106,26 @@ export function mapLandlord(row: SbLandlord): Landlord {
   };
 }
 
+export function propertyTypeFromDb(value: string | null | undefined): PropertyType {
+  if (!value) return "single_family";
+  const direct = PROPERTY_TYPE_FROM_DB[value];
+  if (direct) return direct;
+  const key = lowerStatus(value);
+  if (isPropertyType(key)) return key;
+  return "single_family";
+}
+
+/** Live property_type CHECK — Title Case values only. */
+export function propertyTypeToDb(type: PropertyType | string): string {
+  const key = lowerStatus(type);
+  if (isPropertyType(key)) return PROPERTY_TYPE_TO_DB[key];
+  const already = PROPERTY_TYPE_FROM_DB[type.trim()];
+  if (already) return PROPERTY_TYPE_TO_DB[already];
+  throw new Error(
+    `Invalid property type "${type}". Use single_family / multi_family / condo / townhouse / apartment_building / commercial / other.`,
+  );
+}
+
 export function mapProperty(
   row: SbProperty,
   extras?: { unit_count?: number; occupied_count?: number; landlord_name?: string | null },
@@ -82,7 +133,7 @@ export function mapProperty(
   return {
     id: row.id,
     name: row.property_name ?? "",
-    type: (row.property_type as PropertyType) || "single_family",
+    type: propertyTypeFromDb(row.property_type),
     address: row.street_address,
     city: row.city,
     state: row.state,
@@ -123,7 +174,7 @@ export function propertyToInsert(data: {
 } {
   return {
     property_name: data.name,
-    property_type: data.type ?? "single_family",
+    property_type: propertyTypeToDb(data.type ?? "single_family"),
     street_address: data.address?.trim() || "TBD",
     city: data.city?.trim() || "TBD",
     state: data.state?.trim() || "MD",
@@ -133,6 +184,25 @@ export function propertyToInsert(data: {
     color: data.color ?? "sky",
     landlord_id: data.landlord_id,
   };
+}
+
+export function unitReadinessFromDb(value: string | null | undefined): UnitReadiness {
+  if (!value) return "ready";
+  const key = lowerStatus(value);
+  if (isUnitReadiness(key)) return key;
+  return "ready";
+}
+
+/** Live readiness_status CHECK — Title Case values only. */
+export function unitReadinessToDb(readiness: UnitReadiness | string): string {
+  const key = lowerStatus(readiness);
+  if (isUnitReadiness(key)) return UNIT_READINESS_TO_DB[key];
+  const trimmed = readiness.trim();
+  const fromTitle = Object.entries(UNIT_READINESS_TO_DB).find(([, db]) => db === trimmed);
+  if (fromTitle) return fromTitle[1];
+  throw new Error(
+    `Invalid unit readiness "${readiness}". Use ready / turnover_needed / turnover_in_progress / rehab_needed / rehab_in_progress.`,
+  );
 }
 
 export function mapUnit(
@@ -146,7 +216,7 @@ export function mapUnit(
     active_tenant_name?: string | null;
   },
 ): Unit {
-  const st = lowerStatus(row.status) as UnitStatus;
+  const st = lowerStatus(row.status);
   return {
     id: row.id,
     property_id: row.property_id,
@@ -155,9 +225,8 @@ export function mapUnit(
     bathrooms: Number(row.bathrooms ?? 0),
     sqft: row.sqft,
     market_rent: Number(row.market_rent),
-    status: (["vacant", "occupied", "turnover", "unavailable"].includes(st)
-      ? st
-      : "vacant") as UnitStatus,
+    status: isUnitStatus(st) ? st : "vacant",
+    readiness_status: unitReadinessFromDb(row.readiness_status),
     notes: row.notes,
     created_at: row.created_at,
     property_name: extras?.property_name,
@@ -169,8 +238,13 @@ export function mapUnit(
   };
 }
 
+/** Live Units.status CHECK — Occupied | Vacant only. */
 export function unitStatusToDb(status: UnitStatus | string): string {
-  return UNIT_STATUS_TO_DB[status as UnitStatus] ?? status;
+  const key = lowerStatus(status);
+  if (isUnitStatus(key)) return UNIT_STATUS_TO_DB[key];
+  throw new Error(
+    `Invalid unit status "${status}". Use vacant / occupied (turnover and rehab use readiness_status).`,
+  );
 }
 
 export function mapTenant(
@@ -397,4 +471,4 @@ export function mapApplication(
   };
 }
 
-export { UNIT_STATUS_TO_DB };
+export { UNIT_STATUS_TO_DB, UNIT_READINESS_TO_DB, PROPERTY_TYPE_TO_DB };

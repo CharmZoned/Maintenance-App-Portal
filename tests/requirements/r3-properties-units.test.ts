@@ -5,7 +5,7 @@
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
-import { propertyToInsert, unitStatusToDb } from "@/lib/mappers";
+import { propertyToInsert, unitReadinessToDb, unitStatusToDb } from "@/lib/mappers";
 import {
   clientFor,
   expectDenied,
@@ -151,17 +151,24 @@ describe("[R3] Properties and units", () => {
   describe("the app and the database agree on allowed values", () => {
     // Uses the app's own mapping code, written straight to the database (service
     // role), so this isolates "is the value acceptable" from "is the user allowed".
-    test.each(["single_family", "multi_family", "condo", "townhouse", "commercial"] as const)(
-      "property type '%s' offered in the property form is accepted",
-      async (type) => {
-        const row = propertyToInsert({ name: `Type check ${type}`, type, landlord_id: world.landlord.id });
-        const result = await serviceClient().from("Properties").insert(row).select("id").single();
-        expect(result.error, `database rejected property_type "${row.property_type}": ${result.error?.message}`).toBeNull();
-      },
-    );
+    test.each([
+      "single_family",
+      "multi_family",
+      "condo",
+      "townhouse",
+      "apartment_building",
+      "commercial",
+      "other",
+    ] as const)("property type '%s' offered in the property form is accepted", async (type) => {
+      const row = propertyToInsert({ name: `Type check ${type}`, type, landlord_id: world.landlord.id });
+      const result = await serviceClient().from("Properties").insert(row).select("id").single();
+      expect(result.error, `database rejected property_type "${row.property_type}": ${result.error?.message}`).toBeNull();
+      // Remove probe rows so later RLS visibility checks stay isolated.
+      if (result.data?.id != null) await serviceClient().from("Properties").delete().eq("id", result.data.id);
+    });
 
-    test.each(["vacant", "occupied", "turnover", "unavailable"] as const)(
-      "unit status '%s' offered in the unit form is accepted",
+    test.each(["vacant", "occupied"] as const)(
+      "unit occupancy '%s' offered in the unit form is accepted",
       async (status) => {
         const result = await serviceClient()
           .from("Units")
@@ -169,8 +176,33 @@ describe("[R3] Properties and units", () => {
           .select("id")
           .single();
         expect(result.error, `database rejected unit status "${unitStatusToDb(status)}": ${result.error?.message}`).toBeNull();
+        if (result.data?.id != null) await serviceClient().from("Units").delete().eq("id", result.data.id);
       },
     );
+
+    test.each([
+      "ready",
+      "turnover_needed",
+      "turnover_in_progress",
+      "rehab_needed",
+      "rehab_in_progress",
+    ] as const)("unit readiness '%s' offered in the unit form is accepted", async (readiness) => {
+      const result = await serviceClient()
+        .from("Units")
+        .insert({
+          property_id: world.property.id,
+          unit_label: `Readiness check ${readiness}`,
+          status: "Vacant",
+          readiness_status: unitReadinessToDb(readiness),
+        })
+        .select("id")
+        .single();
+      expect(
+        result.error,
+        `database rejected readiness_status "${unitReadinessToDb(readiness)}": ${result.error?.message}`,
+      ).toBeNull();
+      if (result.data?.id != null) await serviceClient().from("Units").delete().eq("id", result.data.id);
+    });
   });
 
   describe("who else can see or change the portfolio", () => {

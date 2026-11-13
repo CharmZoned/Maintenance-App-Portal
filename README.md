@@ -35,7 +35,7 @@ Open-source **property management software** lineage (Clawnify OpenProperty temp
 ### Properties & units
 - Property cards with type, address, color tag, occupancy snapshot
 - Per-property page with summary tiles, unit grid, and the property's open work orders
-- Units track bedrooms, bathrooms, square footage, market rent, and status (vacant / occupied / turnover / unavailable)
+- Units track bedrooms, bathrooms, square footage, market rent, occupancy (vacant / occupied), and readiness (ready / turnover / rehab)
 
 ### Tenants
 - Searchable list showing each tenant's active unit and contact info

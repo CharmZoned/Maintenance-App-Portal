@@ -9,22 +9,20 @@ import { PropertyDialog } from "./property-dialog";
 import { UnitDialog } from "./unit-dialog";
 import { PropertyDocumentsPanel } from "./property-documents-panel";
 import { WorkOrderDialog } from "../maintenance/work-order-dialog";
-import type { Property, Unit, WorkOrder } from "@/types";
+import { PROPERTY_TYPE_LABELS, UNIT_READINESS_LABELS, type Property, type Unit, type WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
-
-const TYPE_LABEL: Record<string, string> = {
-  single_family: "Single-family",
-  multi_family: "Multi-family",
-  condo: "Condo",
-  townhouse: "Townhouse",
-  commercial: "Commercial",
-};
 
 const STATUS_TONE: Record<string, string> = {
   vacant: "bg-warning-tint text-warning",
   occupied: "bg-success-tint text-success",
-  turnover: "bg-info-tint text-info",
-  unavailable: "bg-muted text-muted-foreground",
+};
+
+const READINESS_TONE: Record<string, string> = {
+  ready: "bg-success-tint text-success",
+  turnover_needed: "bg-info-tint text-info",
+  turnover_in_progress: "bg-info-tint text-info",
+  rehab_needed: "bg-warning-tint text-warning",
+  rehab_in_progress: "bg-warning-tint text-warning",
 };
 
 export function PropertyPage({ id, navigate }: { id: number; navigate: (to: string) => void }) {
@@ -105,7 +103,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
               <div className="flex items-center gap-2">
                 <h1 className="text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">{property.name}</h1>
                 <span className="rounded-full border bg-muted/30 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  {TYPE_LABEL[property.type] ?? property.type}
+                  {PROPERTY_TYPE_LABELS[property.type] ?? property.type}
                 </span>
               </div>
               {(property.address || property.city) && (
@@ -159,9 +157,16 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
                         {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} sqft` : ""}
                       </p>
                     </div>
-                    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
-                      {u.status}
-                    </span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
+                        {u.status}
+                      </span>
+                      {u.readiness_status !== "ready" && (
+                        <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", READINESS_TONE[u.readiness_status])}>
+                          {UNIT_READINESS_LABELS[u.readiness_status] ?? u.readiness_status}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="mt-3 flex items-end justify-between border-t pt-3">
                     <div>

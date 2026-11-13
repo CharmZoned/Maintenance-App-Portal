@@ -5,16 +5,8 @@ import { cn, colorClasses } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
-import type { Property } from "@/types";
+import { PROPERTY_TYPE_LABELS, type Property } from "@/types";
 import { PageShell } from "@/components/page-shell";
-
-const TYPE_LABEL: Record<string, string> = {
-  single_family: "Single-family",
-  multi_family: "Multi-family",
-  condo: "Condo",
-  townhouse: "Townhouse",
-  commercial: "Commercial",
-};
 
 export function PropertiesList({ navigate }: { navigate: (to: string) => void }) {
   const { properties, canMutatePortfolio } = useApp();
@@ -72,7 +64,7 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
                       <Building2 className="size-5" />
                     </div>
                     <span className="chip">
-                      {TYPE_LABEL[p.type] ?? p.type}
+                      {PROPERTY_TYPE_LABELS[p.type] ?? p.type}
                     </span>
                   </div>
                   <h3 className="font-semibold tracking-tight">{p.name}</h3>

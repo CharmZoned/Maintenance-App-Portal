@@ -198,10 +198,11 @@ Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `S
 |---------|----------|
 | `properties.name` | `Properties.property_name` |
 | `properties.address` | `Properties.street_address` |
-| `properties.type` | `Properties.property_type` |
+| `properties.type` (`single_family`, …) | `Properties.property_type` (`Single-family`, `Multi-family`, `Condo`, `Townhouse`, `Apartment building`, `Commercial`, `Other`) |
 | (none) | `Properties.landlord_id` **required** |
 | `units.name` | `Units.unit_label` |
-| unit status `vacant`/`occupied`/… | often Title Case in live data (`Vacant`/`Occupied`); mapping layer normalizes |
+| unit occupancy `vacant`/`occupied` | `Units.status` `Vacant`/`Occupied` only |
+| unit readiness `ready`/`turnover_needed`/… | `Units.readiness_status` (`Ready`, `Turnover Needed`, …) |
 | `tenants.phone` | `Tenants.mobile_phone` |
 | `work_orders` | `MaintenanceRequests` |
 | work order status `open` / `scheduled` / `in_progress` / `on_hold` / `closed` | `Open` / `Scheduled` / `In Progress` / `On Hold` / `Closed` (never D1 `Assigned` / `Completed` / `Cancelled`) |

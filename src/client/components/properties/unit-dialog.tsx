@@ -7,7 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Unit, UnitStatus } from "@/types";
+import {
+  UNIT_READINESS_LABELS,
+  UNIT_READINESSES,
+  UNIT_STATUSES,
+  type Unit,
+  type UnitReadiness,
+  type UnitStatus,
+} from "@/types";
 
 interface Props {
   open: boolean;
@@ -17,12 +24,15 @@ interface Props {
   onSaved?: () => void;
 }
 
-const STATUSES: { value: UnitStatus; label: string }[] = [
-  { value: "vacant", label: "Vacant" },
-  { value: "occupied", label: "Occupied" },
-  { value: "turnover", label: "Turnover" },
-  { value: "unavailable", label: "Unavailable" },
-];
+const STATUSES: { value: UnitStatus; label: string }[] = UNIT_STATUSES.map((value) => ({
+  value,
+  label: value === "vacant" ? "Vacant" : "Occupied",
+}));
+
+const READINESSES: { value: UnitReadiness; label: string }[] = UNIT_READINESSES.map((value) => ({
+  value,
+  label: UNIT_READINESS_LABELS[value],
+}));
 
 export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Props) {
   const app = useApp();
@@ -33,6 +43,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
   const [sqft, setSqft] = useState("");
   const [marketRent, setMarketRent] = useState("0");
   const [status, setStatus] = useState<UnitStatus>("vacant");
+  const [readiness, setReadiness] = useState<UnitReadiness>("ready");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -44,6 +55,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
     setSqft(unit?.sqft ? String(unit.sqft) : "");
     setMarketRent(String(unit?.market_rent ?? 0));
     setStatus(unit?.status ?? "vacant");
+    setReadiness(unit?.readiness_status ?? "ready");
     setNotes(unit?.notes ?? "");
   }, [open, unit]);
 
@@ -59,6 +71,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
         sqft: sqft ? parseInt(sqft, 10) : null,
         market_rent: parseFloat(marketRent) || 0,
         status,
+        readiness_status: readiness,
         notes: notes.trim() || null,
       };
       if (unit) {
@@ -118,7 +131,7 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
               <Input id="unit-rent" type="number" value={marketRent} onChange={(e) => setMarketRent(e.target.value)} />
             </div>
             <div>
-              <Label>Status</Label>
+              <Label>Occupancy</Label>
               <Select value={status} onValueChange={(v) => setStatus(v as UnitStatus)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -126,6 +139,15 @@ export function UnitDialog({ open, onOpenChange, propertyId, unit, onSaved }: Pr
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div>
+            <Label>Readiness</Label>
+            <Select value={readiness} onValueChange={(v) => setReadiness(v as UnitReadiness)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {READINESSES.map((r) => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div>
             <Label htmlFor="unit-notes">Notes</Label>

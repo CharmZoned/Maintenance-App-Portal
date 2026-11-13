@@ -1,6 +1,38 @@
 // ── Core entities ──────────────────────────────────────────────────
 
-export type PropertyType = "single_family" | "multi_family" | "condo" | "townhouse" | "commercial";
+/** UI keys — map 1:1 to Properties.property_type CHECK via propertyTypeToDb. */
+export type PropertyType =
+  | "single_family"
+  | "multi_family"
+  | "condo"
+  | "townhouse"
+  | "apartment_building"
+  | "commercial"
+  | "other";
+
+export const PROPERTY_TYPES: PropertyType[] = [
+  "single_family",
+  "multi_family",
+  "condo",
+  "townhouse",
+  "apartment_building",
+  "commercial",
+  "other",
+];
+
+export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
+  single_family: "Single-family",
+  multi_family: "Multi-family",
+  condo: "Condo",
+  townhouse: "Townhouse",
+  apartment_building: "Apartment building",
+  commercial: "Commercial",
+  other: "Other",
+};
+
+export function isPropertyType(value: string): value is PropertyType {
+  return (PROPERTY_TYPES as string[]).includes(value);
+}
 
 export interface Landlord {
   id: number;
@@ -33,7 +65,45 @@ export interface Property {
   occupied_count?: number;
 }
 
-export type UnitStatus = "vacant" | "occupied" | "turnover" | "unavailable";
+/** Occupancy only — live Units.status CHECK is Occupied | Vacant. */
+export type UnitStatus = "vacant" | "occupied";
+
+export const UNIT_STATUSES: UnitStatus[] = ["vacant", "occupied"];
+
+export function isUnitStatus(value: string): value is UnitStatus {
+  return (UNIT_STATUSES as string[]).includes(value);
+}
+
+/**
+ * Turnaround / rehab — live Units.readiness_status CHECK.
+ * Former UI “turnover” maps here (not Units.status).
+ */
+export type UnitReadiness =
+  | "ready"
+  | "turnover_needed"
+  | "turnover_in_progress"
+  | "rehab_needed"
+  | "rehab_in_progress";
+
+export const UNIT_READINESSES: UnitReadiness[] = [
+  "ready",
+  "turnover_needed",
+  "turnover_in_progress",
+  "rehab_needed",
+  "rehab_in_progress",
+];
+
+export const UNIT_READINESS_LABELS: Record<UnitReadiness, string> = {
+  ready: "Ready",
+  turnover_needed: "Turnover needed",
+  turnover_in_progress: "Turnover in progress",
+  rehab_needed: "Rehab needed",
+  rehab_in_progress: "Rehab in progress",
+};
+
+export function isUnitReadiness(value: string): value is UnitReadiness {
+  return (UNIT_READINESSES as string[]).includes(value);
+}
 
 export interface Unit {
   id: number;
@@ -44,6 +114,7 @@ export interface Unit {
   sqft: number | null;
   market_rent: number;
   status: UnitStatus;
+  readiness_status: UnitReadiness;
   notes: string | null;
   created_at: string;
   // Joined

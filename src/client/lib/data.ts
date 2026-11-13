@@ -11,6 +11,8 @@ import {
   mapWorkOrder,
   mapApplication,
   propertyToInsert,
+  propertyTypeToDb,
+  unitReadinessToDb,
   unitStatusToDb,
   workOrderStatusToDb,
   workOrderPriorityToDb,
@@ -208,7 +210,7 @@ export async function createProperty(input: NewProperty): Promise<Property> {
 export async function updateProperty(id: number, patch: Partial<NewProperty>): Promise<Property> {
   const row: Record<string, unknown> = {};
   if (patch.name !== undefined) row.property_name = patch.name;
-  if (patch.type !== undefined) row.property_type = patch.type;
+  if (patch.type !== undefined) row.property_type = propertyTypeToDb(patch.type);
   if (patch.address !== undefined) row.street_address = patch.address?.trim() || "TBD";
   if (patch.city !== undefined) row.city = patch.city?.trim() || "TBD";
   if (patch.state !== undefined) row.state = patch.state?.trim() || "MD";
@@ -299,6 +301,7 @@ export async function createUnit(input: NewUnit): Promise<Unit> {
       sqft: input.sqft ?? null,
       market_rent: input.market_rent ?? 0,
       status: unitStatusToDb((input.status as UnitStatus) ?? "vacant"),
+      readiness_status: unitReadinessToDb(input.readiness_status ?? "ready"),
       notes: input.notes ?? null,
     })
     .select("*")
@@ -316,6 +319,7 @@ export async function updateUnit(id: number, patch: Partial<NewUnit>): Promise<U
   if (patch.sqft !== undefined) row.sqft = patch.sqft;
   if (patch.market_rent !== undefined) row.market_rent = patch.market_rent;
   if (patch.status !== undefined) row.status = unitStatusToDb(patch.status as UnitStatus);
+  if (patch.readiness_status !== undefined) row.readiness_status = unitReadinessToDb(patch.readiness_status);
   if (patch.notes !== undefined) row.notes = patch.notes;
   const { data, error } = await supabase.from("Units").update(row as never).eq("id", id).select("*").single();
   if (error) throwSb(error);
