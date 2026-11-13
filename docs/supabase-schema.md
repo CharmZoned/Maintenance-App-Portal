@@ -4,6 +4,8 @@
 **URL:** `https://bgjkjtfgrfiszbzatriq.supabase.co`  
 **Verified:** 2026-11-13 via Supabase MCP (live introspection)
 
+**Ops:** Never apply live DDL without a matching file under `supabase/migrations/` on a branch/PR first. Prefer staging. See [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).
+
 Shared with the marketing site (`LandlordGopherWebsite`). Website uses service-role inserts into `inquiries` only — do not add anon policies that expose inquiries.
 
 ---
@@ -54,7 +56,8 @@ Key columns: `id`, `source_id`, `first_name`, `last_name`, `company_name`, `emai
 Key columns: `property_name`, `street_address` NOT NULL, `city`/`state`/`zip` NOT NULL, `property_type` NOT NULL, **`landlord_id` NOT NULL**, `management_status`, `occupancy_status`, `management_end_date`, `year_built`, `color`, `notes`, `source_id`, `is_test_data`.
 
 **RLS:** select for admin / owning landlord / tenant’s property / staff assigned via maintenance.  
-**Phase 1 adds:** admin write; landlord update/insert for own `landlord_id`.
+**Phase 1 added:** admin write; landlord update/insert for own `landlord_id`.  
+**LGA-19:** landlord insert/update policies **dropped** — landlords are **read-only** on Properties (admin write only).
 
 ### `Units`
 
@@ -99,15 +102,22 @@ Rental applicants (not account approval). Do not confuse with `user_roles.accoun
 
 Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_income`, `employer`, `desired_move_in`, `status` (default `new`: `new|screening|approved|declined|withdrawn`), `notes`, `is_test_data`.
 
-**Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.
+**Phase 2 RLS:** staff/admin SELECT/INSERT/UPDATE; admin DELETE; `FORCE ROW LEVEL SECURITY`.  
+**LGA-19:** narrowed to **admin-only** SELECT/INSERT/UPDATE/DELETE (maintenance staff must not read applicant income / PII).
 
 ### `MaintenanceRequests` (+ Photos, Comments, StatusHistory)
 
 Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category` (Title Case enum), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
 
-Policies cover select/insert/update for admin, tenant submit, landlord, assigned maintenance staff. Photo + comment + storage bucket policies exist.
+**Live ACL baseline** (pre-repo Oct migrations + Phase 3 tighten; full predicate table in [`docs/ops/live-maintenance-acl-baseline.md`](./ops/live-maintenance-acl-baseline.md)):
 
-**Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).
+- SELECT: admin / submitting tenant / assigned staff / landlord owns unit (`maintenance_requests_select`)
+- UPDATE: USING `private.can_update_maintenance_request(id)`; WITH CHECK on the NEW row — admin or assigned maintenance only (`maintenance_requests_update`, LGA-19)
+- Comments SELECT: `can_select_maintenance_request` + visibility rules (`maintenance_comments_select`)
+- Photos / comments mutate via `can_upload_maintenance_photo` / `can_update_maintenance_request` (and tenant comment path)
+
+**Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).  
+**LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).
 
 ### `PropertyDocuments`
 
@@ -165,7 +175,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 
 **Phase 1 addresses:** Leases, LeaseTenants, RentCharges, Payments, Vendors, Settings (+ admin write policies on core portfolio tables).  
 **Phase 1.5:** `FORCE ROW LEVEL SECURITY` on those same Phase 1 tables; `vendors_select` staff/admin-only; payment ledger RPCs.  
-**Phase 2 addresses:** `Applications` staff/admin policies + FORCE RLS; account approval RPCs.  
+**Phase 2 addresses:** `Applications` FORCE RLS + policies; account approval RPCs.  
+**LGA-19:** `Applications` admin-only (not maintenance); landlords read-only on Properties + MaintenanceRequests UPDATE.  
 **Intentionally deferred:** `inquiries` (website service-role only).
 
 Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `Staff`) had **select-only** policies — admin CRUD required additive write policies (included in Phase 1 migration).
