@@ -33,6 +33,8 @@ export function PropertyDocumentsPanel({
   units: Unit[];
 }) {
   const app = useApp();
+  /** Staff/admin manage docs; landlord (and tenant) shells are list/download only. */
+  const canManageDocuments = !app.isLandlord && !app.isTenant;
   const [docs, setDocs] = useState<PropertyDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -103,16 +105,20 @@ export function PropertyDocumentsPanel({
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-[1.0625rem] font-semibold leading-tight">Documents</h2>
-        <Button size="sm" onClick={() => setUploadOpen(true)}>
-          <Plus className="mr-1 h-4 w-4" /> Upload
-        </Button>
+        {canManageDocuments && (
+          <Button size="sm" onClick={() => setUploadOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" /> Upload
+          </Button>
+        )}
       </div>
 
       {loading ? (
         <Card className="p-6 text-sm text-muted-foreground">Loading documents…</Card>
       ) : docs.length === 0 ? (
         <Card className="p-8 text-center text-sm text-muted-foreground">
-          No documents yet. Upload leases, handbooks, or inspection files.
+          {canManageDocuments
+            ? "No documents yet. Upload leases, handbooks, or inspection files."
+            : "No documents shared for this property yet."}
         </Card>
       ) : (
         <Card className="divide-y">
@@ -160,39 +166,45 @@ export function PropertyDocumentsPanel({
                 >
                   <Download className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => setDeleting(doc)}>
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
+                {canManageDocuments && (
+                  <Button variant="ghost" size="sm" onClick={() => setDeleting(doc)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                )}
               </div>
             </div>
           ))}
         </Card>
       )}
 
-      <UploadDocumentDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        propertyId={propertyId}
-        units={units}
-        onUploaded={(doc) => {
-          setDocs((prev) => [doc, ...prev]);
-          app.setNotice("Document uploaded.");
-        }}
-      />
+      {canManageDocuments && (
+        <>
+          <UploadDocumentDialog
+            open={uploadOpen}
+            onOpenChange={setUploadOpen}
+            propertyId={propertyId}
+            units={units}
+            onUploaded={(doc) => {
+              setDocs((prev) => [doc, ...prev]);
+              app.setNotice("Document uploaded.");
+            }}
+          />
 
-      <ConfirmDelete
-        open={deleting != null}
-        onOpenChange={(o) => {
-          if (!o) setDeleting(null);
-        }}
-        title="Delete document?"
-        description={
-          deleting
-            ? `Remove “${deleting.title}” (${deleting.file_name}) from this property.`
-            : undefined
-        }
-        onConfirm={() => void confirmDelete()}
-      />
+          <ConfirmDelete
+            open={deleting != null}
+            onOpenChange={(o) => {
+              if (!o) setDeleting(null);
+            }}
+            title="Delete document?"
+            description={
+              deleting
+                ? `Remove “${deleting.title}” (${deleting.file_name}) from this property.`
+                : undefined
+            }
+            onConfirm={() => void confirmDelete()}
+          />
+        </>
+      )}
     </section>
   );
 }

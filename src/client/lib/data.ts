@@ -1547,6 +1547,14 @@ export async function updatePropertyDocumentVisibility(
   return mapPropertyDocument(data!);
 }
 
+/** True when the caller can see a storage.objects row at this path (RLS SELECT). */
+async function propertyDocumentStorageObjectPresent(storagePath: string): Promise<boolean> {
+  const { data, error } = await supabase.storage
+    .from(DOC_BUCKET)
+    .createSignedUrl(storagePath, 60);
+  return Boolean(data?.signedUrl) && error == null;
+}
+
 export async function deletePropertyDocument(id: number): Promise<void> {
   const { data: doc, error } = await supabase
     .from("PropertyDocuments")
@@ -1562,9 +1570,15 @@ export async function deletePropertyDocument(id: number): Promise<void> {
   const { data: removed, error: rmErr } = await supabase.storage
     .from(DOC_BUCKET)
     .remove([doc.storage_path]);
-  if (rmErr) throw new Error(rmErr.message);
-  if (!removed?.length) {
-    throw new Error("Failed to remove document from storage.");
+  const confirmedRemoved = rmErr == null && (removed?.length ?? 0) > 0;
+  if (!confirmedRemoved) {
+    // Retry-safe: a prior attempt may have removed storage then failed on DB delete.
+    // Only treat empty/error remove as OK when the object is truly gone. If it is
+    // still visible, this was an RLS/permission no-op — do not proceed.
+    const stillThere = await propertyDocumentStorageObjectPresent(doc.storage_path);
+    if (stillThere) {
+      throw new Error(rmErr?.message || "Failed to remove document from storage.");
+    }
   }
 
   const { data: deleted, error: delErr } = await supabase

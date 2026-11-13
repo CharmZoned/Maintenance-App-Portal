@@ -70,7 +70,7 @@ export function useAppState(
       return;
     }
     if (isLandlord) {
-      // Thin read-only shell: properties (RLS-scoped) + maintenance; no vendors/settings mutate.
+      // Thin read-only shell: properties (RLS-scoped) + maintenance + documents list; no vendors/settings mutate.
       try {
         setProperties(await data.listProperties());
       } catch (err) {
@@ -393,9 +393,20 @@ export function useAppState(
     getTenantHomeContext: data.getTenantHomeContext,
     listPropertyDocuments: data.listPropertyDocuments,
     getPropertyDocumentDownloadUrl: data.getPropertyDocumentDownloadUrl,
-    uploadPropertyDocument: data.uploadPropertyDocument,
-    updatePropertyDocumentVisibility: data.updatePropertyDocumentVisibility,
-    deletePropertyDocument: data.deletePropertyDocument,
+    uploadPropertyDocument: async (...args: Parameters<typeof data.uploadPropertyDocument>) => {
+      if (isLandlord || isTenant) throw new Error("Document upload is staff-only.");
+      return data.uploadPropertyDocument(...args);
+    },
+    updatePropertyDocumentVisibility: async (
+      ...args: Parameters<typeof data.updatePropertyDocumentVisibility>
+    ) => {
+      if (isLandlord || isTenant) throw new Error("Document visibility is admin-only.");
+      return data.updatePropertyDocumentVisibility(...args);
+    },
+    deletePropertyDocument: async (...args: Parameters<typeof data.deletePropertyDocument>) => {
+      if (isLandlord || isTenant) throw new Error("Document delete is staff-only.");
+      return data.deletePropertyDocument(...args);
+    },
   };
 }
 
