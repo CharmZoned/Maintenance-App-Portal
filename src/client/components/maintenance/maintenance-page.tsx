@@ -268,7 +268,7 @@ export function MaintenancePage() {
               <div className="mt-3 flex items-center justify-between border-t pt-3 text-xs">
                 <div className="flex items-center gap-2">
                   <Badge variant={STATUS_VARIANT[w.status] ?? "secondary"} className="capitalize">
-                    {app.isTenant ? tenantStatusLabel(w.status) : w.status.replace("_", " ")}
+                    {app.isTenant ? tenantStatusLabel(w.status) : w.status.replaceAll("_", " ")}
                   </Badge>
                   {w.vendor_name && <span className="text-muted-foreground">{w.vendor_name}</span>}
                 </div>

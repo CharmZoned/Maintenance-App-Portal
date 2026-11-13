@@ -103,7 +103,7 @@ Key columns: `unit_id`, `first_name`, `last_name`, `email`, `phone`, `monthly_in
 
 ### `MaintenanceRequests` (+ Photos, Comments, StatusHistory)
 
-Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority default `Normal`. Has `request_number` (trigger `private.assign_request_number`), `category` (Title Case enum), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields.
+Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Progress | On Hold | Closed` (default `Open`). Priority CHECK: `Low | Normal | High | Urgent` (default `Normal`). Category CHECK: `Plumbing | Electrical | Heating / AC | Appliance | Pest control | Locks / keys / doors | Windows | Roof / leaks | Mold / water damage | Exterior / yard | General repair | Other`. Has `request_number` (trigger `private.assign_request_number`), `permission_to_enter`, `property_id`, `vendor_id`, `cost`, `notes`, assignment/scheduling fields. Companion CHECKs require staff+date for Scheduled, staff+started_at for In Progress, hold_reason+follow-up for On Hold, closed_at+resolution_notes for Closed.
 
 Policies cover select/insert/update for admin, tenant submit, landlord, assigned maintenance staff. Photo + comment + storage bucket policies exist.
 
@@ -175,7 +175,8 @@ Also pre-Phase 1: core tables (`Landlords`, `Properties`, `Units`, `Tenants`, `S
 | unit status `vacant`/`occupied`/… | often Title Case in live data (`Vacant`/`Occupied`); mapping layer normalizes |
 | `tenants.phone` | `Tenants.mobile_phone` |
 | `work_orders` | `MaintenanceRequests` |
-| work order status `open` / `scheduled` / `in_progress` / `on_hold` / `closed` | `Open` / `Scheduled` / `In Progress` / `On Hold` / `Closed` |
+| work order status `open` / `scheduled` / `in_progress` / `on_hold` / `closed` | `Open` / `Scheduled` / `In Progress` / `On Hold` / `Closed` (never D1 `Assigned` / `Completed` / `Cancelled`) |
+| work order category (Title Case list above) | same Title Case strings (not vendor `plumber`/`general`) |
 | work order priority `normal` | `Normal` (etc.) |
 | (photos) | `MaintenanceRequestPhotos` + storage `maintenance-photos` (`{requestId}/…`) |
 | (comments) | `MaintenanceRequestComments` |
