@@ -90,6 +90,20 @@ expectDenied(await worker.from("MaintenanceRequests").select().eq("id", wo.id));
 Logins (password `Password123!`): `admin@`, `worker@`, `worker2@`, `tenant@`,
 `tenant2@`, `landlord@`, `pending@` — all `@test.local`. See `emulator/seed.ts`.
 
+## AuthZ / ledger regression coverage (WS-J)
+
+Wave 2 locks in these suites on the PR #18 harness (prefer new assertions over
+app changes):
+
+| Area | Where | What it locks in |
+|---|---|---|
+| Payment ledger RPCs | `requirements/r7-permissions.test.ts` → **payment ledger RPCs** | `record_payment` / `delete_payment` status math, SUM-vs-drift heal, non-admin deny, direct Payment DML deny, positive amount, waived cleared by payment |
+| Maintenance photo isolation | `requirements/r4-maintenance-requests.test.ts` → **photo isolation** | Unassigned worker cannot see/upload; landlord read-only on owned requests; photo rows not rewritable |
+| Status history append-only | same file → **status history** | Cross-tenant history isolation; prior rows never rewritten when status advances |
+| Document visibility isolation | `requirements/r5-property-documents.test.ts` → **visibility isolation** | Tenant/landlord/staff storage + row ACL; other-property deny; pending sees nothing |
+
+R6 notification checks stay `test.todo` until that product stream reopens.
+
 ## How the emulator stays faithful
 
 - On start it replays `tests/emulator/baseline/*.sql` and then **every file in

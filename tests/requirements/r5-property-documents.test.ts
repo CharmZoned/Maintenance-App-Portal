@@ -201,6 +201,75 @@ describe("[R5] Property documents", () => {
       const signed = await client.storage.from("property-documents").createSignedUrl(doc.storage_path, 60);
       expect(signed.error).not.toBeNull();
     });
+
+    describe("visibility isolation", () => {
+      test("a tenant never sees landlord-only or staff-only documents", async () => {
+        const titles = await titlesVisibleTo("tenant");
+        expect(titles).not.toContain("VIS staff-only");
+        expect(titles).not.toContain("VIS landlord");
+        const client = await clientFor("tenant");
+        const { data: rows } = await client
+          .from("PropertyDocuments")
+          .select("title, visibility")
+          .in("title", ["VIS staff-only", "VIS landlord"]);
+        expect(rows).toEqual([]);
+      });
+
+      test("a landlord cannot download a staff-only file even with its storage path", async () => {
+        const [doc] = await sql<{ storage_path: string }>(
+          `select storage_path from public."PropertyDocuments" where title = 'VIS staff-only'`,
+        );
+        const client = await clientFor("landlord");
+        expect(
+          (await client.from("PropertyDocuments").select("id").eq("title", "VIS staff-only")).data,
+        ).toEqual([]);
+        const signed = await client.storage.from("property-documents").createSignedUrl(doc.storage_path, 60);
+        expect(signed.error).not.toBeNull();
+      });
+
+      test("a landlord can download landlord- and tenant-visible files on owned properties", async () => {
+        const client = await clientFor("landlord");
+        for (const title of ["VIS landlord", "VIS tenant building-wide"]) {
+          const [doc] = await sql<{ storage_path: string }>(
+            `select storage_path from public."PropertyDocuments" where title = $1`,
+            [title],
+          );
+          const signed = await client.storage.from("property-documents").createSignedUrl(doc.storage_path, 60);
+          expect(signed.error, title).toBeNull();
+          const res = await fetch(signed.data!.signedUrl);
+          expect(res.status, title).toBe(200);
+        }
+      });
+
+      test("a landlord cannot see documents on a property they do not own", async () => {
+        const client = await clientFor("landlord");
+        const { data: rows } = await client
+          .from("PropertyDocuments")
+          .select("title")
+          .eq("title", "VIS tenant other property");
+        expect(rows).toEqual([]);
+        const [doc] = await sql<{ storage_path: string }>(
+          `select storage_path from public."PropertyDocuments" where title = 'VIS tenant other property'`,
+        );
+        const signed = await client.storage.from("property-documents").createSignedUrl(doc.storage_path, 60);
+        expect(signed.error).not.toBeNull();
+      });
+
+      test("a tenant cannot download a landlord-only file even with its storage path", async () => {
+        const [doc] = await sql<{ storage_path: string }>(
+          `select storage_path from public."PropertyDocuments" where title = 'VIS landlord'`,
+        );
+        const client = await clientFor("tenant");
+        const signed = await client.storage.from("property-documents").createSignedUrl(doc.storage_path, 60);
+        expect(signed.error).not.toBeNull();
+      });
+
+      test("a pending user sees no property documents at all", async () => {
+        const client = await clientFor("pending");
+        const { data: rows } = await client.from("PropertyDocuments").select("id");
+        expect(rows).toEqual([]);
+      });
+    });
   });
 
   describe("tenants and landlords cannot manage documents", () => {

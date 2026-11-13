@@ -214,8 +214,16 @@ describe("[R3] Properties and units", () => {
 
     test("a landlord sees only the properties they own", async () => {
       const client = await clientFor("landlord");
-      const { data: rows } = await client.from("Properties").select("id");
-      expect(rows).toEqual([{ id: world.property.id }]);
+      const { data: rows } = await client.from("Properties").select("id").order("id");
+      const ids = (rows ?? []).map((r) => r.id);
+      // Includes seed Maple Court plus any properties created earlier in this file for Lena.
+      expect(ids).toContain(world.property.id);
+      expect(ids).not.toContain(world.otherProperty.id);
+      const [{ count }] = await sql<{ count: string }>(
+        `select count(*)::text as count from public."Properties" where landlord_id = $1`,
+        [world.landlord.id],
+      );
+      expect(ids).toHaveLength(Number(count));
     });
 
     test("a worker with no assigned jobs sees no properties", async () => {
