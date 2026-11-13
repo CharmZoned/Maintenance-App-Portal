@@ -548,10 +548,13 @@ async function unlinkTenantFromLease(
   await clearTenantUnitsMatching([tenantId], leaseUnitId);
 }
 
-async function moveOccupantsToUnit(
+/**
+ * Set LeaseTenants members to the lease unit unconditionally (no source-unit filter).
+ * Avoids stale beforeUnit races where a concurrent update already moved occupants.
+ */
+async function setOccupantsUnit(
   leaseId: number,
-  beforeUnit: number,
-  afterUnit: number,
+  unitId: number,
   skipTenantId: number | null,
 ): Promise<void> {
   const { data: members, error: mErr } = await supabase
@@ -565,10 +568,26 @@ async function moveOccupantsToUnit(
   if (ids.length === 0) return;
   const { error: tErr } = await supabase
     .from("Tenants")
-    .update({ unit_id: afterUnit } as never)
-    .in("id", ids)
-    .eq("unit_id", beforeUnit);
+    .update({ unit_id: unitId } as never)
+    .in("id", ids);
   if (tErr) throwSb(tErr);
+}
+
+/** Compare-and-swap predicate so concurrent updateLease calls serialize on the lease row. */
+function leaseCasFilter(
+  query: {
+    eq: (column: string, value: unknown) => typeof query;
+    is: (column: string, value: null) => typeof query;
+  },
+  expected: { unit_id: number; primary_tenant_id: number | null },
+) {
+  let q = query.eq("unit_id", expected.unit_id);
+  if (expected.primary_tenant_id == null) {
+    q = q.is("primary_tenant_id", null);
+  } else {
+    q = q.eq("primary_tenant_id", expected.primary_tenant_id);
+  }
+  return q;
 }
 
 async function syncLeaseTenantLinks(args: {
@@ -588,15 +607,13 @@ async function syncLeaseTenantLinks(args: {
     await linkPrimaryTenantToLease(leaseId, afterUnit, afterPrimary);
   }
 
-  if (afterUnit !== beforeUnit) {
-    await moveOccupantsToUnit(leaseId, beforeUnit, afterUnit, afterPrimary);
-  }
+  // Always converge members to the lease's current unit (safe under concurrent edits).
+  await setOccupantsUnit(leaseId, afterUnit, afterPrimary);
 }
 
 /**
  * Best-effort undo after a partial syncLeaseTenantLinks failure (no DB transaction).
- * Restores the lease row, removes a newly linked primary, moves co-tenants back,
- * and re-links the previous primary.
+ * Only restores if the lease row still matches our after-state (won't clobber a newer winner).
  */
 async function compensateLeaseTenantLinkSync(args: {
   leaseId: number;
@@ -607,14 +624,23 @@ async function compensateLeaseTenantLinkSync(args: {
 }): Promise<void> {
   const { leaseId, beforeUnit, beforePrimary, afterUnit, afterPrimary } = args;
 
-  const { error: leaseErr } = await supabase
+  let restore = supabase
     .from("Leases")
     .update({
       unit_id: beforeUnit,
       primary_tenant_id: beforePrimary,
     } as never)
     .eq("id", leaseId);
+  restore = leaseCasFilter(restore as never, {
+    unit_id: afterUnit,
+    primary_tenant_id: afterPrimary,
+  }) as typeof restore;
+  const { data: restored, error: leaseErr } = await restore.select("id").maybeSingle();
   if (leaseErr) throwSb(leaseErr);
+  if (!restored) {
+    // Another update won the lease row; do not roll that back.
+    return;
+  }
 
   if (afterPrimary != null && afterPrimary !== beforePrimary) {
     const { error: ltErr } = await supabase
@@ -626,10 +652,7 @@ async function compensateLeaseTenantLinkSync(args: {
     await clearTenantUnitsMatching([afterPrimary], afterUnit);
   }
 
-  if (afterUnit !== beforeUnit) {
-    // Move every remaining member still on afterUnit back (includes same-primary case).
-    await moveOccupantsToUnit(leaseId, afterUnit, beforeUnit, null);
-  }
+  await setOccupantsUnit(leaseId, beforeUnit, null);
 
   if (beforePrimary != null) {
     await linkPrimaryTenantToLease(leaseId, beforeUnit, beforePrimary);
@@ -697,12 +720,24 @@ export async function updateLease(id: number, patch: Partial<NewLease>): Promise
   ] as const) {
     if (patch[key] !== undefined) row[key] = patch[key];
   }
-  const { data, error } = await supabase.from("Leases").update(row as never).eq("id", id).select("*").single();
+
+  // Serialize concurrent link-affecting updates with a CAS on unit + primary.
+  let updateQuery = supabase.from("Leases").update(row as never).eq("id", id);
+  if (needsLinkSync && before) {
+    updateQuery = leaseCasFilter(updateQuery as never, before) as typeof updateQuery;
+  }
+  const { data, error } = await updateQuery.select("*").maybeSingle();
   if (error) throwSb(error);
+  if (!data) {
+    if (needsLinkSync) {
+      throw new Error("Lease was modified by another update; please retry");
+    }
+    throw new Error("Lease not found");
+  }
 
   if (needsLinkSync && before) {
-    const afterUnit = data!.unit_id as number;
-    const afterPrimary = (data!.primary_tenant_id as number | null) ?? null;
+    const afterUnit = data.unit_id as number;
+    const afterPrimary = (data.primary_tenant_id as number | null) ?? null;
     try {
       await syncLeaseTenantLinks({
         leaseId: id,
@@ -729,7 +764,7 @@ export async function updateLease(id: number, patch: Partial<NewLease>): Promise
   }
 
   const list = await listLeases();
-  return list.find((l) => l.id === id) ?? mapLease(data!);
+  return list.find((l) => l.id === id) ?? mapLease(data);
 }
 
 export async function deleteLease(id: number): Promise<void> {

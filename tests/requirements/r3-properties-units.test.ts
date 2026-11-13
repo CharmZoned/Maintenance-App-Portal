@@ -181,6 +181,52 @@ describe("[R3] Properties and units", () => {
       ).toHaveLength(1);
     });
 
+    test("updateLease sets co-tenants to the lease unit even if their unit_id was already moved (gap R3)", async () => {
+      const [{ id: primaryId }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Pat', 'Primary', 'pat@cotenant.test', false, false) returning id`,
+      );
+      const [{ id: roommateId }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Roo', 'Mate', 'roo@cotenant.test', false, false) returning id`,
+      );
+      const [{ id: unitA }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Co-A', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      const [{ id: unitB }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Co-B', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      const [{ id: unitC }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Co-C', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const lease = await data.createLease({
+        unit_id: Number(unitA),
+        primary_tenant_id: Number(primaryId),
+        start_date: "2026-04-01",
+        end_date: "2027-03-31",
+        monthly_rent: 1400,
+      });
+      await sql(`insert into public."LeaseTenants" (lease_id, tenant_id) values ($1, $2)`, [
+        lease.id,
+        roommateId,
+      ]);
+      // Simulate a concurrent move that already parked the roommate on an intermediate unit.
+      await sql(`update public."Tenants" set unit_id = $1 where id = $2`, [unitB, roommateId]);
+
+      await data.updateLease(lease.id, { unit_id: Number(unitC) });
+      const [roommate] = await sql<{ unit_id: number | null }>(
+        `select unit_id from public."Tenants" where id = $1`,
+        [roommateId],
+      );
+      expect(Number(roommate.unit_id), "co-tenant converges to lease unit without needing beforeUnit").toBe(
+        Number(unitC),
+      );
+    });
+
     test("deleteLease clears tenant.unit_id and leaves no LeaseTenants orphans (gap R3)", async () => {
       const [{ id: tenantId }] = await sql<{ id: number }>(
         `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
