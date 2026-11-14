@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 
 interface RequestProps {
   onSubmit: (email: string) => Promise<void>;
@@ -79,7 +80,7 @@ export function ResetConfirmPage({ onSubmit, onDone, error }: ConfirmProps) {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 8) return;
+    if (password.length < PASSWORD_MIN_LENGTH) return;
     setBusy(true);
     try {
       await onSubmit(password);
@@ -104,9 +105,12 @@ export function ResetConfirmPage({ onSubmit, onDone, error }: ConfirmProps) {
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            minLength={8}
+            minLength={PASSWORD_MIN_LENGTH}
             required
           />
+          <p className="text-xs text-muted-foreground">
+            At least {PASSWORD_MIN_LENGTH} characters.
+          </p>
         </div>
         <Button type="submit" disabled={busy}>
           {busy ? "Saving…" : "Update password"}
