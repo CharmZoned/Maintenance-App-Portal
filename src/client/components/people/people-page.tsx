@@ -10,27 +10,14 @@ import { TenantDialog } from "@/components/tenants/tenant-dialog";
 import { LandlordDialog } from "@/components/landlords/landlord-dialog";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
 import type { Landlord, Tenant } from "@/types";
+import { portalStatusFromAccounts } from "@/lib/people-portal-status";
 import { PeopleTabBar, type PeopleTabId } from "./people-tab-bar";
 import { ApprovalCard } from "./approval-card";
 import { PersonRow } from "./person-row";
 import { TeamRow } from "./team-row";
 import { VendorRow } from "./vendor-row";
-import type { PortalStatusKind } from "./portal-status";
 
 type LoadState = "loading" | "ready" | "error";
-
-function statusFromAccount(
-  accounts: UserAccountRow[],
-  email: string | null | undefined,
-): PortalStatusKind {
-  if (!email) return "not_invited";
-  const row = accounts.find((a) => a.email?.toLowerCase() === email.toLowerCase());
-  if (!row) return "not_invited";
-  if (row.account_status === "approved") return "active";
-  if (row.account_status === "suspended") return "suspended";
-  if (row.account_status === "pending") return "pending";
-  return "not_invited";
-}
 
 function approveBlockedReason(user: UserAccountRow): string | null {
   if (user.email_confirmed_at === null) {
@@ -62,7 +49,15 @@ export function PeoplePage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const { isAdmin, listTenants, setError, landlords, vendors, canMutatePortfolio } = useApp();
+  const {
+    isAdmin,
+    listTenants,
+    setError,
+    setNotice,
+    landlords,
+    vendors,
+    canMutatePortfolio,
+  } = useApp();
   const [tab, setTab] = useState<PeopleTabId>("tenants");
   const [state, setState] = useState<LoadState>("loading");
   const [error, setLocalError] = useState<string | null>(null);
@@ -194,9 +189,7 @@ export function PeoplePage({
         size="header"
         type="button"
         onClick={() =>
-          setError(
-            "Add team member is stubbed — create Staff rows in the DB / Users linking for now.",
-          )
+          setNotice("Create Staff rows and link them on Users for now.")
         }
       >
         <Plus className="size-4" /> Add team member
@@ -218,8 +211,7 @@ export function PeoplePage({
       ) : tab === "approvals" ? (
         <div className="space-y-3">
           <p className="text-[13px] text-muted-foreground">
-            Pending sign-ups · Approve as Tenant of Unit… / Owner / Team member, or Reject.
-            Complex role links still live on Users.
+            Pending sign-ups · Approve or reject here. Role links live on Users.
           </p>
           {!isAdmin ? (
             <EmptyState message="Approvals are restricted to admins." />
@@ -227,24 +219,38 @@ export function PeoplePage({
             <EmptyState message="No pending sign-ups. New accounts appear here after signup." />
           ) : (
             <div className="flex flex-col gap-3">
-              {pending.map((user) => (
-                <ApprovalCard
-                  key={user.user_id}
-                  user={user}
-                  blockedReason={approveBlockedReason(user)}
-                  busy={busyId === user.user_id}
-                  onApprove={() => setConfirm({ user, status: "approved" })}
-                  onReject={() => setConfirm({ user, status: "rejected" })}
-                  onManageLinks={() => navigate("/users")}
-                />
-              ))}
+              {pending.map((user) => {
+                const blocked = approveBlockedReason(user);
+                const linkedTenant =
+                  user.role === "tenant" && user.tenant_id != null
+                    ? tenants.find((t) => t.id === user.tenant_id)
+                    : undefined;
+                const softWarning =
+                  !blocked &&
+                  linkedTenant != null &&
+                  linkedTenant.active_unit_id == null
+                    ? "Linked tenant has no unit — they can sign in but cannot submit maintenance until a unit is assigned."
+                    : null;
+                return (
+                  <ApprovalCard
+                    key={user.user_id}
+                    user={user}
+                    blockedReason={blocked}
+                    softWarning={softWarning}
+                    busy={busyId === user.user_id}
+                    onApprove={() => setConfirm({ user, status: "approved" })}
+                    onReject={() => setConfirm({ user, status: "rejected" })}
+                    onManageLinks={() => navigate("/users")}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
       ) : tab === "tenants" ? (
         <div className="space-y-3">
           <p className="text-[13px] text-muted-foreground">
-            List: name, unit, phone, portal status · Slim directory (detail at /tenants/:id).
+            Name, unit, phone, and portal status. Open a row for full tenant detail.
           </p>
           {tenants.length === 0 ? (
             <EmptyState
@@ -265,7 +271,10 @@ export function PeoplePage({
                     key={t.id}
                     name={`${t.first_name} ${t.last_name}`}
                     meta={parts.join(" · ")}
-                    status={statusFromAccount(accounts, t.email)}
+                    status={portalStatusFromAccounts(accounts, {
+                      tenantId: t.id,
+                      email: t.email,
+                    })}
                     onClick={() => navigate(`/tenants/${t.id}`)}
                   />
                 );
@@ -276,7 +285,7 @@ export function PeoplePage({
       ) : tab === "landlords" ? (
         <div className="space-y-3">
           <p className="text-[13px] text-muted-foreground">
-            List adds portal status · Conversation deep-link stubbed until message-center exists.
+            Name, contact, and portal status for each landlord.
           </p>
           {landlords.length === 0 ? (
             <EmptyState
@@ -302,7 +311,10 @@ export function PeoplePage({
                     key={l.id}
                     name={name}
                     meta={meta}
-                    status={statusFromAccount(accounts, l.email)}
+                    status={portalStatusFromAccounts(accounts, {
+                      landlordId: l.id,
+                      email: l.email,
+                    })}
                     onClick={
                       canMutatePortfolio
                         ? () => {
@@ -320,8 +332,7 @@ export function PeoplePage({
       ) : tab === "team" ? (
         <div className="space-y-3">
           <p className="text-[13px] text-muted-foreground">
-            Name, job title, contact, portal status · Gets new-request alerts is a stub column
-            (Staff.gets_request_alerts unused).
+            Name, job title, contact, request alerts, and portal status.
           </p>
           {staff.length === 0 ? (
             <EmptyState message="No team members yet. Staff rows power maintenance assignment." />
@@ -333,8 +344,11 @@ export function PeoplePage({
                   name={`${s.first_name} ${s.last_name}`}
                   meta={[s.job_title, s.email].filter(Boolean).join(" · ") || "—"}
                   openJobs="Open jobs · —"
-                  alerts={true}
-                  status={statusFromAccount(accounts, s.email)}
+                  alerts={s.gets_request_alerts}
+                  status={portalStatusFromAccounts(accounts, {
+                    staffId: s.id,
+                    email: s.email,
+                  })}
                 />
               ))}
             </div>
@@ -343,7 +357,7 @@ export function PeoplePage({
       ) : (
         <div className="space-y-3">
           <p className="text-[13px] text-muted-foreground">
-            Vendors directory (existing Vendors table) · Full U16 vendor CRM deferred.
+            Vendors directory with category and contact details.
           </p>
           {vendors.length === 0 ? (
             <EmptyState message="No vendors yet." />

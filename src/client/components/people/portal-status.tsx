@@ -1,6 +1,11 @@
 import { cn } from "@/lib/utils";
 
-export type PortalStatusKind = "not_invited" | "pending" | "active" | "suspended";
+export type PortalStatusKind =
+  | "not_invited"
+  | "pending"
+  | "active"
+  | "suspended"
+  | "rejected";
 
 const STYLES: Record<PortalStatusKind, { label: string; className: string }> = {
   not_invited: {
@@ -17,6 +22,10 @@ const STYLES: Record<PortalStatusKind, { label: string; className: string }> = {
   },
   suspended: {
     label: "Suspended",
+    className: "bg-destructive-tint text-destructive",
+  },
+  rejected: {
+    label: "Rejected",
     className: "bg-destructive-tint text-destructive",
   },
 };

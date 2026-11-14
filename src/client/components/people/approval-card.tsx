@@ -11,7 +11,7 @@ function roleClaim(user: UserAccountRow): string {
 }
 
 function approveLabel(user: UserAccountRow): string {
-  if (user.role === "tenant") return "Approve as Tenant of Unit…";
+  if (user.role === "tenant") return "Approve as tenant";
   if (user.role === "landlord") return "Approve as Owner";
   if (user.role === "maintenance") return "Approve as Team member";
   return "Approve";
@@ -21,6 +21,7 @@ function approveLabel(user: UserAccountRow): string {
 export function ApprovalCard({
   user,
   blockedReason,
+  softWarning,
   busy,
   onApprove,
   onReject,
@@ -28,6 +29,8 @@ export function ApprovalCard({
 }: {
   user: UserAccountRow;
   blockedReason?: string | null;
+  /** Non-blocking note (e.g. linked tenant has no unit). */
+  softWarning?: string | null;
   busy?: boolean;
   onApprove: () => void;
   onReject: () => void;
@@ -57,6 +60,9 @@ export function ApprovalCard({
         <p>{roleClaim(user)}</p>
         <p className="text-muted-foreground">{emailConfirmed}</p>
         {blockedReason ? <p className="text-warning">{blockedReason}</p> : null}
+        {!blockedReason && softWarning ? (
+          <p className="text-warning">{softWarning}</p>
+        ) : null}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button size="default" disabled={busy || Boolean(blockedReason)} onClick={onApprove}>
