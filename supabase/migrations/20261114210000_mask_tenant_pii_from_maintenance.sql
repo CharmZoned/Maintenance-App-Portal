@@ -3,10 +3,13 @@
 -- RLS is row-level only; public."Tenants" is a security_invoker view that allowlists
 -- who may see those columns (admin / landlord / tenant / service_role / DB owner).
 --
--- Physical rows live in private.tenants (out of PostgREST db-schemas). Authenticated
--- gets SELECT on the base table only so the invoker view can read through RLS; writes
--- go through INSTEAD OF triggers that require private.is_admin() (SECURITY DEFINER
--- would otherwise bypass tenants_admin_* policies). RETURNING values are re-masked.
+-- Physical rows live in private.tenants (keep `private` out of PostgREST db-schemas).
+-- Authenticated gets SELECT on the base table only so the invoker view can read through
+-- RLS; direct address of private.tenants would bypass the column mask, so exposing
+-- `private` via API/schema config is a deploy anti-pattern.
+-- Writes go through INSTEAD OF triggers gated for admin JWT, service_role, or no-JWT
+-- ops/emulator sessions (SECURITY DEFINER would otherwise bypass tenants_admin_*).
+-- RETURNING values are re-masked.
 
 alter table public."Tenants" set schema private;
 alter table private."Tenants" rename to tenants;
@@ -86,7 +89,7 @@ begin
     or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
     or ((select auth.uid()) is null and coalesce(auth.jwt() ->> 'role', '') = '')
   ) then
-    raise exception 'forbidden: only admin may insert tenants';
+    raise exception 'forbidden: tenant writes require admin, service_role, or ops session';
   end if;
 
   insert into private.tenants (
@@ -143,7 +146,7 @@ begin
     or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
     or ((select auth.uid()) is null and coalesce(auth.jwt() ->> 'role', '') = '')
   ) then
-    raise exception 'forbidden: only admin may update tenants';
+    raise exception 'forbidden: tenant writes require admin, service_role, or ops session';
   end if;
 
   update private.tenants t set
@@ -193,7 +196,7 @@ begin
     or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
     or ((select auth.uid()) is null and coalesce(auth.jwt() ->> 'role', '') = '')
   ) then
-    raise exception 'forbidden: only admin may delete tenants';
+    raise exception 'forbidden: tenant writes require admin, service_role, or ops session';
   end if;
   delete from private.tenants where id = old.id;
   return old;
