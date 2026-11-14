@@ -30,10 +30,11 @@ function sqlFiles(dir: string): string[] {
 
 /**
  * A real Postgres (PGlite, in-process) carrying the project's schema:
- *   1. tests/emulator/baseline/*  — platform shim + schema history that predates this repo
- *   2. supabase/migrations/*      — every migration in the repo, in filename order
+ *   1. tests/emulator/baseline/*  — emulator-only platform shim (auth/storage helpers)
+ *   2. supabase/migrations/*      — full schema history (pre-portal setup + portal phases)
  *
  * New files dropped into supabase/migrations are picked up automatically.
+ * Pre-portal setup scripts live in migrations (not duplicated in baseline).
  */
 export class EmulatorDb {
   private constructor(

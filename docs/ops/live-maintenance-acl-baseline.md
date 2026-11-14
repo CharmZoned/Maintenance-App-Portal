@@ -1,7 +1,7 @@
 # Live maintenance ACL baseline
 
 **Project:** `bgjkjtfgrfiszbzatriq`  
-**Why:** Core `MaintenanceRequests` / photos / comments policies and helpers come from **pre-portal** remote migrations (Oct 2026) that are **not** files under this repo’s `supabase/migrations/`. AuthZ PRs must review against this live baseline, not assume the helpers are absent.
+**Why:** Core `MaintenanceRequests` / photos / comments policies and helpers come from **pre-portal** migrations (Oct 2026). Those scripts now also ship under this repo’s `supabase/migrations/` (same version stamps) so a fresh project can rebuild; live history already has them applied — do not re-run on production. AuthZ PRs must still review against this live baseline summary, not assume helpers are absent.
 
 Verified via Supabase MCP (2026-11-13). Later phase migrations may `CREATE OR REPLACE` helpers or `DROP`/`CREATE` policies — those land as normal repo files.
 
