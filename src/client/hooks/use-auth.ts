@@ -102,7 +102,12 @@ export function useAuth() {
     }
   }, []);
 
-  /** Returns true when email confirmation is required (no session yet). */
+  /**
+   * Returns true when email confirmation is required (no session yet).
+   * Confirmation redirect is fixed to `/dashboard` (not `?redirect=`) to avoid
+   * open redirects via signup email links. Post-login `?redirect=` is handled
+   * in the app shell only after the auth gate is `ready`.
+   */
   const signup = useCallback(async (email: string, password: string): Promise<"session" | "confirm"> => {
     setAuthError(null);
     const emailRedirectTo = `${window.location.origin}/dashboard`;

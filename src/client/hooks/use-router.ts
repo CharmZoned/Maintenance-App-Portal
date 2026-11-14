@@ -16,7 +16,7 @@ export type Route =
   | { name: "settings" }
   | { name: "not-found" };
 
-function parse(path: string): Route {
+export function parseRoute(path: string): Route {
   if (path === "/" || path === "/dashboard") return { name: "dashboard" };
   if (path === "/properties") return { name: "properties" };
   let m = path.match(/^\/properties\/(\d+)$/);
@@ -35,12 +35,31 @@ function parse(path: string): Route {
   return { name: "not-found" };
 }
 
+export type NavigateOptions = {
+  /** Use history.replaceState instead of pushState. */
+  replace?: boolean;
+  /** Query string including `?`, or `""` to clear. Defaults to keeping current search when omitted. */
+  search?: string;
+};
+
 export function useRouter() {
   const [path, setPath] = useState<string>(() => window.location.pathname);
 
-  const navigate = useCallback((to: string) => {
-    if (to === window.location.pathname) return;
-    window.history.pushState(null, "", to);
+  const navigate = useCallback((to: string, opts?: NavigateOptions) => {
+    const search =
+      opts?.search !== undefined
+        ? opts.search
+        : opts?.replace
+          ? window.location.search
+          : "";
+    // replace: always sync React path (even when URL pathname already matches),
+    // so callers that replaceState'd first (or pass replace) do not no-op.
+    if (!opts?.replace && to === window.location.pathname) return;
+    if (opts?.replace) {
+      window.history.replaceState(null, "", `${to}${search}${window.location.hash}`);
+    } else {
+      window.history.pushState(null, "", to);
+    }
     setPath(to);
   }, []);
 
@@ -50,5 +69,5 @@ export function useRouter() {
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  return { path, route: parse(path), navigate };
+  return { path, route: parseRoute(path), navigate };
 }

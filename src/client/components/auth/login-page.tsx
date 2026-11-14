@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { intentLoginLabel } from "@/lib/safe-redirect";
 
 interface Props {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -9,6 +10,12 @@ interface Props {
   onForgot: () => void;
   error: string | null;
   configured: boolean;
+}
+
+function loginSubtitle(mode: "login" | "signup"): string {
+  if (mode === "signup") return "Create an account (pending approval)";
+  const intent = new URLSearchParams(window.location.search).get("intent");
+  return intentLoginLabel(intent);
 }
 
 export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Props) {
@@ -48,9 +55,7 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
         <div className="space-y-1 text-center">
           <p className="text-sm font-medium tracking-wide text-emerald-800">Landlord Gopher</p>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">LG Maintenance Portal</h1>
-          <p className="text-sm text-muted-foreground">
-            {mode === "login" ? "Staff and admin sign-in" : "Create an account (pending approval)"}
-          </p>
+          <p className="text-sm text-muted-foreground">{loginSubtitle(mode)}</p>
         </div>
 
         <form onSubmit={submit} className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">

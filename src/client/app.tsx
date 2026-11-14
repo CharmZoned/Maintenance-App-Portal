@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
 import { useAppState } from "./hooks/use-app-state";
 import { useAuth } from "./hooks/use-auth";
-import { useRouter, type Route } from "./hooks/use-router";
+import { parseRoute, useRouter, type Route } from "./hooks/use-router";
 import { AppContext } from "./context";
 import { ErrorBanner } from "./components/error-banner";
 import { NoticeBanner } from "./components/notice-banner";
@@ -24,6 +24,10 @@ import { LoginPage } from "./components/auth/login-page";
 import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
 import { Button } from "./components/ui/button";
+import {
+  readLoginRedirectParams,
+  stripLoginRedirectParams,
+} from "./lib/safe-redirect";
 
 const PORTFOLIO: AppNavItem[] = [
   { id: "dashboard", label: "Dashboard", href: "/dashboard", home: true },
@@ -97,19 +101,38 @@ export function App() {
     }
   }, []);
 
+  // Phase 4b / WS-R: honor safe ?redirect= (or website ?intent= defaults) once ready.
+  // replace:true always syncs router state (avoids no-op after URL already matches).
+  useEffect(() => {
+    if (!ready) return;
+    const { target, hadParams } = readLoginRedirectParams(
+      window.location.search,
+      window.location.origin,
+    );
+    if (!hadParams && !target) return;
+
+    const cleanedSearch = stripLoginRedirectParams(window.location.search);
+    const nextPath = target ?? window.location.pathname;
+    navigate(nextPath, { replace: true, search: cleanedSearch });
+  }, [ready, navigate]);
+
+  // Read window.location.pathname so same-tick WS-R replaceState is visible
+  // before React path state flushes (avoids clobbering allowlisted deep links).
   useEffect(() => {
     if (!ready || !isTenant) return;
-    if (route.name !== "maintenance" && route.name !== "documents") {
+    const here = parseRoute(window.location.pathname);
+    if (here.name !== "maintenance" && here.name !== "documents") {
       navigate("/maintenance");
     }
-  }, [ready, isTenant, route.name, navigate]);
+  }, [ready, isTenant, path, navigate]);
 
   useEffect(() => {
     if (!ready || !isLandlord) return;
-    if (!landlordHomeRoute(route)) {
+    const here = parseRoute(window.location.pathname);
+    if (!landlordHomeRoute(here)) {
       navigate("/properties");
     }
-  }, [ready, isLandlord, route, navigate]);
+  }, [ready, isLandlord, path, navigate]);
 
   if (auth.gate.state === "loading") {
     return (
