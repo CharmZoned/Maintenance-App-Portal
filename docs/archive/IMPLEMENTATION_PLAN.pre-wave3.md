@@ -1,7 +1,11 @@
 # Landlord Gopher — Phased Implementation Plan
 
+> **Historical snapshot** (pre–Wave 3). Not the live tracker — see
+> [`docs/IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md) and
+> [`docs/wave3-plan.md`](../wave3-plan.md).
+
 **Last revised:** 2026-11-13  
-**Tracker:** Cursor Project task list (this doc is the source of truth for scope; Project tasks mirror phases/requirements below).  
+**Tracker (at time of writing):** Cursor Project task list mirrored phases/requirements below.  
 **LGA-5:** Correction plan before Phase 2 — completion checklist in [Coordinator runbook](#lga-5--correction-plan-before-phase-2).
 
 ## Branch / merge status

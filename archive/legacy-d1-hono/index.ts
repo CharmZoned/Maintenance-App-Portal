@@ -8,7 +8,8 @@
  */
 import { Hono } from "hono";
 
-type Env = { Bindings: { DB: D1Database } };
+/** Bindings unused — stub only returns 410/404 (no D1). */
+type Env = { Bindings: Record<string, unknown> };
 
 const app = new Hono<Env>();
 

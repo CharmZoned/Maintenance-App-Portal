@@ -1,7 +1,7 @@
 /**
- * @deprecated Portfolio data goes through `src/client/lib/data.ts` (Supabase).
- * Leftover fetch helper; the SPA does not call legacy `/api` routes. The 410
- * Worker stub lives under `archive/legacy-d1-hono/`.
+ * Archived unused SPA fetch helper (was `src/client/api.ts`).
+ * Portfolio data goes through `src/client/lib/data.ts` (Supabase). The 410
+ * Worker stub is `index.ts` in this folder.
  */
 export async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
   const opts: RequestInit = { method, headers: {} };

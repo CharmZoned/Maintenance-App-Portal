@@ -10,7 +10,7 @@ This file used to hold the full phased plan. That snapshot is archived at
 | Doc | Role |
 |-----|------|
 | [`docs/parallel-work-plan.md`](parallel-work-plan.md) | Wave 1–2 stream definitions + historical kickoffs |
-| [`docs/wave3-plan.md`](wave3-plan.md) | Repo pointer for Wave 3 streams (canonical detail in Project store `docs/wave3-plan.md`) |
+| [`docs/wave3-plan.md`](wave3-plan.md) | Wave 3 streams (repo index; fuller copy may also live in the Cursor Project store under the same relative path) |
 | [`docs/deferred-work.md`](deferred-work.md) | Parked items (hosting/URL, R6, Stripe, hygiene backlog, etc.) |
 | [`docs/ops/schema-migrations.md`](ops/schema-migrations.md) | Migration / no live-only DDL rules |
 | [`docs/ops/ci-required-checks.md`](ops/ci-required-checks.md) | CI workflow + making the check required |

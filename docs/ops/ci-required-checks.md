@@ -4,11 +4,12 @@
 
 Workflow: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 
-On every PR to `master` and every push to `master`, GitHub Actions runs:
+On every PR to `master` and every push to `master` (skipped when the diff is
+**only** Markdown / `docs/**`), GitHub Actions runs:
 
-1. `pnpm typecheck`
+1. `pnpm typecheck` (in parallel with build)
 2. `pnpm build`
-3. `pnpm test` (emulator suite; **289 pass / 10 R6 `test.todo` is expected green**)
+3. `pnpm test` (emulator suite — **must exit 0**; R6 notification cases may be `test.todo` until WS-L)
 
 Job name shown in the Checks UI: **`typecheck / build / test`**.
 
@@ -30,3 +31,4 @@ Until that click, the workflow still runs on PRs but merge is not blocked by Git
 
 - Do **not** require Playwright (`pnpm test:browser`) or the full dashboard run in this gate — those are slower / optional.
 - R6 notification todos stay as `test.todo` until **WS-L**; they must not fail CI.
+- Action versions are pinned by commit SHA in the workflow (not floating `@v4` tags alone).

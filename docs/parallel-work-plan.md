@@ -2,7 +2,7 @@
 
 **Mode:** Historical stream definitions + Wave 1–2 context. **Wave 3 staffing:** **approved** — use [`docs/wave3-plan.md`](./wave3-plan.md) (pointer) and the Cursor Project store `docs/wave3-plan.md` (canonical: I/K/N/O + WS-S hygiene + WS-R; **P/Q + portal hosting/URL not staffed**). Implementers launched for **I / K / N / O / R / S1**.  
 **Base (original):** `master` @ `15e0261` (merged [#18](https://github.com/CharmZoned/Maintenance-App-Portal/pull/18) test suite). **Wave 1–2 status:** merged on `master` (PRs #19–#29); no Wave 2 leftovers to re-plan.  
-**Inputs:** gap analysis, `docs/deferred-work.md`, IMPLEMENTATION_PLAN R1–R8, role rundown, owner bug list (PR #18 intentional failures), live Supabase grants/CHECKs verified 2026-11-13; owner Wave 3 choices + hygiene 1–13 + hosting deferral (2026-11-14).  
+**Inputs:** gap analysis, `docs/deferred-work.md`, historical R1–R8 map in `docs/archive/IMPLEMENTATION_PLAN.pre-wave3.md`, role rundown, owner bug list (PR #18 intentional failures), live Supabase grants/CHECKs verified 2026-11-13; owner Wave 3 choices + hygiene 1–13 + hosting deferral (2026-11-14).  
 **Product hold:** **R6 notifications + web push stays its own deferred stream (WS-L)** — do not staff until product reopens Phase 6.
 
 ---
@@ -595,7 +595,7 @@ IMPLEMENT: WS-S S2 from docs/wave3-plan.md. One migration PR at a time (prefer 3
 | Wave 3 plan (canonical) | Project store `docs/wave3-plan.md` |
 | Gap analysis | Project store `docs/gap-analysis-requirements.md` (and uploaded copy) |
 | Deferred | `docs/deferred-work.md` |
-| Plan / R1–R8 | `docs/IMPLEMENTATION_PLAN.md` |
+| Plan / R1–R8 (historical) | `docs/archive/IMPLEMENTATION_PLAN.pre-wave3.md` (live pointer: `docs/IMPLEMENTATION_PLAN.md`) |
 | Phase 6 hold | `docs/phases/phase-6.md` |
 | Role rundown | Project store `docs/role-capability-rundown.md` |
 | Migration ops | `docs/ops/schema-migrations.md` |
