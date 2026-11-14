@@ -71,8 +71,12 @@ set search_path = ''
 as $$
 declare
   active_unit bigint;
+  is_primary boolean;
 begin
-  select l.unit_id into active_unit
+  select
+    l.unit_id,
+    (l.primary_tenant_id is not distinct from p_tenant_id)
+  into active_unit, is_primary
   from public."LeaseTenants" lt
   join public."Leases" l on l.id = lt.lease_id
   where lt.tenant_id = p_tenant_id
@@ -82,10 +86,16 @@ begin
   limit 1;
 
   if active_unit is not null then
+    -- Keep primary_on_lease aligned with the remaining active lease so we do
+    -- not violate tenants_one_primary_per_unit_idx after a cross-unit reassign.
     update private.tenants t
-       set unit_id = active_unit
+       set unit_id = active_unit,
+           primary_on_lease = coalesce(is_primary, false)
      where t.id = p_tenant_id
-       and t.unit_id is distinct from active_unit;
+       and (
+         t.unit_id is distinct from active_unit
+         or t.primary_on_lease is distinct from coalesce(is_primary, false)
+       );
     return;
   end if;
 
@@ -110,10 +120,10 @@ set search_path = ''
 as $$
 declare
   lease_unit bigint;
-  lease_status text;
+  is_primary boolean;
 begin
   if tg_op = 'DELETE' then
-    select l.unit_id, l.status into lease_unit, lease_status
+    select l.unit_id into lease_unit
     from public."Leases" l
     where l.id = old.lease_id;
 
@@ -138,16 +148,23 @@ begin
     perform private.recompute_tenant_unit_from_leases(old.tenant_id, lease_unit, old.lease_id);
   end if;
 
-  select l.unit_id into lease_unit
+  select
+    l.unit_id,
+    (l.primary_tenant_id is not distinct from new.tenant_id)
+  into lease_unit, is_primary
   from public."Leases" l
   where l.id = new.lease_id
     and l.status = 'active';
 
   if lease_unit is not null then
     update private.tenants t
-       set unit_id = lease_unit
+       set unit_id = lease_unit,
+           primary_on_lease = coalesce(is_primary, false)
      where t.id = new.tenant_id
-       and t.unit_id is distinct from lease_unit;
+       and (
+         t.unit_id is distinct from lease_unit
+         or t.primary_on_lease is distinct from coalesce(is_primary, false)
+       );
   end if;
 
   return new;
@@ -196,11 +213,15 @@ begin
      )
   then
     update private.tenants t
-       set unit_id = new.unit_id
+       set unit_id = new.unit_id,
+           primary_on_lease = (t.id is not distinct from new.primary_tenant_id)
       from public."LeaseTenants" lt
      where lt.lease_id = new.id
        and lt.tenant_id = t.id
-       and t.unit_id is distinct from new.unit_id;
+       and (
+         t.unit_id is distinct from new.unit_id
+         or t.primary_on_lease is distinct from (t.id is not distinct from new.primary_tenant_id)
+       );
     return new;
   end if;
 

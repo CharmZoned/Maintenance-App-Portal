@@ -88,3 +88,22 @@ create policy property_documents_insert on public."PropertyDocuments"
     and storage_path ~ (('^'::text || (property_id)::text) || '/[^/]+$'::text)
     and ((select private.is_admin()) or (visibility = 'staff'::text))
   );
+
+drop policy if exists property_documents_update on public."PropertyDocuments";
+create policy property_documents_update on public."PropertyDocuments"
+  for update
+  to authenticated
+  using ((select private.can_manage_property_documents()))
+  with check (
+    (select private.can_manage_property_documents())
+    and (
+      (select private.is_admin())
+      or visibility = 'staff'::text
+    )
+  );
+
+drop policy if exists property_documents_delete on public."PropertyDocuments";
+create policy property_documents_delete on public."PropertyDocuments"
+  for delete
+  to authenticated
+  using ((select private.can_manage_property_documents()));

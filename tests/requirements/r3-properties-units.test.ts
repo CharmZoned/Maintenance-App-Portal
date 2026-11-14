@@ -352,6 +352,67 @@ describe("[R3] Properties and units", () => {
       expect(tenant.primary_on_lease).toBe(false);
     });
 
+    test("co-tenant link to another active lease drops primary_on_lease (LD-9)", async () => {
+      // Primary on unit A + co-member on unit B must not keep primary_on_lease
+      // after the DB sync push (tenants_one_primary_per_unit_idx).
+      const [{ id: tenantT }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Co', 'Tenant', 'co@tenant.test', false, false) returning id`,
+      );
+      const [{ id: tenantP }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Pri', 'Mary', 'pri@mary.test', false, false) returning id`,
+      );
+      const [{ id: unitA }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Ld9-A', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      const [{ id: unitB }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Ld9-B', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const leaseA = await data.createLease({
+        unit_id: Number(unitA),
+        primary_tenant_id: Number(tenantT),
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
+        monthly_rent: 900,
+      });
+      const leaseB = await data.createLease({
+        unit_id: Number(unitB),
+        primary_tenant_id: Number(tenantP),
+        start_date: "2026-02-01",
+        end_date: "2027-01-31",
+        monthly_rent: 950,
+      });
+      await sql(`insert into public."LeaseTenants" (lease_id, tenant_id) values ($1, $2)`, [
+        leaseB.id,
+        tenantT,
+      ]);
+      const [afterLink] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantT],
+      );
+      expect(Number(afterLink.unit_id), "push follows the newly linked active lease").toBe(Number(unitB));
+      expect(afterLink.primary_on_lease, "co-tenant must not stay primary on unit B").toBe(false);
+      const [primaryP] = await sql<{ primary_on_lease: boolean }>(
+        `select primary_on_lease from public."Tenants" where id = $1`,
+        [tenantP],
+      );
+      expect(primaryP.primary_on_lease).toBe(true);
+
+      await data.updateLease(leaseA.id, { status: "ended" });
+      const [afterEnd] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantT],
+      );
+      expect(Number(afterEnd.unit_id), "recompute keeps the remaining active lease unit").toBe(
+        Number(unitB),
+      );
+      expect(afterEnd.primary_on_lease).toBe(false);
+    });
+
     test("renames a property", async () => {
       await signInApp("admin");
       const updated = await data.updateProperty(world.otherProperty.id, { name: "Birch House (renovated)" });
