@@ -62,7 +62,7 @@ export function PeoplePage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const app = useApp();
+  const { isAdmin, listTenants, setError, landlords, vendors, canMutatePortfolio } = useApp();
   const [tab, setTab] = useState<PeopleTabId>("tenants");
   const [state, setState] = useState<LoadState>("loading");
   const [error, setLocalError] = useState<string | null>(null);
@@ -78,25 +78,29 @@ export function PeoplePage({
     status: "approved" | "rejected";
   } | null>(null);
 
-  const load = useCallback(async () => {
-    setState("loading");
-    setLocalError(null);
-    try {
-      const [acc, ten, st] = await Promise.all([
-        app.isAdmin ? data.listUserAccounts() : Promise.resolve([] as UserAccountRow[]),
-        app.listTenants(),
-        app.isAdmin ? data.listStaff() : Promise.resolve([] as data.StaffMember[]),
-      ]);
-      setAccounts(acc);
-      setTenants(ten);
-      setStaff(st);
-      setState("ready");
-    } catch (err) {
-      setLocalError((err as Error).message);
-      setState("error");
-      app.setError((err as Error).message);
-    }
-  }, [app]);
+  /** Initial mount shows skeletons; mutation refreshes keep current rows. */
+  const load = useCallback(
+    async (opts?: { keepRows?: boolean }) => {
+      if (!opts?.keepRows) setState("loading");
+      setLocalError(null);
+      try {
+        const [acc, ten, st] = await Promise.all([
+          isAdmin ? data.listUserAccounts() : Promise.resolve([] as UserAccountRow[]),
+          listTenants(),
+          isAdmin ? data.listStaff() : Promise.resolve([] as data.StaffMember[]),
+        ]);
+        setAccounts(acc);
+        setTenants(ten);
+        setStaff(st);
+        setState("ready");
+      } catch (err) {
+        setLocalError((err as Error).message);
+        setState("error");
+        setError((err as Error).message);
+      }
+    },
+    [isAdmin, listTenants, setError],
+  );
 
   useEffect(() => {
     void load();
@@ -133,16 +137,16 @@ export function PeoplePage({
 
   async function applyStatus(user: UserAccountRow, status: "approved" | "rejected") {
     if (status === "approved" && approveBlockedReason(user)) {
-      app.setError(approveBlockedReason(user) ?? "Cannot approve yet.");
+      setError(approveBlockedReason(user) ?? "Cannot approve yet.");
       setConfirm(null);
       return;
     }
     setBusyId(user.user_id);
     try {
       await data.setAccountStatus(user.user_id, status);
-      await load();
+      await load({ keepRows: true });
     } catch (err) {
-      app.setError((err as Error).message);
+      setError((err as Error).message);
     } finally {
       setBusyId(null);
       setConfirm(null);
@@ -159,13 +163,13 @@ export function PeoplePage({
         : tab === "tenants"
           ? `${tenants.length} ${tenants.length === 1 ? "tenant" : "tenants"}`
           : tab === "landlords"
-            ? `${app.landlords.length} ${app.landlords.length === 1 ? "landlord" : "landlords"}`
+            ? `${landlords.length} ${landlords.length === 1 ? "landlord" : "landlords"}`
             : tab === "team"
               ? `${staff.length} team ${staff.length === 1 ? "member" : "members"}`
-              : `${app.vendors.length} ${app.vendors.length === 1 ? "vendor" : "vendors"}`;
+              : `${vendors.length} ${vendors.length === 1 ? "vendor" : "vendors"}`;
 
   const primaryAction =
-    tab === "tenants" && app.canMutatePortfolio ? (
+    tab === "tenants" && canMutatePortfolio ? (
       <Button
         variant="default"
         size="header"
@@ -173,7 +177,7 @@ export function PeoplePage({
       >
         <Plus className="size-4" /> Add tenant
       </Button>
-    ) : tab === "landlords" && app.canMutatePortfolio ? (
+    ) : tab === "landlords" && canMutatePortfolio ? (
       <Button
         variant="default"
         size="header"
@@ -184,13 +188,13 @@ export function PeoplePage({
       >
         <Plus className="size-4" /> Add landlord
       </Button>
-    ) : tab === "team" && app.isAdmin ? (
+    ) : tab === "team" && isAdmin ? (
       <Button
         variant="default"
         size="header"
         type="button"
         onClick={() =>
-          app.setError(
+          setError(
             "Add team member is stubbed — create Staff rows in the DB / Users linking for now.",
           )
         }
@@ -217,7 +221,7 @@ export function PeoplePage({
             Pending sign-ups · Approve as Tenant of Unit… / Owner / Team member, or Reject.
             Complex role links still live on Users.
           </p>
-          {!app.isAdmin ? (
+          {!isAdmin ? (
             <EmptyState message="Approvals are restricted to admins." />
           ) : pending.length === 0 ? (
             <EmptyState message="No pending sign-ups. New accounts appear here after signup." />
@@ -245,8 +249,8 @@ export function PeoplePage({
           {tenants.length === 0 ? (
             <EmptyState
               message="No tenants yet. Add a tenant to start signing leases."
-              actionLabel={app.canMutatePortfolio ? "Add tenant" : undefined}
-              onAction={app.canMutatePortfolio ? () => setTenantDialog(true) : undefined}
+              actionLabel={canMutatePortfolio ? "Add tenant" : undefined}
+              onAction={canMutatePortfolio ? () => setTenantDialog(true) : undefined}
             />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
@@ -274,12 +278,12 @@ export function PeoplePage({
           <p className="text-[13px] text-muted-foreground">
             List adds portal status · Conversation deep-link stubbed until message-center exists.
           </p>
-          {app.landlords.length === 0 ? (
+          {landlords.length === 0 ? (
             <EmptyState
               message="No landlords yet. Create a landlord before adding properties."
-              actionLabel={app.canMutatePortfolio ? "Add landlord" : undefined}
+              actionLabel={canMutatePortfolio ? "Add landlord" : undefined}
               onAction={
-                app.canMutatePortfolio
+                canMutatePortfolio
                   ? () => {
                       setEditingLandlord(undefined);
                       setLandlordDialog(true);
@@ -289,7 +293,7 @@ export function PeoplePage({
             />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
-              {app.landlords.map((l) => {
+              {landlords.map((l) => {
                 const name =
                   l.company_name?.trim() || `${l.first_name} ${l.last_name}`.trim();
                 const meta = [l.email, l.phone].filter(Boolean).join(" · ") || "—";
@@ -300,7 +304,7 @@ export function PeoplePage({
                     meta={meta}
                     status={statusFromAccount(accounts, l.email)}
                     onClick={
-                      app.canMutatePortfolio
+                      canMutatePortfolio
                         ? () => {
                             setEditingLandlord(l);
                             setLandlordDialog(true);
@@ -341,11 +345,11 @@ export function PeoplePage({
           <p className="text-[13px] text-muted-foreground">
             Vendors directory (existing Vendors table) · Full U16 vendor CRM deferred.
           </p>
-          {app.vendors.length === 0 ? (
+          {vendors.length === 0 ? (
             <EmptyState message="No vendors yet." />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
-              {app.vendors.map((v) => (
+              {vendors.map((v) => (
                 <VendorRow
                   key={v.id}
                   name={v.name}
@@ -357,7 +361,11 @@ export function PeoplePage({
         </div>
       )}
 
-      <TenantDialog open={tenantDialog} onOpenChange={setTenantDialog} onSaved={() => void load()} />
+      <TenantDialog
+        open={tenantDialog}
+        onOpenChange={setTenantDialog}
+        onSaved={() => void load({ keepRows: true })}
+      />
       <LandlordDialog
         open={landlordDialog}
         onOpenChange={setLandlordDialog}
