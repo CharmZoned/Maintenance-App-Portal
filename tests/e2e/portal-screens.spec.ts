@@ -47,7 +47,7 @@ test.describe("[R8] Admin web portal — who sees what", () => {
       "href",
       "/maintenance",
     );
-    await expect(page.getByRole("heading", { name: "Maintenance" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "My jobs" })).toBeVisible();
     const links = await navLinks(page);
     expect(links).not.toContain("Users");
     expect(links).not.toContain("Dashboard");

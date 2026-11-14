@@ -1,59 +1,77 @@
 import { useEffect, useMemo, useState } from "react";
-import { CircleAlert, Plus, Wrench } from "lucide-react";
+import { Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
 import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
-import { cn, formatDate, formatMoney } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import type { StaffMember } from "@/lib/data";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { WorkOrderDialog } from "./work-order-dialog";
 import { TenantSubmitDialog } from "./tenant-submit-dialog";
-import type { TenantHomeContext, WorkOrder, WorkOrderStatus } from "@/types";
+import { formatStaffMember } from "./work-order-assignee-date-fields";
+import type { TenantHomeContext, WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
+import {
+  EmptyState,
+  ErrorRetry,
+  ListRow,
+  PriorityChip,
+  SkeletonRow,
+  StatusChip,
+} from "@/components/patterns";
+import { cn } from "@/lib/utils";
+import {
+  staffQueueTab,
+  toRequestStatus,
+  workOrderContextLine,
+} from "./request-status";
 
-const PRIORITY_TONE: Record<string, string> = {
-  urgent: "bg-destructive-tint text-destructive",
-  high: "bg-warning-tint text-warning",
-  normal: "bg-info-tint text-info",
-  low: "bg-muted text-muted-foreground",
-};
-
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  open: "secondary",
-  scheduled: "default",
-  in_progress: "default",
-  on_hold: "outline",
-  closed: "outline",
-};
-
-type StaffFilter = WorkOrderStatus | "open_all" | "all";
+type StaffTab = "needs" | "active" | "completed" | "all";
 type TenantFilter = "active" | "closed";
 
-function tenantStatusLabel(status: WorkOrderStatus): string {
-  switch (status) {
-    case "open":
-      return "Submitted";
-    case "scheduled":
-      return "Scheduled";
-    case "in_progress":
-      return "In progress";
-    case "on_hold":
-      return "On hold";
-    case "closed":
-      return "Closed";
-    default:
-      return status;
-  }
+function QueueTab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-sm px-3 py-2 text-[13px]",
+        active
+          ? "bg-brand-tint font-medium text-brand-text"
+          : "border border-border font-normal text-muted-foreground hover:bg-muted",
+      )}
+    >
+      {label}
+    </button>
+  );
 }
 
 export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
   const app = useApp();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [staffFilter, setStaffFilter] = useState<StaffFilter>("open_all");
+  const [listError, setListError] = useState<string | null>(null);
+  const [staffTab, setStaffTab] = useState<StaffTab>("needs");
   const [tenantFilter, setTenantFilter] = useState<TenantFilter>("active");
+  const [propertyFilter, setPropertyFilter] = useState<string>("all");
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
+  const [query, setQuery] = useState("");
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [tenantOpen, setTenantOpen] = useState(false);
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
@@ -65,10 +83,13 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     () =>
       createSingleFlightLoader(async () => {
         try {
+          setListError(null);
           return await listWorkOrders();
         } catch (err) {
-          setError((err as Error).message);
-          return [] as WorkOrder[];
+          const message = (err as Error).message;
+          setListError(message);
+          setError(message);
+          throw err;
         }
       }),
     [listWorkOrders, setError],
@@ -80,6 +101,9 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
       const list = await flight.load();
       setOrders(list);
       return list;
+    } catch {
+      setOrders([]);
+      return [] as WorkOrder[];
     } finally {
       setLoading(false);
     }
@@ -93,6 +117,8 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
         const list = await flight.load();
         if (cancelled) return;
         setOrders(list);
+      } catch {
+        if (!cancelled) setOrders([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -102,7 +128,6 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     };
   }, [flight]);
 
-  // Calendar deep-links: open existing WO without touching work-order-dialog (WS-K).
   useDeepLinkOpen({
     search,
     param: "wo",
@@ -112,7 +137,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     onFound: (found) => {
       setEditing(found);
       setDialogOpen(true);
-      setStaffFilter((prev) => (prev !== "all" && found.status === "closed" ? "all" : prev));
+      setStaffTab("all");
       replace?.("/maintenance");
     },
     onMiss: () => replace?.("/maintenance"),
@@ -126,7 +151,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
         const ctx = await app.getTenantHomeContext();
         if (!cancelled) setHome(ctx);
       } catch {
-        /* ignore — submit dialog also loads */
+        /* ignore */
       }
     })();
     return () => {
@@ -134,204 +159,308 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     };
   }, [app.isTenant, app]);
 
-  const counts = useMemo(() => {
-    const c = {
-      all: orders.length,
-      open: 0,
-      scheduled: 0,
-      in_progress: 0,
-      on_hold: 0,
-      closed: 0,
-      urgent: 0,
-      active: 0,
+  useEffect(() => {
+    if (app.isTenant || app.isLandlord) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await app.listStaff();
+        if (!cancelled) setStaff(rows);
+      } catch {
+        /* assignee filter optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
+  }, [app]);
+
+  const staffById = useMemo(() => {
+    const map = new Map<number, StaffMember>();
+    for (const s of staff) map.set(s.id, s);
+    return map;
+  }, [staff]);
+
+  const counts = useMemo(() => {
+    let needs = 0;
+    let active = 0;
+    let completed = 0;
+    let urgent = 0;
     for (const o of orders) {
-      if (o.status === "open") c.open++;
-      if (o.status === "scheduled") c.scheduled++;
-      if (o.status === "in_progress") c.in_progress++;
-      if (o.status === "on_hold") c.on_hold++;
-      if (o.status === "closed") c.closed++;
-      if (o.status !== "closed") c.active++;
-      if (o.priority === "urgent" && o.status !== "closed") c.urgent++;
+      const tab = staffQueueTab(o.status, Boolean(o.assigned_staff_id));
+      if (tab === "needs") needs++;
+      else if (tab === "active") active++;
+      else completed++;
+      if (o.priority === "urgent" && o.status !== "closed") urgent++;
     }
-    return c;
+    return { needs, active, completed, all: orders.length, urgent };
   }, [orders]);
 
   const filtered = useMemo(() => {
+    let list = orders;
     if (app.isTenant) {
-      if (tenantFilter === "closed") return orders.filter((o) => o.status === "closed");
-      return orders.filter((o) => o.status !== "closed");
+      list =
+        tenantFilter === "closed"
+          ? list.filter((o) => o.status === "closed")
+          : list.filter((o) => o.status !== "closed");
+    } else if (staffTab !== "all") {
+      list = list.filter(
+        (o) => staffQueueTab(o.status, Boolean(o.assigned_staff_id)) === staffTab,
+      );
     }
-    if (staffFilter === "all") return orders;
-    if (staffFilter === "open_all") return orders.filter((o) => o.status !== "closed");
-    return orders.filter((o) => o.status === staffFilter);
-  }, [orders, staffFilter, tenantFilter, app.isTenant]);
+    if (propertyFilter !== "all") {
+      const pid = Number(propertyFilter);
+      list = list.filter((o) => o.property_id === pid);
+    }
+    if (assigneeFilter !== "all" && !app.isTenant) {
+      if (assigneeFilter === "unassigned") {
+        list = list.filter((o) => o.assigned_staff_id == null);
+      } else {
+        const sid = Number(assigneeFilter);
+        list = list.filter((o) => o.assigned_staff_id === sid);
+      }
+    }
+    const q = query.trim().toLowerCase();
+    if (q) {
+      list = list.filter((o) => {
+        const hay = [
+          o.title,
+          o.description,
+          o.property_name,
+          o.unit_name,
+          o.tenant_first_name,
+          o.tenant_last_name,
+          o.request_number,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    return list;
+  }, [
+    orders,
+    staffTab,
+    tenantFilter,
+    propertyFilter,
+    assigneeFilter,
+    query,
+    app.isTenant,
+  ]);
 
   const title = app.isTenant ? "My requests" : "Maintenance";
-  const metaOpen = app.isTenant ? counts.active : counts.open + counts.scheduled + counts.in_progress + counts.on_hold;
-  const noUnit = app.isTenant && home != null && home.unit_id == null;
+  const needsAction = counts.needs;
+  const meta = app.isTenant
+    ? `${orders.filter((o) => o.status !== "closed").length} active`
+    : `${needsAction} need action`;
   const homeLabel =
     home &&
     [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name].filter(Boolean).join(" · ");
+  const noUnit = app.isTenant && home != null && home.unit_id == null;
+  const filtersActive =
+    propertyFilter !== "all" || assigneeFilter !== "all" || query.trim().length > 0;
+
+  function openOrder(w: WorkOrder) {
+    setEditing(w);
+    setDialogOpen(true);
+  }
+
+  function clearFilters() {
+    setPropertyFilter("all");
+    setAssigneeFilter("all");
+    setQuery("");
+  }
 
   return (
     <PageShell
       title={title}
       meta={
         <>
-          {metaOpen} {app.isTenant ? "active" : "open"}
-          {homeLabel && app.isTenant && (
+          {meta}
+          {homeLabel && app.isTenant ? (
             <span className="ml-2 text-muted-foreground">· {homeLabel}</span>
-          )}
-          {counts.urgent > 0 && (
-            <span className="badge-tone tone-danger ml-2">
-              <CircleAlert className="h-3 w-3" /> {counts.urgent} urgent
-            </span>
-          )}
+          ) : null}
         </>
       }
       actions={
         app.isTenant ? (
           <Button
+            variant="brand"
+            size="header"
             onClick={() => setTenantOpen(true)}
             disabled={noUnit}
             title={noUnit ? "Ask staff to assign a unit first" : undefined}
           >
             <Plus className="h-4 w-4" /> New request
           </Button>
-        ) : app.canCreateWorkOrders && filtered.length > 0 ? (
+        ) : app.canCreateWorkOrders ? (
           <Button
+            variant="brand"
+            size="header"
             onClick={() => {
               setEditing(undefined);
               setDialogOpen(true);
             }}
           >
-            <Plus className="h-4 w-4" /> New work order
+            <Plus className="h-4 w-4" /> New request
           </Button>
         ) : null
       }
     >
       {noUnit && (
-        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-          Your account isn’t linked to a unit yet. Ask staff to assign a unit before submitting requests.
+        <p className="rounded-sm border border-warning bg-warning-tint px-3 py-2 text-sm text-warning">
+          Your account isn’t linked to a unit yet. Ask staff to assign a unit before submitting
+          requests.
         </p>
       )}
 
       {app.isTenant ? (
-        <Tabs value={tenantFilter} onValueChange={(v) => setTenantFilter(v as TenantFilter)}>
-          <TabsList>
-            <TabsTrigger value="active">Active ({counts.active})</TabsTrigger>
-            <TabsTrigger value="closed">Closed ({counts.closed})</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap gap-2">
+          <QueueTab
+            label={`Active (${orders.filter((o) => o.status !== "closed").length})`}
+            active={tenantFilter === "active"}
+            onClick={() => setTenantFilter("active")}
+          />
+          <QueueTab
+            label={`Closed (${orders.filter((o) => o.status === "closed").length})`}
+            active={tenantFilter === "closed"}
+            onClick={() => setTenantFilter("closed")}
+          />
+        </div>
       ) : (
-        <Tabs value={staffFilter} onValueChange={(v) => setStaffFilter(v as StaffFilter)}>
-          <TabsList>
-            <TabsTrigger value="open_all">Open</TabsTrigger>
-            <TabsTrigger value="open">Unscheduled</TabsTrigger>
-            <TabsTrigger value="scheduled">Scheduled</TabsTrigger>
-            <TabsTrigger value="in_progress">In progress</TabsTrigger>
-            <TabsTrigger value="on_hold">On hold</TabsTrigger>
-            <TabsTrigger value="closed">Closed</TabsTrigger>
-            <TabsTrigger value="all">All</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex flex-wrap gap-2">
+          <QueueTab
+            label="Needs action"
+            active={staffTab === "needs"}
+            onClick={() => setStaffTab("needs")}
+          />
+          <QueueTab label="Active" active={staffTab === "active"} onClick={() => setStaffTab("active")} />
+          <QueueTab
+            label="Completed"
+            active={staffTab === "completed"}
+            onClick={() => setStaffTab("completed")}
+          />
+          <QueueTab label="All" active={staffTab === "all"} onClick={() => setStaffTab("all")} />
+        </div>
+      )}
+
+      {!app.isTenant && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={propertyFilter} onValueChange={setPropertyFilter}>
+            <SelectTrigger className="h-8 w-auto min-w-[7.5rem] text-xs">
+              <SelectValue placeholder="Property" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All properties</SelectItem>
+              {app.properties.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {!app.isLandlord && (
+            <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+              <SelectTrigger className="h-8 w-auto min-w-[7.5rem] text-xs">
+                <SelectValue placeholder="Assignee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All assignees</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {staff.map((s) => (
+                  <SelectItem key={s.id} value={String(s.id)}>
+                    {formatStaffMember(s)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Input
+            className="h-8 min-w-[12rem] flex-1 text-xs"
+            placeholder="Search requests…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
       )}
 
       {loading ? (
-        <Card className="p-8 text-center text-sm text-muted-foreground">Loading…</Card>
+        <div className="overflow-hidden rounded-md border border-border bg-card">
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      ) : listError ? (
+        <ErrorRetry message={listError} onRetry={() => void load()} />
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
-          <Wrench className="size-7 text-faint" aria-hidden />
-          <p className="font-medium">Nothing here</p>
-          <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            {orders.length === 0
-              ? app.isTenant
-                ? "Submit a request when something needs fixing in your unit."
-                : app.isLandlord
-                  ? "Maintenance on your properties will show up here (read-only)."
-                  : "Track repairs and turnover work for your properties."
-              : "No work orders match this filter."}
-          </p>
-          {orders.length === 0 && app.isTenant && !noUnit && (
-            <Button className="mt-2" onClick={() => setTenantOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" /> New request
-            </Button>
-          )}
-          {orders.length === 0 && app.canCreateWorkOrders && (
-            <Button
-              className="mt-2"
-              onClick={() => {
-                setEditing(undefined);
-                setDialogOpen(true);
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> New work order
-            </Button>
-          )}
+        <div className="rounded-md border border-border bg-card">
+          <EmptyState
+            icon={<Wrench className="size-5" aria-hidden />}
+            message={
+              orders.length === 0
+                ? app.isTenant
+                  ? "Submit a request when something needs fixing in your unit."
+                  : app.isLandlord
+                    ? "Maintenance on your properties will show up here (read-only)."
+                    : "Nothing needs action right now."
+                : "No requests match this filter."
+            }
+            filtered={orders.length > 0 && filtersActive}
+            onClear={clearFilters}
+            actionLabel={
+              orders.length === 0 && app.isTenant && !noUnit
+                ? "New request"
+                : orders.length === 0 && app.canCreateWorkOrders
+                  ? "New request"
+                  : undefined
+            }
+            onAction={
+              app.isTenant
+                ? () => setTenantOpen(true)
+                : app.canCreateWorkOrders
+                  ? () => {
+                      setEditing(undefined);
+                      setDialogOpen(true);
+                    }
+                  : undefined
+            }
+          />
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {filtered.map((w) => (
-            <Card
-              key={w.id}
-              className="cursor-pointer p-4 transition-colors duration-150 hover:bg-muted"
-              onClick={() => {
-                setEditing(w);
-                setDialogOpen(true);
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <h3 className="truncate font-semibold">{w.title}</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {[
-                      w.request_number ? `#${w.request_number}` : null,
-                      w.category,
-                      !app.isTenant
-                        ? [w.tenant_first_name, w.tenant_last_name].filter(Boolean).join(" ") || null
-                        : null,
-                      w.property_name,
-                      w.unit_name,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ") || "—"}
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize",
-                    PRIORITY_TONE[w.priority],
-                  )}
-                >
-                  {w.priority === "urgent" && <CircleAlert className="mr-1 h-3 w-3" />}
-                  {app.isTenant && w.priority === "urgent" ? "emergency" : w.priority}
-                </span>
-              </div>
-              {w.description && (
-                <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{w.description}</p>
-              )}
-              <div className="mt-3 flex items-center justify-between border-t pt-3 text-xs">
-                <div className="flex items-center gap-2">
-                  <Badge variant={STATUS_VARIANT[w.status] ?? "secondary"} className="capitalize">
-                    {app.isTenant ? tenantStatusLabel(w.status) : w.status.replaceAll("_", " ")}
-                  </Badge>
-                  {w.vendor_name && <span className="text-muted-foreground">{w.vendor_name}</span>}
-                </div>
-                <div className="text-right text-muted-foreground">
-                  {w.scheduled_at && <div>Scheduled {formatDate(w.scheduled_at)}</div>}
-                  {w.cost != null && !app.isTenant && (
-                    <div className="font-medium tabular-nums text-foreground">
-                      {formatMoney(w.cost, app.settings.currency)}
-                    </div>
-                  )}
-                  {!w.scheduled_at && (w.cost == null || app.isTenant) && (
-                    <div>Created {formatDate(w.created_at)}</div>
-                  )}
-                </div>
-              </div>
-            </Card>
-          ))}
+        <div className="overflow-hidden rounded-md border border-border bg-card">
+          {filtered.map((w) => {
+            const status = toRequestStatus(w);
+            const assignee =
+              w.assigned_staff_id != null
+                ? staffById.get(w.assigned_staff_id)
+                : undefined;
+            const assigneeLabel = assignee
+              ? `Assigned ${formatStaffMember(assignee)}`
+              : w.assigned_staff_id
+                ? "Assigned"
+                : null;
+            return (
+              <ListRow
+                key={w.id}
+                title={w.title}
+                context={workOrderContextLine(w, {
+                  isTenant: app.isTenant,
+                  assigneeLabel,
+                })}
+                priority={
+                  w.priority === "urgent" ? (
+                    <PriorityChip level="Emergency" />
+                  ) : w.priority === "high" ? (
+                    <PriorityChip level="High" />
+                  ) : null
+                }
+                status={<StatusChip status={status} />}
+                onClick={() => openOrder(w)}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -339,7 +468,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
         open={dialogOpen}
         onOpenChange={(o) => {
           setDialogOpen(o);
-          if (!o) load();
+          if (!o) void load();
         }}
         workOrder={editing}
       />
@@ -348,7 +477,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
           open={tenantOpen}
           onOpenChange={(o) => {
             setTenantOpen(o);
-            if (!o) load();
+            if (!o) void load();
           }}
           onSaved={load}
         />
