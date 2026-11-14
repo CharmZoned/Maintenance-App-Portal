@@ -13,32 +13,15 @@ import {
   type RequestStatus,
 } from "@/components/patterns";
 import { WorkOrderDialog } from "./work-order-dialog";
-import { formatRelativeWhen, parseWhenDate, toRequestStatus } from "./request-status";
+import {
+  formatRelativeWhen,
+  formatScheduleWhen,
+  jobSectionFor,
+  parseWhenDate,
+  toRequestStatus,
+  type JobSection,
+} from "./request-status";
 import type { WorkOrder } from "@/types";
-
-type JobSection = "Today" | "Upcoming" | "On hold" | "Recently completed";
-
-function isSameLocalDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-function sectionFor(order: WorkOrder, now: Date): JobSection {
-  if (order.status === "closed") return "Recently completed";
-  if (order.status === "on_hold") return "On hold";
-  // In-progress stays under Today even if scheduled_at is a later calendar day.
-  if (order.status === "in_progress") return "Today";
-  if (order.scheduled_at) {
-    const d = parseWhenDate(order.scheduled_at);
-    if (d && !isSameLocalDay(d, now) && d > now) {
-      return "Upcoming";
-    }
-  }
-  return "Today";
-}
 
 function compactContext(order: WorkOrder): string {
   const parts: string[] = [];
@@ -51,7 +34,8 @@ function compactContext(order: WorkOrder): string {
       parts.push(`follow-up ${formatDate(order.next_follow_up_date, { weekday: "short" })}`);
     }
   } else if (order.scheduled_at) {
-    parts.push(formatRelativeWhen(order.scheduled_at));
+    // Past-day schedules stay under Today — label Overdue, not "Yesterday".
+    parts.push(formatScheduleWhen(order.scheduled_at));
   } else if (order.status === "closed" && order.completed_at) {
     parts.push(`Completed ${formatRelativeWhen(order.completed_at).toLowerCase()}`);
   }
@@ -164,7 +148,7 @@ export function MyJobsPage({ search = "", replace }: DeepLinkProps = {}) {
       "Recently completed": [],
     };
     for (const o of orders) {
-      groups[sectionFor(o, now)].push(o);
+      groups[jobSectionFor(o, now)].push(o);
     }
     // Cap completed to most recently closed, not most recently created.
     groups["Recently completed"] = [...groups["Recently completed"]]
