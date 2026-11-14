@@ -47,11 +47,12 @@ function parseSettings(raw: Record<string, string>): AppSettings {
 
 export function useAppState(
   enabled: boolean,
-  opts?: { isAdmin?: boolean; isTenant?: boolean; isLandlord?: boolean },
+  opts?: { isAdmin?: boolean; isTenant?: boolean; isLandlord?: boolean; isMaintenance?: boolean },
 ) {
   const isAdmin = opts?.isAdmin ?? false;
   const isTenant = opts?.isTenant ?? false;
   const isLandlord = opts?.isLandlord ?? false;
+  const isMaintenance = opts?.isMaintenance ?? false;
   const [properties, setProperties] = useState<Property[]>([]);
   const [landlords, setLandlords] = useState<Landlord[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -82,6 +83,14 @@ export function useAppState(
       setSettings(DEFAULT_SETTINGS);
       return;
     }
+    if (isMaintenance) {
+      // Jobs + calendar only — skip portfolio bootstrap that delayed the old admin shell.
+      setProperties([]);
+      setVendors([]);
+      setLandlords([]);
+      setSettings(DEFAULT_SETTINGS);
+      return;
+    }
     // Settings RLS is admin-only (WS-S S2 #10). Staff skip the fetch and keep
     // DEFAULT_SETTINGS for money formatting (may differ from live admin currency).
     const [props, vens, st, lls] = await Promise.all([
@@ -96,7 +105,7 @@ export function useAppState(
     setVendors(vens);
     setSettings(st ? parseSettings(st) : DEFAULT_SETTINGS);
     setLandlords(lls);
-  }, [isTenant, isLandlord, isAdmin]);
+  }, [isTenant, isLandlord, isMaintenance, isAdmin]);
 
   useEffect(() => {
     if (!enabled) {
