@@ -98,6 +98,7 @@ export function MyJobsPage({ search = "", replace }: DeepLinkProps = {}) {
       createSingleFlightLoader(async () => {
         try {
           setListError(null);
+          setError(null);
           return await listWorkOrders();
         } catch (err) {
           const message = (err as Error).message;

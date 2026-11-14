@@ -48,6 +48,7 @@ function QueueTab({
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
         "rounded-sm px-3 py-2 text-[13px]",
@@ -84,6 +85,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
       createSingleFlightLoader(async () => {
         try {
           setListError(null);
+          setError(null);
           return await listWorkOrders();
         } catch (err) {
           const message = (err as Error).message;
@@ -94,6 +96,9 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
       }),
     [listWorkOrders, setError],
   );
+
+  /** Tenant + landlord share Active/Closed; Needs action is admin-only. */
+  const useAudienceTabs = app.isTenant || app.isLandlord;
 
   async function load() {
     setLoading(true);
@@ -198,7 +203,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
 
   const filtered = useMemo(() => {
     let list = orders;
-    if (app.isTenant) {
+    if (useAudienceTabs) {
       list =
         tenantFilter === "closed"
           ? list.filter((o) => o.status === "closed")
@@ -212,7 +217,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
       const pid = Number(propertyFilter);
       list = list.filter((o) => o.property_id === pid);
     }
-    if (assigneeFilter !== "all" && !app.isTenant) {
+    if (assigneeFilter !== "all" && !useAudienceTabs) {
       if (assigneeFilter === "unassigned") {
         list = list.filter((o) => o.assigned_staff_id == null);
       } else {
@@ -246,14 +251,14 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     propertyFilter,
     assigneeFilter,
     query,
-    app.isTenant,
+    useAudienceTabs,
   ]);
 
   const title = app.isTenant ? "My requests" : "Maintenance";
-  const needsAction = counts.needs;
-  const meta = app.isTenant
-    ? `${orders.filter((o) => o.status !== "closed").length} active`
-    : `${needsAction} need action`;
+  const activeCount = orders.filter((o) => o.status !== "closed").length;
+  const meta = useAudienceTabs
+    ? `${activeCount} active`
+    : `${counts.needs} need action`;
   const homeLabel =
     home &&
     [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name].filter(Boolean).join(" · ");
@@ -315,10 +320,10 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
         </p>
       )}
 
-      {app.isTenant ? (
+      {useAudienceTabs ? (
         <div className="flex flex-wrap gap-2">
           <QueueTab
-            label={`Active (${orders.filter((o) => o.status !== "closed").length})`}
+            label={`Active (${activeCount})`}
             active={tenantFilter === "active"}
             onClick={() => setTenantFilter("active")}
           />
@@ -331,13 +336,17 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
       ) : (
         <div className="flex flex-wrap gap-2">
           <QueueTab
-            label="Needs action"
+            label={`Needs action (${counts.needs})`}
             active={staffTab === "needs"}
             onClick={() => setStaffTab("needs")}
           />
-          <QueueTab label="Active" active={staffTab === "active"} onClick={() => setStaffTab("active")} />
           <QueueTab
-            label="Completed"
+            label={`Active (${counts.active})`}
+            active={staffTab === "active"}
+            onClick={() => setStaffTab("active")}
+          />
+          <QueueTab
+            label={`Completed (${counts.completed})`}
             active={staffTab === "completed"}
             onClick={() => setStaffTab("completed")}
           />
@@ -345,7 +354,8 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
         </div>
       )}
 
-      {!app.isTenant && (
+      {/* Landlords keep property + search; assignee filter stays admin-only. */}
+      {(app.isLandlord || !useAudienceTabs) && (
         <div className="flex flex-wrap items-center gap-2">
           <Select value={propertyFilter} onValueChange={setPropertyFilter}>
             <SelectTrigger className="h-8 w-auto min-w-[7.5rem] text-xs">
