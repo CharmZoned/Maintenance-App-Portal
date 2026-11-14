@@ -1,345 +1,337 @@
-import { useEffect, useState } from "react";
-import {
-  Building2,
-  CheckCircle2,
-  CircleAlert,
-  ClipboardList,
-  Home,
-  Receipt,
-  Wrench,
-} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
-import { cn, daysBetween, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
-import type { DashboardSummary } from "@/types";
-import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/page-shell";
+import {
+  EmptyState,
+  ErrorRetry,
+  ListRow,
+  PriorityChip,
+  SkeletonRow,
+  StatusChip,
+} from "@/components/patterns";
+import * as data from "@/lib/data";
+import {
+  formatActivityStamp,
+  isOpenRequest,
+  priorityLevel,
+  requestNextStep,
+  toRequestStatus,
+} from "@/lib/request-status";
+import { cn } from "@/lib/utils";
+import type { DashboardSummary, Property, WorkOrder } from "@/types";
+import { WorkOrderDialog } from "@/components/maintenance/work-order-dialog";
 
+/**
+ * Admin U5 Dashboard (Figma 04 Homes) — needs-attention counters, open requests,
+ * upcoming (replaces calendar tiles), recent activity stub, portfolio strip.
+ * No rent / lease KPI tiles per Figma Q1 note.
+ */
 export function DashboardPage({ navigate }: { navigate: (to: string) => void }) {
-  const { settings, setError, getDashboardSummary } = useApp();
+  const app = useApp();
+  const { getDashboardSummary, listWorkOrders, properties, setError, isAdmin } = app;
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [orders, setOrders] = useState<WorkOrder[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
+      setLoadError(null);
       try {
-        setLoading(true);
-        const data = await getDashboardSummary();
-        if (!cancelled) setSummary(data);
+        const [dash, woList, accounts] = await Promise.all([
+          getDashboardSummary(),
+          listWorkOrders(),
+          isAdmin
+            ? data.listUserAccounts().catch(() => [] as data.UserAccountRow[])
+            : Promise.resolve([] as data.UserAccountRow[]),
+        ]);
+        if (cancelled) return;
+        setSummary(dash);
+        setOrders(woList);
+        setPendingApprovals(
+          accounts.filter((a) => a.account_status === "pending").length,
+        );
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled) {
+          const message = (err as Error).message;
+          setLoadError(message);
+          setError(message);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [setError, getDashboardSummary]);
+    return () => {
+      cancelled = true;
+    };
+  }, [getDashboardSummary, listWorkOrders, setError, isAdmin, reloadKey]);
 
-  if (loading || !summary) {
+  const openOrders = useMemo(
+    () => orders.filter(isOpenRequest).slice(0, 6),
+    [orders],
+  );
+
+  const unassigned = useMemo(
+    () =>
+      orders.filter(
+        (o) => isOpenRequest(o) && !o.assigned_staff_id && o.status === "open",
+      ).length,
+    [orders],
+  );
+
+  const overdueFollowUps = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return orders.filter(
+      (o) =>
+        o.status === "on_hold" &&
+        o.next_follow_up_date != null &&
+        o.next_follow_up_date.slice(0, 10) <= today,
+    ).length;
+  }, [orders]);
+
+  const upcoming = useMemo(() => {
+    return orders
+      .filter((o) => o.scheduled_at && isOpenRequest(o))
+      .slice()
+      .sort((a, b) => (a.scheduled_at! < b.scheduled_at! ? -1 : 1))
+      .slice(0, 5);
+  }, [orders]);
+
+  const openByProperty = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const o of orders) {
+      if (!isOpenRequest(o) || o.property_id == null) continue;
+      map.set(o.property_id, (map.get(o.property_id) ?? 0) + 1);
+    }
+    return map;
+  }, [orders]);
+
+  if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center text-muted-foreground">
-        Loading dashboard…
-      </div>
+      <PageShell title="Dashboard" meta="Needs attention · portfolio overview">
+        <div className="space-y-3" aria-busy="true">
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      </PageShell>
+    );
+  }
+
+  if (loadError || !summary) {
+    return (
+      <PageShell title="Dashboard" meta="Needs attention · portfolio overview">
+        <ErrorRetry
+          message={loadError ?? "Couldn’t load dashboard."}
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
+      </PageShell>
     );
   }
 
   return (
     <PageShell
       title="Dashboard"
-      meta={`Snapshot of ${new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" })}`}
+      meta="Needs attention · portfolio overview"
+      actions={
+        app.canCreateWorkOrders ? (
+          <Button variant="brand" size="header" onClick={() => setCreateOpen(true)}>
+            New request
+          </Button>
+        ) : null
+      }
     >
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Counter value={unassigned} label="Unassigned requests" />
+        <Counter value={pendingApprovals} label="Awaiting approval" />
+        <Counter value={overdueFollowUps} label="Overdue follow-ups" />
+        {/* Stub: unread messages — Messages group owns inbox counts. */}
+        <Counter value={0} label="Unread messages" muted />
+      </div>
 
-        <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          <KpiCard
-            label="Occupancy"
-            value={`${summary.occupancy_rate}%`}
-            sub={`${summary.occupied} of ${summary.units} units`}
-            icon={<Home className="h-4 w-4" />}
-          />
-          <KpiCard
-            label="Active leases"
-            value={String(summary.active_leases)}
-            sub={summary.upcoming_move_outs ? `${summary.upcoming_move_outs} ending in 30 days` : "No upcoming move-outs"}
-            icon={<ClipboardList className="h-4 w-4" />}
-          />
-          <KpiCard
-            label="Outstanding rent"
-            value={formatMoney(summary.month_outstanding, settings.currency)}
-            sub={`${formatMoney(summary.month_collected, settings.currency)} collected this month`}
-            icon={<Receipt className="h-4 w-4" />}
-          />
-          <KpiCard
-            label="Open work orders"
-            value={String(summary.open_work_orders)}
-            sub={summary.urgent_work_orders ? `${summary.urgent_work_orders} urgent` : "Nothing urgent"}
-            icon={<Wrench className="h-4 w-4" />}
-            tone={summary.urgent_work_orders > 0 ? "warn" : "default"}
-          />
-        </section>
-
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Portfolio</h2>
-              <button
-                type="button"
-                onClick={() => navigate("/properties")}
-                className="text-xs font-medium text-primary hover:underline"
-              >
-                View all
-              </button>
-            </div>
-            <dl className="space-y-3 text-sm">
-              <Row label="Properties" value={summary.properties} icon={<Building2 className="h-4 w-4" />} />
-              <Row label="Total units" value={summary.units} />
-              <Row label="Occupied" value={summary.occupied} tone="positive" />
-              <Row label="Vacant" value={summary.vacant} tone={summary.vacant > 0 ? "warn" : "default"} />
-            </dl>
-          </Card>
-
-          <Card className="p-5 lg:col-span-2">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">This month's rent</h2>
-              <button
-                type="button"
-                onClick={() => navigate("/rent")}
-                className="text-xs font-medium text-primary hover:underline"
-              >
-                Open ledger
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <Stat
-                label="Collected"
-                value={formatMoney(summary.month_collected, settings.currency)}
-                tone="positive"
-              />
-              <Stat
-                label="Outstanding"
-                value={formatMoney(summary.month_outstanding, settings.currency)}
-                tone={summary.month_outstanding > 0 ? "warn" : "default"}
-              />
-              <Stat
-                label="Overdue"
-                value={formatMoney(summary.overdue_total, settings.currency)}
-                sub={summary.overdue_count ? `${summary.overdue_count} charge${summary.overdue_count === 1 ? "" : "s"}` : undefined}
-                tone={summary.overdue_total > 0 ? "danger" : "default"}
-              />
-            </div>
-          </Card>
-        </section>
-
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Open work orders</h2>
-              <button
-                type="button"
-                onClick={() => navigate("/maintenance")}
-                className="text-xs font-medium text-primary hover:underline"
-              >
-                View all
-              </button>
-            </div>
-            {summary.recent_work_orders.length === 0 ? (
-              <Empty icon={<CheckCircle2 className="h-5 w-5" />} title="All caught up" message="No open work orders right now." />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-card p-4">
+            <h2 className="text-sm font-semibold text-foreground">Open requests</h2>
+            {openOrders.length === 0 ? (
+              <EmptyState message="No open requests right now." className="py-8" />
             ) : (
-              <ul className="divide-y">
-                {summary.recent_work_orders.map((w) => (
-                  <li key={w.id} className="flex items-center justify-between gap-4 py-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{w.title}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {[w.property_name, w.unit_name].filter(Boolean).join(" · ") || "Unassigned"}
+              <div className="mt-3 overflow-hidden rounded-md border border-border">
+                {openOrders.map((wo) => {
+                  const status = toRequestStatus(wo);
+                  const pri = priorityLevel(wo.priority);
+                  const unitBit = wo.unit_name ? ` · Unit ${wo.unit_name}` : "";
+                  return (
+                    <div key={wo.id} className="border-b border-border last:border-b-0">
+                      {pri === "Emergency" ? (
+                        <div className="px-4 pt-2">
+                          <PriorityChip level="Emergency" />
+                        </div>
+                      ) : null}
+                      <ListRow
+                        title={`${wo.title}${unitBit}`}
+                        context={[
+                          wo.property_name,
+                          status,
+                          requestNextStep(wo),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                        status={
+                          <StatusChip status={status} nextStep={requestNextStep(wo)} />
+                        }
+                        onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-md border border-border bg-card p-4">
+            <h2 className="text-sm font-semibold text-foreground">Upcoming</h2>
+            {upcoming.length === 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">
+                No scheduled visits. (Replaces Calendar D5.)
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-3">
+                {upcoming.map((wo) => (
+                  <li key={wo.id} className="flex gap-3">
+                    <p className="w-[88px] shrink-0 text-xs font-semibold text-brand-text">
+                      {formatActivityStamp(wo.scheduled_at)}
+                    </p>
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
+                    >
+                      <p className="truncate text-[13px] font-medium text-foreground">
+                        {wo.title}
                       </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <PriorityBadge priority={w.priority} />
-                      <StatusBadge status={w.status} />
-                    </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {[wo.property_name, wo.unit_name ? `Unit ${wo.unit_name}` : null]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    </button>
                   </li>
                 ))}
               </ul>
             )}
-          </Card>
+            <p className="mt-3 text-[11px] text-muted-foreground">Replaces Calendar (D5)</p>
+          </section>
+        </div>
 
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">Lease expirations</h2>
+        <div className="space-y-4">
+          <section className="rounded-md border border-border bg-card p-4">
+            <h2 className="text-sm font-semibold text-foreground">Recent activity</h2>
+            {/* Stub: no activity feed API — derive light signals from open WOs. */}
+            <ul className="mt-3 space-y-2">
+              {openOrders.slice(0, 5).map((wo) => (
+                <li key={wo.id} className="flex gap-2 text-[13px]">
+                  <p className="min-w-0 flex-1 text-foreground">
+                    {wo.title} · {toRequestStatus(wo)}
+                  </p>
+                  <p className="shrink-0 text-[11px] text-muted-foreground">
+                    {formatActivityStamp(wo.created_at)}
+                  </p>
+                </li>
+              ))}
+              {openOrders.length === 0 ? (
+                <li className="text-sm text-muted-foreground">No recent activity.</li>
+              ) : null}
+            </ul>
+          </section>
+
+          <section className="rounded-md border border-border bg-card p-4">
+            <h2 className="text-sm font-semibold text-foreground">Portfolio</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(properties as Property[]).slice(0, 8).map((p) => {
+                const open = openByProperty.get(p.id) ?? 0;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => navigate(`/properties/${p.id}`)}
+                    className="min-w-[140px] flex-1 rounded-sm bg-muted p-3 text-left transition-colors hover:bg-muted/80"
+                  >
+                    <p className="text-[13px] font-semibold text-foreground">{p.name}</p>
+                    <p
+                      className={cn(
+                        "text-[11px]",
+                        open > 0 ? "text-info" : "text-faint",
+                      )}
+                    >
+                      {open > 0
+                        ? `${open} open request${open === 1 ? "" : "s"}`
+                        : "No open requests"}
+                    </p>
+                  </button>
+                );
+              })}
+              {properties.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No properties yet.</p>
+              ) : null}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {summary.occupied}/{summary.units} units occupied ·{" "}
               <button
                 type="button"
-                onClick={() => navigate("/leases")}
-                className="text-xs font-medium text-primary hover:underline"
+                className="font-medium text-brand-text hover:underline"
+                onClick={() => navigate("/properties")}
               >
                 View all
               </button>
-            </div>
-            {summary.upcoming_expirations.length === 0 ? (
-              <Empty icon={<CheckCircle2 className="h-5 w-5" />} title="Nothing in the next 60 days" message="No lease expirations coming up." />
-            ) : (
-              <ul className="divide-y">
-                {summary.upcoming_expirations.map((l) => {
-                  const today = toIsoDate(new Date());
-                  const days = daysBetween(today, l.end_date);
-                  return (
-                    <li key={l.id} className="flex items-center justify-between gap-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">
-                          {l.tenant_first_name || "—"} {l.tenant_last_name || ""}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {[l.property_name, l.unit_name].filter(Boolean).join(" · ")}
-                        </p>
-                      </div>
-                      <div className="text-right text-xs">
-                        <div className="font-medium text-foreground">{formatDate(l.end_date)}</div>
-                        <div className={cn(
-                          "text-muted-foreground",
-                          days <= 14 && "text-destructive font-medium",
-                        )}>
-                          {days < 0 ? "Already ended" : days === 0 ? "Today" : `in ${days} day${days === 1 ? "" : "s"}`}
-                        </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Card>
-        </section>
+            </p>
+          </section>
+        </div>
+      </div>
+
+      <WorkOrderDialog
+        open={createOpen}
+        onOpenChange={(o) => {
+          setCreateOpen(o);
+          if (!o) setReloadKey((k) => k + 1);
+        }}
+        onSaved={() => setReloadKey((k) => k + 1)}
+      />
     </PageShell>
   );
 }
 
-function KpiCard({
-  label, value, sub, icon, tone = "default",
+function Counter({
+  value,
+  label,
+  muted = false,
 }: {
+  value: number;
   label: string;
-  value: string;
-  sub?: string;
-  icon: React.ReactNode;
-  tone?: "default" | "warn";
+  muted?: boolean;
 }) {
   return (
-    <Card className={cn("relative px-3 py-2.5", tone === "warn" && "bg-warning-tint")}>
-      <span
+    <div
+      className={cn(
+        "flex flex-col gap-1.5 rounded-md border border-border p-4",
+        muted ? "bg-muted text-faint" : "bg-card text-foreground",
+      )}
+    >
+      <p className="text-[28px] font-semibold leading-[38px]">{value}</p>
+      <p
         className={cn(
-          "absolute right-3 top-2.5 opacity-50",
-          tone === "warn" ? "text-warning" : "text-muted-foreground",
+          "text-xs font-medium",
+          muted ? "text-faint" : "text-muted-foreground",
         )}
-        aria-hidden
       >
-        {icon}
-      </span>
-      <div className={cn(
-        "data text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]",
-        tone === "warn" && "text-warning",
-      )}>
-        {value}
-      </div>
-      <div className="section-label mt-0.5">{label}</div>
-      {/* Fixed height: toggling the comparison line must never shift the row. */}
-      <div className="mt-1 h-4 truncate text-xs text-muted-foreground">{sub}</div>
-    </Card>
-  );
-}
-
-function Row({
-  label, value, icon, tone = "default",
-}: {
-  label: string;
-  value: string | number;
-  icon?: React.ReactNode;
-  tone?: "default" | "positive" | "warn" | "danger";
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <dt className="flex items-center gap-2 text-muted-foreground">
-        {icon}
         {label}
-      </dt>
-      <dd className={cn(
-        "font-medium tabular-nums",
-        tone === "positive" && "text-success",
-        tone === "warn" && "text-warning",
-        tone === "danger" && "text-destructive",
-      )}>
-        {value}
-      </dd>
+      </p>
     </div>
-  );
-}
-
-function Stat({
-  label, value, sub, tone = "default",
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "default" | "positive" | "warn" | "danger";
-}) {
-  return (
-    <div>
-      <div className="stat-label">{label}</div>
-      <div className={cn(
-        "mt-1 text-xl font-semibold tabular-nums",
-        tone === "positive" && "text-success",
-        tone === "warn" && "text-warning",
-        tone === "danger" && "text-destructive",
-      )}>
-        {value}
-      </div>
-      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
-    </div>
-  );
-}
-
-function Empty({
-  icon, title, message,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  message: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-1 py-8 text-center">
-      <span className="text-muted-foreground">{icon}</span>
-      <p className="text-sm font-medium">{title}</p>
-      <p className="text-xs text-muted-foreground">{message}</p>
-    </div>
-  );
-}
-
-function PriorityBadge({ priority }: { priority: string }) {
-  const map: Record<string, string> = {
-    urgent: "bg-destructive-tint text-destructive",
-    high: "bg-warning-tint text-warning",
-    normal: "bg-info-tint text-info",
-    low: "bg-muted text-muted-foreground",
-  };
-  return (
-    <span className={cn(
-      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-      map[priority] ?? map.normal,
-    )}>
-      {priority === "urgent" && <CircleAlert className="h-3 w-3" />}
-      {priority}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    open: "secondary",
-    scheduled: "default",
-    in_progress: "default",
-    on_hold: "outline",
-    closed: "outline",
-  };
-  return (
-    <Badge variant={(map[status] ?? "secondary") as never} className="capitalize">
-      {status.replaceAll("_", " ")}
-    </Badge>
   );
 }

@@ -26,8 +26,9 @@ test.describe("[R8] Admin web portal — who sees what", () => {
   test("an admin sees the dashboard and Phase 0 primary nav", async ({ page }, testInfo) => {
     await signIn(page, "admin");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-    await expect(page.getByText("Occupancy").first()).toBeVisible();
-    await expect(page.getByText("Open work orders").first()).toBeVisible();
+    await expect(page.getByText("Needs attention · portfolio overview")).toBeVisible();
+    await expect(page.getByText("Unassigned requests").first()).toBeVisible();
+    await expect(page.getByText("Open requests").first()).toBeVisible();
     expect(await navLinks(page)).toEqual([
       "Dashboard",
       "Maintenance",
