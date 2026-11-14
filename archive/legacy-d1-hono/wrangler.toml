@@ -1,5 +1,6 @@
+# Archived — not a primary deploy path. See archive/README.md.
 name = "open-property"
-main = "src/server/index.ts"
+main = "index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 

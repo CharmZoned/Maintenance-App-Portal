@@ -4,7 +4,7 @@
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
-import legacyWorker from "../../src/server/index";
+import legacyWorker from "../../archive/legacy-d1-hono/index";
 import {
   anonClient,
   clientFor,

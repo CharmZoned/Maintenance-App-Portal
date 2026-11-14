@@ -1,12 +1,18 @@
 <img src="readme-banner.png" alt="OpenProperty preview" width="100%" />
 
-# LG Maintenance Portal (OpenProperty)
+# LG Maintenance Portal
 
-[![Deploy with Clawnify](https://app.clawnify.com/deploy-button.svg)](https://app.clawnify.com/deploy?repo=clawnify/OpenProperty)
+**Landlord Gopher** staff/admin/landlord/tenant portal. Product data path is
+**Supabase Auth + Postgres + RLS** (landlords, properties, units, tenants,
+leases, rent, maintenance, vendors, settings, documents). Accounts must be
+`account_status = approved` to pass the app gate and RLS helpers.
 
-**Landlord Gopher** staff/admin portal. Phase 1 uses **Supabase Auth + Postgres + RLS** for portfolio data (landlords, properties, units, tenants, leases, rent, maintenance, vendors, settings). The legacy Worker still exists but **all `/api/*` routes return 410 Gone** (unauthenticated D1 CRUD is retired). Accounts must be `account_status = approved` to pass the app gate and RLS helpers.
+See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) (pointer to
+current trackers), [`docs/deferred-work.md`](docs/deferred-work.md), and
+[`docs/ops/ci-required-checks.md`](docs/ops/ci-required-checks.md).
 
-See [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) and [`docs/phases/phase-1.md`](docs/phases/phase-1.md).
+Legacy D1 / Hono / Clawnify Worker assets are preserved under
+[`archive/`](archive/README.md) — not a deploy path.
 
 ### Local env (required for the UI)
 
@@ -23,7 +29,8 @@ Bootstrap the first admin after creating an Auth user:
 select private.assign_admin('you@example.com');
 ```
 
-Open-source **property management software** lineage (Clawnify OpenProperty template), adapted for Landlord Gopher.
+Open-source **property management software** lineage (Clawnify OpenProperty
+template), adapted for Landlord Gopher on Supabase.
 
 ## Features
 
@@ -65,73 +72,64 @@ Open-source **property management software** lineage (Clawnify OpenProperty temp
 
 - React 19 + Vite + TypeScript
 - Tailwind CSS v4 + shadcn/ui (Radix primitives)
-- Hono on Cloudflare Workers (D1-native — same code locally and in production)
-- `lucide-react` for icons
+- Supabase Auth + PostgREST + Storage (RLS)
+- `lucide-react` / Phosphor icons
 - pushState URL routing
 
 ## Develop
 
 ```bash
 pnpm install
-pnpm dev          # Vite at :5173, Wrangler at :8787 (D1 schema applied automatically)
+pnpm dev          # Vite at :5173
 pnpm typecheck
 pnpm build
 ```
-
-The dev script applies `src/server/schema.sql` to the local D1 database, then runs Vite and Wrangler in parallel. The schema seeds 3 sample properties, 5 units, and 3 vendors so the app is usable on first boot.
 
 ## Test
 
 ```bash
 pnpm test:ui      # dashboard at http://localhost:4600 — requirements, workflows, what needs fixing
-pnpm test         # data-layer tests (~25s)
+pnpm test         # data-layer tests (~25s); CI runs this on PRs to master
 pnpm test:all     # everything, incl. the real UI in a browser; writes tests/.results/report.html
 pnpm dev:local    # run the portal against a local backend with demo logins (never touches live)
 ```
 
 Tests run against a local Supabase emulator built from `supabase/migrations/`. See [`tests/README.md`](tests/README.md).
 
-## Deploy
+## CI
 
-If you have the Clawnify CLI installed:
-
-```bash
-clawnify deploy
-```
-
-Or wire it up to Cloudflare Workers + D1 directly using the bindings in `wrangler.toml` (binding `DB`, database name `open-property-db`).
+PRs to `master` run `pnpm typecheck`, `pnpm build`, and `pnpm test` via
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Making that check
+**required** needs an owner click in branch protection — see
+[`docs/ops/ci-required-checks.md`](docs/ops/ci-required-checks.md).
 
 ## Project layout
 
 ```
-docs/               Implementation plan + phase briefs + schema notes
-supabase/migrations Phase 1 additive RLS / account_status
+archive/            Legacy D1/Hono/Clawnify Worker (410 stub + schema) — not primary
+docs/               Plan pointer, deferred work, phase briefs, schema notes, ops
+supabase/migrations Additive RLS / AuthZ / product SQL (file before apply)
 src/
-  server/           Legacy Hono + D1 (unused by Phase 1 client)
   client/
     app.tsx         Auth gate + shell + routing
     lib/
       supabase.ts   Browser client
       data.ts       Supabase queries/mutations
-      mappers.ts    D1/UI ↔ Supabase field mapping
-    components/
-      auth/         Login, reset password, blocked
-      landlords/    Landlord CRUD
-      dashboard/ properties/ tenants/ leases/ rent/ maintenance/ settings/
+      mappers.ts    UI ↔ Supabase field mapping
+    components/     Feature pages + dialogs
     hooks/          use-auth, use-router, use-app-state
 ```
 
 ## What's intentionally not included
 
-To keep this template self-hostable with no third-party SaaS dependencies and no public-facing endpoints, these features are out of scope:
+To keep this portal focused, these stay out of scope or deferred (see
+`docs/deferred-work.md`):
 
 - Listing syndication to external rental sites
 - Real credit / background screening (placeholder application records only)
-- 2-way SMS, email blasts, automated texting
-- Online card / ACH payment processing
-- Public tenant or owner portals
-
-These can all be layered on top once you fork the template.
+- 2-way SMS, email blasts, automated texting (Phase 6 / R6 hold)
+- Online card / ACH payment processing (Stripe hold)
+- Full landlord self-serve portfolio CRUD
 
 ## License
 
