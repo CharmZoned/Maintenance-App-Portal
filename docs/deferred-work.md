@@ -76,7 +76,7 @@ Backlog for **WS-S** / **WS-R** / **WS-I** (see Project store `docs/wave3-plan.m
 | 1 | Required GitHub CI checks on PRs/`master` | **WS-S S1** | S | Yes | **Done in PR #33** (owner still must mark check required) |
 | 2 | Archive D1/Hono/Clawnify primary path; refresh stale IMPLEMENTATION_PLAN; retire `main`↔`master` `sync-branches.yml` (owner confirm) | **WS-S S1** | M | Yes | **Done in PR #33** (master-only) |
 | 3 | Revoke `anon` (+ `PUBLIC` if needed) EXECUTE on payment RPCs (`record_payment` / `delete_payment`); keep `GRANT` to `authenticated`; verify privileges (mirror Phase 2) | **WS-S S2** | S | **No** other mig/RLS | **Done in PR #37** — `20261114050000_*` (apply live still pending ops; never live-only) |
-| 4 | Last-admin guard on `admin_set_user_role` | **WS-S S2** | S–M | **No** mig overlap | Queued (serialize) |
+| 4 | Last-admin guard on `admin_set_user_role` / `set_account_status` | **WS-S S2** | S–M | **No** mig overlap | **In PR** — stacked on #39; `20261114080000_last_admin_guard.sql` (apply live after merge; never live-only) |
 | 5 | Require `email_confirmed_at` before Approve (+ Users badge) | **WS-S S2** | S–M | **No** mig overlap | **In PR #39** — `20261114070000_require_email_confirmed_before_approve.sql` + Users badge/disable (apply live after merge; never live-only) |
 | 6 | Enforce 5-photo **DB** cap per maintenance request (FE already slices to 5) | **WS-S S2** | S | **No** mig; avoid K dialog thrash | Queued (serialize) |
 | 7 | Leaked-password protection + min length (Auth + UI) | **WS-S S3** | S | Yes | Queued |
