@@ -1,7 +1,7 @@
 # Parallel work plan — remaining MVP + R1–R5 bugs
 
-**Mode:** Planning only (no app/bugfix code in this doc’s PR).  
-**Base:** `master` @ `15e0261` (includes merged [#18](https://github.com/CharmZoned/Maintenance-App-Portal/pull/18) test suite).  
+**Mode:** Historical stream definitions + Wave 1–2 context. **Wave 3 staffing:** use [`docs/wave3-plan.md`](./wave3-plan.md) (pointer) and the Cursor Project store `docs/wave3-plan.md` (canonical, awaiting owner approval).  
+**Base (original):** `master` @ `15e0261` (merged [#18](https://github.com/CharmZoned/Maintenance-App-Portal/pull/18) test suite). **Wave 1–2 status:** merged on `master` (PRs #19–#29); no Wave 2 leftovers to re-plan.  
 **Inputs:** gap analysis, `docs/deferred-work.md`, IMPLEMENTATION_PLAN R1–R8, role rundown, owner bug list (PR #18 intentional failures), live Supabase grants/CHECKs verified 2026-11-13.  
 **Product hold:** **R6 notifications stays its own deferred stream** — do not staff until product reopens Phase 6.
 
@@ -50,7 +50,7 @@ flowchart TB
     H[WS-H Manual QA]
     J[WS-J Expand automated tests]
   end
-  subgraph W3["Wave 3 — polish / optional"]
+  subgraph W3["Wave 3 — polish / optional — see docs/wave3-plan.md"]
     K[WS-K Maint UX]
     N[WS-N Perf + query slim]
     I[WS-I Ops URL staging repair]
@@ -77,9 +77,9 @@ flowchart TB
 
 | Wave | Streams (parallel OK) | Merge gate |
 |------|----------------------|------------|
-| **1** | A, B, C, D | Intentional `#18` reds for R1–R5 clear under `pnpm test` (emulator) |
-| **2** | E, F, G, H, J | AuthZ leftovers + landlord docs + lease sync + signed-off manual QA; test coverage expanded |
-| **3** | I (can start anytime), K, N | Ops/URL/staging; UX/perf when capacity |
+| **1** | A, B, C, D | **Done** — intentional `#18` reds for R1–R5 cleared (`pnpm test` emulator) |
+| **2** | E, F, G, H, J | **Done** — AuthZ leftovers + landlord docs + lease sync + signed-off manual QA; test coverage expanded |
+| **3** | I, K, N (+ optional O/P/Q) | See [`docs/wave3-plan.md`](./wave3-plan.md) — ops/URL; Accept & schedule; perf; easy add-ons |
 | **Hold** | L (R6), M (landlord MVP) | Explicit product reopen only |
 
 **Suggested merge order inside Wave 1:** A → B → C/D (A/B are independent migrations; merge either first; C is FE-only; D is FE-only). If two BE agents run together, **pre-claim migration timestamps** below.
@@ -101,7 +101,8 @@ Latest repo prefixes on `master` (as of `15e0261`):
 | `20261114020000` | **WS-B** Roles | `…_fix_user_roles_pending_and_set_account_status.sql` |
 | `20261114030000` | **WS-E** AuthZ | `…_harden_landlord_helpers_and_mr_notes.sql` (split if large) |
 | `20261114040000` | **WS-E/D** optional storage harden | `…_property_documents_storage_path_bind.sql` |
-| `20261114050000+` | Future / WS-L when reopened | leave free |
+| `20261114050000+` | Wave 3 if any schema need | claim before writing; prefer FE/ops-only for I/K/N |
+| `20261114100000+` | **WS-L** when reopened | leave free until Phase 6 |
 
 Rules (also `docs/ops/schema-migrations.md`):
 
