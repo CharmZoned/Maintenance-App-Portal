@@ -26,6 +26,7 @@ import { LoginPage } from "./components/auth/login-page";
 import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
 import { StubPage } from "./components/stub-page";
+import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
 import { PortalNav, MobileTabBar, ShellChromeProvider } from "./components/chrome";
 import { FoundationGalleryPage } from "./components/foundation/foundation-gallery-page";
@@ -276,10 +277,10 @@ export function App() {
                   )}
                   {route.name === "documents" && <TenantDocumentsPage />}
                   {route.name === "account" && (
-                    <StubPage
-                      title="Account"
-                      meta={auth.gate.user.email ?? undefined}
-                      message="Account settings arrive in the Auth screen PR."
+                    <AccountPage
+                      email={auth.gate.user.email ?? ""}
+                      role={auth.gate.role.role}
+                      onSignOut={() => void auth.logout()}
                     />
                   )}
                   {route.name !== "home" &&
@@ -314,10 +315,11 @@ export function App() {
                   )}
                   {route.name === "documents" && <LandlordDocumentsPage />}
                   {route.name === "account" && (
-                    <StubPage
-                      title="Account"
-                      meta={auth.gate.user.email ?? undefined}
-                      message="Account settings arrive in the Auth screen PR."
+                    <AccountPage
+                      email={auth.gate.user.email ?? ""}
+                      role={auth.gate.role.role}
+                      showStaffAlerts
+                      onSignOut={() => void auth.logout()}
                     />
                   )}
                   {!isLandlordAllowedRoute(route) && (
@@ -341,10 +343,11 @@ export function App() {
                   )}
                   {route.name === "calendar" && <CalendarPage navigate={navigate} />}
                   {route.name === "account" && (
-                    <StubPage
-                      title="Account"
-                      meta={auth.gate.user.email ?? undefined}
-                      message="Account settings arrive in the Auth screen PR."
+                    <AccountPage
+                      email={auth.gate.user.email ?? ""}
+                      role={auth.gate.role.role}
+                      showStaffAlerts
+                      onSignOut={() => void auth.logout()}
                     />
                   )}
                   {route.name !== "maintenance" &&
@@ -381,10 +384,11 @@ export function App() {
                     />
                   )}
                   {route.name === "account" && (
-                    <StubPage
-                      title="Account"
-                      meta={auth.gate.user.email ?? undefined}
-                      message="Account settings arrive in the Auth screen PR. Admin Settings remain at /settings."
+                    <AccountPage
+                      email={auth.gate.user.email ?? ""}
+                      role={auth.gate.role.role}
+                      showStaffAlerts
+                      onSignOut={() => void auth.logout()}
                     />
                   )}
                   {route.name === "foundation" && isAdmin && <FoundationGalleryPage />}
