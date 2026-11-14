@@ -109,9 +109,9 @@ export function ResetConfirmPage({ onSubmit, onDone, error }: ConfirmProps) {
   if (done) {
     return (
       <AuthShell>
-        <AuthCard>
+        <AuthCard title="Password updated">
           <SuccessNotice message="Your password was updated." className="w-full py-6" />
-          <p className="text-sm text-muted-foreground">Taking you to your home…</p>
+          <p className="text-sm text-muted-foreground">Continue to your home.</p>
           <Button
             type="button"
             variant="brand"
