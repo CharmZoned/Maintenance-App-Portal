@@ -13,7 +13,7 @@ import {
   type RequestStatus,
 } from "@/components/patterns";
 import { WorkOrderDialog } from "./work-order-dialog";
-import { formatRelativeWhen, toRequestStatus } from "./request-status";
+import { formatRelativeWhen, parseWhenDate, toRequestStatus } from "./request-status";
 import type { WorkOrder } from "@/types";
 
 type JobSection = "Today" | "Upcoming" | "On hold" | "Recently completed";
@@ -29,9 +29,11 @@ function isSameLocalDay(a: Date, b: Date): boolean {
 function sectionFor(order: WorkOrder, now: Date): JobSection {
   if (order.status === "closed") return "Recently completed";
   if (order.status === "on_hold") return "On hold";
+  // In-progress stays under Today even if scheduled_at is a later calendar day.
+  if (order.status === "in_progress") return "Today";
   if (order.scheduled_at) {
-    const d = new Date(order.scheduled_at);
-    if (!Number.isNaN(d.getTime()) && !isSameLocalDay(d, now) && d > now) {
+    const d = parseWhenDate(order.scheduled_at);
+    if (d && !isSameLocalDay(d, now) && d > now) {
       return "Upcoming";
     }
   }
@@ -164,17 +166,30 @@ export function MyJobsPage({ search = "", replace }: DeepLinkProps = {}) {
     for (const o of orders) {
       groups[sectionFor(o, now)].push(o);
     }
-    // Cap completed to recent handful for the worker home.
-    groups["Recently completed"] = groups["Recently completed"].slice(0, 5);
+    // Cap completed to most recently closed, not most recently created.
+    groups["Recently completed"] = [...groups["Recently completed"]]
+      .sort((a, b) => {
+        const ta = parseWhenDate(a.completed_at ?? a.created_at)?.getTime() ?? 0;
+        const tb = parseWhenDate(b.completed_at ?? b.created_at)?.getTime() ?? 0;
+        return tb - ta;
+      })
+      .slice(0, 5);
     return (Object.keys(groups) as JobSection[])
       .map((label) => ({ label, items: groups[label] }))
       .filter((g) => g.items.length > 0);
   }, [orders, now]);
 
+  const openCount = orders.filter((o) => o.status !== "closed").length;
   const todayCount = sections.find((s) => s.label === "Today")?.items.length ?? 0;
+  const meta =
+    openCount === 0
+      ? "No open jobs"
+      : todayCount > 0
+        ? `Today · ${todayCount}`
+        : `${openCount} open`;
 
   return (
-    <PageShell title="My jobs" meta={`Today · ${todayCount} assigned`}>
+    <PageShell title="My jobs" meta={meta}>
       {loading ? (
         <div className="space-y-2">
           <SkeletonRow className="h-[52px] rounded-md border border-border" />

@@ -25,10 +25,16 @@ export function staffQueueTab(status: WorkOrderStatus, assigned: boolean): "need
   return "active";
 }
 
+/** Parse ISO / date-only the same way for bucketing and relative labels. */
+export function parseWhenDate(iso: string): Date | null {
+  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function formatRelativeWhen(iso: string | null | undefined): string {
   if (!iso) return "";
-  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
-  if (Number.isNaN(d.getTime())) return iso;
+  const d = parseWhenDate(iso);
+  if (!d) return iso;
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
