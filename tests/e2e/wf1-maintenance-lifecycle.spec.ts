@@ -70,6 +70,15 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
 
     // Accept & schedule is expanded by default for Open requests (WS-K).
     await expect(dialog.getByRole("button", { name: "Hide", exact: true })).toBeVisible();
+    // Wait until staff options have loaded (listStaff is async on dialog open).
+    await expect
+      .poll(async () => {
+        await selectUnder(dialog, "Staff").click();
+        const n = await page.getByRole("option", { name: /Fixit, Sam/ }).count();
+        await page.keyboard.press("Escape");
+        return n;
+      }, { timeout: 15_000 })
+      .toBeGreaterThan(0);
     await choose(page, selectUnder(dialog, "Staff"), "Fixit, Sam");
     await dialog.locator('label:text-is("Date") ~ input[type="date"]').fill(tomorrow());
     await shot(page, testInfo, "Admin assigns Sam and picks a date");

@@ -131,6 +131,14 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const listHistory = app.listMaintenanceStatusHistory;
   const workOrderId = workOrder?.id;
 
+  async function loadMedia(id: number) {
+    const [p, c, h] = await Promise.all([listPhotos(id), listComments(id), listHistory(id)]);
+    setPhotos(p);
+    // Landlords: tenant_visible only (also enforced by maintenance_comments_select RLS).
+    setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
+    setHistory(h);
+  }
+
   useEffect(() => {
     if (!open || workOrderId == null) {
       setPhotos([]);
@@ -153,7 +161,6 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         ]);
         if (cancelled) return;
         setPhotos(p);
-        // Landlords: tenant_visible only (also enforced by maintenance_comments_select RLS).
         setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
         setHistory(h);
       } catch (err) {
@@ -316,14 +323,32 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       app.setError("Pick a staff member and scheduled date.");
       return;
     }
+    if (
+      !MAINTENANCE_CATEGORIES.includes(category.trim() as (typeof MAINTENANCE_CATEGORIES)[number])
+    ) {
+      app.setError("Pick a current maintenance category before accepting.");
+      return;
+    }
     setSaving(true);
     try {
+      // One intake confirm: schedule + keep in-dialog edits (title/notes/etc.) so Confirm
+      // is not a silent discard when the Accept panel is default-open.
       await app.updateWorkOrder(
         workOrder.id,
         {
           status: "scheduled",
           assigned_staff_id: Number(assignedStaffId),
           scheduled_at: scheduledAt,
+          property_id: propertyId ? Number(propertyId) : null,
+          unit_id: unitId ? Number(unitId) : null,
+          vendor_id: vendorId ? Number(vendorId) : null,
+          title: title.trim() || workOrder.title,
+          description: description.trim() || null,
+          category,
+          priority,
+          permission_to_enter: permission,
+          cost: cost ? parseFloat(cost) : null,
+          notes: notes.trim() || null,
         },
         { previousStatus: workOrder.status },
       );
@@ -351,35 +376,33 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
 
   async function postComment() {
     if (!workOrder || !commentBody.trim()) return;
+    const id = workOrder.id;
     try {
       const visibility: CommentVisibility = app.isTenant ? "tenant_visible" : commentVisibility;
-      const row = await app.addMaintenanceComment(workOrder.id, commentBody.trim(), visibility);
+      const row = await app.addMaintenanceComment(id, commentBody.trim(), visibility);
+      if (workOrderId !== id) return;
       setComments((prev) => [...prev, row]);
       setCommentBody("");
       app.setNotice("Comment posted.");
     } catch (err) {
-      app.setError((err as Error).message);
+      if (workOrderId === id) app.setError((err as Error).message);
     }
   }
 
   async function uploadMorePhotos() {
     if (!workOrder || !photoFiles.length) return;
+    const id = workOrder.id;
     try {
       await Promise.all(
-        photoFiles.slice(0, 5).map((file) => app.uploadMaintenancePhoto(workOrder.id, file)),
+        photoFiles.slice(0, 5).map((file) => app.uploadMaintenancePhoto(id, file)),
       );
+      if (workOrderId !== id) return;
       setPhotoFiles([]);
-      const [p, c, h] = await Promise.all([
-        listPhotos(workOrder.id),
-        listComments(workOrder.id),
-        listHistory(workOrder.id),
-      ]);
-      setPhotos(p);
-      setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
-      setHistory(h);
+      await loadMedia(id);
+      if (workOrderId !== id) return;
       app.setNotice("Photos uploaded.");
     } catch (err) {
-      app.setError((err as Error).message);
+      if (workOrderId === id) app.setError((err as Error).message);
     }
   }
 
