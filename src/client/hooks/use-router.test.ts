@@ -17,11 +17,25 @@ describe("pathnameOf / splitLocation", () => {
 });
 
 describe("deep-link helpers", async () => {
-  const { queryId, queryPeriod } = await import("../lib/deep-link");
-  it("parses ids and periods", () => {
+  const { queryId, queryPeriod, createSingleFlightLoader } = await import("../lib/deep-link");
+  it("parses ids and periods (digits only)", () => {
     expect(queryId("?wo=12", "wo")).toBe(12);
     expect(queryId("?wo=0", "wo")).toBeNull();
+    expect(queryId("?wo=1e2", "wo")).toBeNull();
     expect(queryPeriod("?period=2026-11")).toBe("2026-11");
     expect(queryPeriod("?period=bad")).toBeNull();
+  });
+
+  it("shares one in-flight load", async () => {
+    let calls = 0;
+    const flight = createSingleFlightLoader(async () => {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 5));
+      return [1, 2];
+    });
+    const [a, b] = await Promise.all([flight.load(), flight.load()]);
+    expect(calls).toBe(1);
+    expect(a).toEqual([1, 2]);
+    expect(b).toEqual([1, 2]);
   });
 });

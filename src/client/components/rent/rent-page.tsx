@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Receipt, Sparkles } from "lucide-react";
 import { useApp } from "@/context";
-import { queryPeriod } from "@/lib/deep-link";
+import { queryPeriod, type DeepLinkProps } from "@/lib/deep-link";
 import { addMonths, cn, currentPeriod, formatDate, formatMoney, formatPeriod } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,13 +19,7 @@ const STATUS_TONE: Record<ChargeStatus, string> = {
   waived: "bg-muted text-muted-foreground",
 };
 
-export function RentPage({
-  search = "",
-  replace,
-}: {
-  search?: string;
-  replace?: (to: string) => void;
-} = {}) {
+export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
   const app = useApp();
   const [period, setPeriod] = useState<string>(() => queryPeriod(search) ?? currentPeriod());
   const [charges, setCharges] = useState<RentCharge[]>([]);
