@@ -246,6 +246,36 @@ describe("[R7] Permissions", () => {
       expect((await client.from("Tenants").select("id")).data).toEqual([{ id: world.tenants.tenant.id }]);
     });
 
+    test("a suspended assigned worker loses portfolio visibility even with a leftover staff_id", async () => {
+      // Regression: staff_* helpers used to resolve staff_id from user_roles without
+      // account_status = 'approved', so a suspended worker with an assignment still
+      // passed staff_can_see_tenant / staff_assigned_to_*.
+      const approved = await clientFor("worker");
+      expect((await approved.from("Tenants").select("id")).data).toEqual([{ id: world.tenants.tenant.id }]);
+      expect((await approved.from("Landlords").select("id")).data).toEqual([{ id: world.landlord.id }]);
+
+      await sql(`update public.user_roles set account_status = 'suspended' where user_id = $1`, [
+        world.users.worker.id,
+      ]);
+      const [link] = await sql<{ staff_id: number; account_status: string }>(
+        `select staff_id, account_status from public.user_roles where user_id = $1`,
+        [world.users.worker.id],
+      );
+      expect(link.staff_id).toBe(world.staff.worker.id);
+      expect(link.account_status).toBe("suspended");
+
+      const suspended = await clientFor("worker");
+      expect((await suspended.from("Tenants").select("id")).data ?? []).toEqual([]);
+      expect((await suspended.from("Units").select("id")).data ?? []).toEqual([]);
+      expect((await suspended.from("Properties").select("id")).data ?? []).toEqual([]);
+      expect((await suspended.from("Landlords").select("id")).data ?? []).toEqual([]);
+      expect((await suspended.from("MaintenanceRequests").select("id")).data ?? []).toEqual([]);
+
+      await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [
+        world.users.worker.id,
+      ]);
+    });
+
     test("cannot read or mutate Settings (admin-only)", async () => {
       const client = await clientFor("worker");
       expectDenied(await client.from("Settings").select("*"), "worker must not SELECT Settings");

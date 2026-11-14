@@ -413,6 +413,37 @@ describe("[R3] Properties and units", () => {
       expect(afterEnd.primary_on_lease).toBe(false);
     });
 
+    test("rejects a second active lease on the same unit", async () => {
+      const [{ id: unitId }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status)
+         values ($1, 'OneActive', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await sql(
+        `insert into public."Leases" (unit_id, start_date, end_date, status, monthly_rent)
+         values ($1, current_date, current_date + 30, 'active', 1000)`,
+        [unitId],
+      );
+      await expect(
+        sql(
+          `insert into public."Leases" (unit_id, start_date, end_date, status, monthly_rent)
+           values ($1, current_date, current_date + 60, 'active', 1100)`,
+          [unitId],
+        ),
+      ).rejects.toThrow(/leases_one_active_per_unit|duplicate key/i);
+    });
+
+    test("rejects a work order whose property_id does not match the unit", async () => {
+      await expect(
+        sql(
+          `insert into public."MaintenanceRequests"
+             (title, description, category, unit_id, property_id, status)
+           values ('Mismatch', 'x', 'Other', $1, $2, 'Open')`,
+          [world.units.a.id, world.otherProperty.id],
+        ),
+      ).rejects.toThrow(/does not match unit/i);
+    });
+
     test("renames a property", async () => {
       await signInApp("admin");
       const updated = await data.updateProperty(world.otherProperty.id, { name: "Birch House (renovated)" });
