@@ -36,6 +36,28 @@ describe("[R8] Admin web portal", () => {
     });
   });
 
+  describe("charges (WS-N N1)", () => {
+    test("generateCharges batches missing period rows and listCharges enriches only those leases", async () => {
+      await sql(
+        `insert into public."Leases" (unit_id, primary_tenant_id, start_date, end_date, monthly_rent, rent_due_day, status)
+         values ($1, $2, '2026-01-01', '2026-12-31', 1500, 1, 'active'),
+                ($3, $4, '2026-01-01', '2026-12-31', 1600, 5, 'active')`,
+        [world.units.a.id, world.tenants.tenant.id, world.units.b.id, world.tenants.tenant2.id],
+      );
+      await signInApp("admin");
+      const period = "2098-06";
+      const first = await data.generateCharges(period);
+      expect(first.created).toBeGreaterThanOrEqual(2);
+      const second = await data.generateCharges(period);
+      expect(second.created).toBe(0);
+
+      const listed = await data.listCharges(period);
+      expect(listed.length).toBeGreaterThanOrEqual(2);
+      expect(listed.every((c) => c.period === period)).toBe(true);
+      expect(listed.some((c) => c.unit_name === "1A" || c.unit_name === "2B")).toBe(true);
+    });
+  });
+
   describe("user management", () => {
     test("the admin's user list shows every account, with role and status", async () => {
       await signInApp("admin");

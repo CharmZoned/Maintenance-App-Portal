@@ -447,11 +447,17 @@ export async function listLeases(params?: {
   tenant_id?: number;
   unit_id?: number;
   status?: string;
+  /** When set, only these lease ids are loaded (avoids full-table enrich for charge lists). */
+  ids?: number[];
 }): Promise<Lease[]> {
   let q = supabase.from("Leases").select("*").order("start_date", { ascending: false });
   if (params?.unit_id) q = q.eq("unit_id", params.unit_id);
   if (params?.status) q = q.eq("status", params.status);
   if (params?.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
+  if (params?.ids !== undefined) {
+    if (params.ids.length === 0) return [];
+    q = q.in("id", params.ids);
+  }
   const { data: leases, error } = await q;
   if (error) throwSb(error);
 
@@ -1055,33 +1061,45 @@ export async function listCharges(period?: string): Promise<RentCharge[]> {
 }
 
 export async function generateCharges(period: string): Promise<{ created: number; period: string }> {
-  const leases = await listLeases({ status: "active" });
-  const [year, month] = period.split("-").map(Number);
+  // Slim active-lease fetch — charge gen only needs id / rent / due day (no unit/tenant enrich).
+  const { data: leases, error: leaseErr } = await supabase
+    .from("Leases")
+    .select("id, monthly_rent, rent_due_day")
+    .eq("status", "active");
+  if (leaseErr) throwSb(leaseErr);
+  if (!leases?.length) return { created: 0, period };
+
+  const { data: existingRows, error: existingErr } = await supabase
+    .from("RentCharges")
+    .select("lease_id")
+    .eq("period", period);
+  if (existingErr) throwSb(existingErr);
+  const existing = new Set((existingRows ?? []).map((r) => r.lease_id));
+
   const dueDayDefault = 1;
-  let created = 0;
-  for (const lease of leases) {
-    const dueDay = Math.min(lease.rent_due_day || dueDayDefault, 28);
-    const due_date = `${period}-${String(dueDay).padStart(2, "0")}`;
-    const { data: existing } = await supabase
-      .from("RentCharges")
-      .select("id")
-      .eq("lease_id", lease.id)
-      .eq("period", period)
-      .maybeSingle();
-    if (existing) continue;
-    const { error } = await supabase.from("RentCharges").insert({
-      lease_id: lease.id,
-      period,
-      due_date,
-      amount: lease.monthly_rent,
-      amount_paid: 0,
-      status: "open",
+  const toInsert = leases
+    .filter((lease) => !existing.has(lease.id))
+    .map((lease) => {
+      const dueDay = Math.min(lease.rent_due_day || dueDayDefault, 28);
+      return {
+        lease_id: lease.id,
+        period,
+        due_date: `${period}-${String(dueDay).padStart(2, "0")}`,
+        amount: lease.monthly_rent,
+        amount_paid: 0,
+        status: "open",
+      };
     });
-    if (!error) created += 1;
-    void year;
-    void month;
-  }
-  return { created, period };
+
+  if (!toInsert.length) return { created: 0, period };
+
+  // Batch upsert: UNIQUE(lease_id, period) + ignoreDuplicates keeps races soft (no all-or-nothing fail).
+  const { error: insertErr } = await supabase.from("RentCharges").upsert(toInsert, {
+    onConflict: "lease_id,period",
+    ignoreDuplicates: true,
+  });
+  if (insertErr) throwSb(insertErr);
+  return { created: toInsert.length, period };
 }
 
 export async function listPayments(chargeId: number): Promise<Payment[]> {
@@ -1670,6 +1688,165 @@ export async function listMaintenanceStatusHistory(
 
 // ── Dashboard ─────────────────────────────────────────────────────
 
+type DashboardChargeRow = {
+  amount: number | string;
+  amount_paid: number | string;
+  status: string;
+  due_date: string;
+};
+
+type DashboardLeaseRow = {
+  id: number;
+  status: string;
+  end_date: string;
+  unit_id: number;
+  primary_tenant_id: number | null;
+};
+
+type DashboardWoRow = {
+  id: number;
+  title: string;
+  priority: string;
+  status: string;
+  property_id: number | null;
+  unit_id: number | null;
+  created_at: string;
+};
+
+function chargeBalance(c: DashboardChargeRow): number {
+  return Number(c.amount) - Number(c.amount_paid);
+}
+
+function isOpenDashboardWo(status: string): boolean {
+  const s = lower(status);
+  return s !== "closed" && s !== "completed" && s !== "cancelled" && s !== "canceled";
+}
+
+function dashboardWoPriority(priority: string): WorkOrderPriority {
+  const s = lower(priority);
+  if (s === "low" || s === "normal" || s === "high" || s === "urgent") return s;
+  return "normal";
+}
+
+function dashboardWoStatus(status: string): WorkOrderStatus {
+  const s = lower(status).replace(/\s+/g, "_");
+  if (s === "assigned") return "open";
+  if (s === "completed" || s === "cancelled" || s === "canceled") return "closed";
+  if (
+    s === "open" ||
+    s === "scheduled" ||
+    s === "in_progress" ||
+    s === "on_hold" ||
+    s === "closed"
+  ) {
+    return s;
+  }
+  return "open";
+}
+
+async function loadDashboardAggregateRows(period: string): Promise<{
+  propertyCount: number;
+  units: { id: number; status: string }[];
+  activeLeases: DashboardLeaseRow[];
+  charges: DashboardChargeRow[];
+  workOrders: DashboardWoRow[];
+}> {
+  // Slim aggregates — avoid full listProperties/listUnits/listLeases/listCharges/listWorkOrders graphs.
+  const [
+    { data: propertyRows, error: propErr },
+    { data: unitRows, error: unitErr },
+    { data: leaseRows, error: leaseErr },
+    { data: chargeRows, error: chargeErr },
+    { data: woRows, error: woErr },
+  ] = await Promise.all([
+    // id-only (not head/count) — works on PostgREST and the local emulator.
+    supabase.from("Properties").select("id"),
+    supabase.from("Units").select("id, status"),
+    supabase
+      .from("Leases")
+      .select("id, status, end_date, unit_id, primary_tenant_id")
+      .eq("status", "active"),
+    supabase.from("RentCharges").select("amount, amount_paid, status, due_date").eq("period", period),
+    supabase
+      .from("MaintenanceRequests")
+      .select("id, title, priority, status, property_id, unit_id, created_at")
+      .order("created_at", { ascending: false }),
+  ]);
+  if (propErr) throwSb(propErr);
+  if (unitErr) throwSb(unitErr);
+  if (leaseErr) throwSb(leaseErr);
+  if (chargeErr) throwSb(chargeErr);
+  if (woErr) throwSb(woErr);
+
+  return {
+    propertyCount: (propertyRows ?? []).length,
+    units: unitRows ?? [],
+    activeLeases: (leaseRows ?? []) as DashboardLeaseRow[],
+    charges: (chargeRows ?? []) as DashboardChargeRow[],
+    workOrders: (woRows ?? []) as DashboardWoRow[],
+  };
+}
+
+async function enrichDashboardSlices(
+  recentTop: DashboardWoRow[],
+  upcomingTop: DashboardLeaseRow[],
+): Promise<{
+  unitMap: Map<number, { id: number; unit_label: string; property_id: number }>;
+  propMap: Map<number, { id: number; property_name: string | null }>;
+  tenantMap: Map<number, { id: number; first_name: string; last_name: string }>;
+}> {
+  const unitIds = [
+    ...new Set(
+      [...recentTop.map((w) => w.unit_id), ...upcomingTop.map((l) => l.unit_id)].filter(
+        (id): id is number => id != null,
+      ),
+    ),
+  ];
+  const tenantIds = [
+    ...new Set(upcomingTop.map((l) => l.primary_tenant_id).filter((id): id is number => id != null)),
+  ];
+
+  const [
+    { data: sliceUnits, error: unitErr },
+    { data: tenants, error: tenantErr },
+  ] = await Promise.all([
+    unitIds.length
+      ? supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
+      : Promise.resolve({
+          data: [] as { id: number; unit_label: string; property_id: number }[],
+          error: null,
+        }),
+    tenantIds.length
+      ? supabase.from("Tenants").select("id, first_name, last_name").in("id", tenantIds)
+      : Promise.resolve({
+          data: [] as { id: number; first_name: string; last_name: string }[],
+          error: null,
+        }),
+  ]);
+  if (unitErr) throwSb(unitErr);
+  if (tenantErr) throwSb(tenantErr);
+
+  const unitMap = new Map((sliceUnits ?? []).map((u) => [u.id, u]));
+  const propIds = [
+    ...new Set(
+      [
+        ...recentTop.map((w) => w.property_id),
+        ...(sliceUnits ?? []).map((u) => u.property_id),
+      ].filter((id): id is number => id != null),
+    ),
+  ];
+  const { data: props, error: propErr } = propIds.length
+    ? await supabase.from("Properties").select("id, property_name").in("id", propIds)
+    : { data: [] as { id: number; property_name: string | null }[], error: null };
+  if (propErr) throwSb(propErr);
+
+  return {
+    unitMap,
+    propMap: new Map((props ?? []).map((p) => [p.id, p])),
+    tenantMap: new Map((tenants ?? []).map((t) => [t.id, t])),
+  };
+}
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const now = new Date();
   const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -1678,29 +1855,35 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const in30Iso = in30.toISOString().slice(0, 10);
   const todayIso = now.toISOString().slice(0, 10);
 
-  const [properties, units, leases, charges, workOrders] = await Promise.all([
-    listProperties(),
-    listUnits(),
-    listLeases(),
-    listCharges(period),
-    listWorkOrders(),
-  ]);
+  const { propertyCount, units, activeLeases, charges, workOrders } =
+    await loadDashboardAggregateRows(period);
 
-  const occupied = units.filter((u) => u.status === "occupied").length;
-  const vacant = units.filter((u) => u.status === "vacant").length;
-  const activeLeases = leases.filter((l) => l.status === "active");
-  const upcoming = activeLeases.filter((l) => l.end_date <= in30Iso && l.end_date >= todayIso);
+  const occupied = units.filter((u) => lower(u.status) === "occupied").length;
+  const vacant = units.filter((u) => lower(u.status) === "vacant").length;
+  const upcoming = activeLeases
+    .filter((l) => l.end_date <= in30Iso && l.end_date >= todayIso)
+    .sort((a, b) => a.end_date.localeCompare(b.end_date));
+  const upcomingTop = upcoming.slice(0, 5);
+
   const month_outstanding = charges
     .filter((c) => c.status !== "paid" && c.status !== "waived")
-    .reduce((s, c) => s + (c.amount - c.amount_paid), 0);
-  const month_collected = charges.reduce((s, c) => s + c.amount_paid, 0);
-  const overdue = charges.filter((c) => c.status === "overdue" || (c.due_date < todayIso && c.status !== "paid" && c.status !== "waived"));
-  const openWo = workOrders.filter((w) => w.status !== "closed");
-  const urgentWo = openWo.filter((w) => w.priority === "urgent");
+    .reduce((s, c) => s + chargeBalance(c), 0);
+  const month_collected = charges.reduce((s, c) => s + Number(c.amount_paid), 0);
+  const overdue = charges.filter(
+    (c) =>
+      c.status === "overdue" ||
+      (c.due_date < todayIso && c.status !== "paid" && c.status !== "waived"),
+  );
+
+  const openWo = workOrders.filter((w) => isOpenDashboardWo(w.status));
+  const urgentWo = openWo.filter((w) => dashboardWoPriority(w.priority) === "urgent");
+  const recentTop = openWo.slice(0, 5);
+
+  const { unitMap, propMap, tenantMap } = await enrichDashboardSlices(recentTop, upcomingTop);
 
   return {
     period,
-    properties: properties.length,
+    properties: propertyCount,
     units: units.length,
     occupied,
     vacant,
@@ -1709,27 +1892,37 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     upcoming_move_outs: upcoming.length,
     month_outstanding,
     month_collected,
-    overdue_total: overdue.reduce((s, c) => s + (c.amount - c.amount_paid), 0),
+    overdue_total: overdue.reduce((s, c) => s + chargeBalance(c), 0),
     overdue_count: overdue.length,
     open_work_orders: openWo.length,
     urgent_work_orders: urgentWo.length,
-    recent_work_orders: openWo.slice(0, 5).map((w) => ({
-      id: w.id,
-      title: w.title,
-      priority: w.priority,
-      status: w.status,
-      property_name: w.property_name ?? null,
-      unit_name: w.unit_name ?? null,
-      created_at: w.created_at,
-    })),
-    upcoming_expirations: upcoming.slice(0, 5).map((l) => ({
-      id: l.id,
-      end_date: l.end_date,
-      tenant_first_name: l.tenant_first_name ?? null,
-      tenant_last_name: l.tenant_last_name ?? null,
-      unit_name: l.unit_name ?? null,
-      property_name: l.property_name ?? null,
-    })),
+    recent_work_orders: recentTop.map((w) => {
+      const u = w.unit_id != null ? unitMap.get(w.unit_id) : undefined;
+      const propId = w.property_id ?? u?.property_id;
+      const p = propId != null ? propMap.get(propId) : undefined;
+      return {
+        id: w.id,
+        title: w.title,
+        priority: dashboardWoPriority(w.priority),
+        status: dashboardWoStatus(w.status),
+        property_name: p?.property_name ?? null,
+        unit_name: u?.unit_label ?? null,
+        created_at: w.created_at,
+      };
+    }),
+    upcoming_expirations: upcomingTop.map((l) => {
+      const u = unitMap.get(l.unit_id);
+      const p = u ? propMap.get(u.property_id) : undefined;
+      const t = l.primary_tenant_id ? tenantMap.get(l.primary_tenant_id) : undefined;
+      return {
+        id: l.id,
+        end_date: l.end_date,
+        tenant_first_name: t?.first_name ?? null,
+        tenant_last_name: t?.last_name ?? null,
+        unit_name: u?.unit_label ?? null,
+        property_name: p?.property_name ?? null,
+      };
+    }),
   };
 }
 
