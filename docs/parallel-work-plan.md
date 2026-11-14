@@ -346,11 +346,13 @@ Run manual Phase 2 + LGA-18 approve/link matrix on live Landlord Gopher after Wa
 
 | Item | Source | Notes |
 |------|--------|-------|
-| Supabase staging + **duplicate migration history cleanup** / version repair | **hygiene #8** · **deferred** | `docs/ops/schema-migrations.md`; no live-only DDL |
+| Supabase staging + **duplicate migration history cleanup** / version repair | **hygiene #8** · **deferred** | Full inventory + repair commands in `docs/ops/schema-migrations.md`. Staging create **paused** pending owner confirm of ~$0.01344/hr. No live-only DDL. |
 
 **Out of scope for WS-I:** portal hosting/deploy config; portal URL; website `NEXT_PUBLIC_PORTAL_URL` / login-link wiring; WordPress retirement / Next.js launch — see deferred-work **“Portal hosting + URL: deferred until owner provides the link”**.
 
-**Acceptance:** Staging created or explicitly re-parked; migration history repaired or documented; no hosting/URL claimed as WS-I deliverables.
+**Acceptance:** Staging created **or** explicitly re-parked with cost note; migration history repaired **or** ops doc lists mismatches + repair plan; no hosting/URL claimed as WS-I.
+
+**Status (2026-11-14):** Staging proposed + cost parked; history inventory + repair plan shipped in ops doc (live `migration repair` still pending CLI/ops go-ahead).
 
 **Kickoff prompt:**
 

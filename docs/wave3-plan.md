@@ -11,14 +11,14 @@
 | **WS-O** thin calendar | **YES** — staffed |
 | **WS-P** Zillow research | **NO** — leave deferred |
 | **WS-Q** website visual | **NO** — leave deferred |
-| **Portal hosting + URL** | **Out of Wave 3** — deferred until owner provides the link (live landlordgopher.com still old WordPress; Next.js not launched) |
+| **Portal hosting + URL** (**roadmap #3** = hygiene **#13**) | **Out of Wave 3** — deferred until owner provides the link (live landlordgopher.com still old WordPress; Next.js not launched). ≠ hygiene #3 |
 | Status labels (hygiene #11) | **Open** |
 
 ## Streams (staffed)
 
 | Stream | Size | Conflict | Start |
 |--------|------|----------|-------|
-| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL |
+| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL. Staging create **paused** (~$0.01344/hr pending owner); history inventory + repair plan in [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) |
 | **WS-K** Accept & schedule | M | **High** on `work-order-dialog.tsx` | Now |
 | **WS-N** Perf/docs (one lane) | S–M | Low–med | Now |
 | **WS-O** Thin read-only calendar | M | Med; prefer after K | After K (or coordinated) |
