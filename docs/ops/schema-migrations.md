@@ -129,8 +129,9 @@ Requires `supabase` CLI logged in / `SUPABASE_ACCESS_TOKEN`, linked to `bgjkjtfg
 
 ```bash
 # From repo root, linked to project bgjkjtfgrfiszbzatriq
-# Must target remote history (--remote). --yes skips prompts for hosted changes.
-# 1) Drop true duplicates / clock stamps (B + C + lga15 pair)
+# HISTORY ONLY — updates supabase_migrations rows; does NOT run or undo SQL/DDL.
+# Must target remote (--remote). --yes skips CLI prompts on hosted changes (ops go-ahead first).
+# 1) Mark duplicate / clock stamps as reverted in history (B + C + lga15 pair)
 supabase migration repair --remote --yes --status reverted \
   20261113232311 20261113232318 \
   20261113213707 20261113215853 \
@@ -140,7 +141,7 @@ supabase migration repair --remote --yes --status reverted \
   20261113212113 20261113213318 \
   20261113213530 20261113215737
 
-# 2) Mark repo prefixes as applied (C + lga15 canonical)
+# 2) Mark repo prefixes as applied in history (C + lga15 canonical)
 supabase migration repair --remote --yes --status applied \
   20261113160000 20261113180000 \
   20261113200000 20261113203000 \
