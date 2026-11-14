@@ -24,6 +24,12 @@ import { LoginPage } from "./components/auth/login-page";
 import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
 import { Button } from "./components/ui/button";
+import {
+  isLandlordAllowedRoute,
+  ROLE_HOME,
+  resolveReadyLanding,
+  type PortalAudience,
+} from "./lib/safe-redirect";
 
 const PORTFOLIO: AppNavItem[] = [
   { id: "dashboard", label: "Dashboard", href: "/dashboard", home: true },
@@ -58,15 +64,6 @@ function activeFor(route: Route): string {
   return route.name;
 }
 
-function landlordHomeRoute(route: Route): boolean {
-  return (
-    route.name === "properties" ||
-    route.name === "property" ||
-    route.name === "maintenance" ||
-    route.name === "documents"
-  );
-}
-
 type AuthScreen = "login" | "reset-request" | "reset-confirm";
 
 export function App() {
@@ -97,19 +94,20 @@ export function App() {
     }
   }, []);
 
+  // Phase 4b / WS-R + role shell: one replace landing (redirect/intent → clamp).
+  // No separate effects — avoids same-tick order races and replace-then-push history.
   useEffect(() => {
-    if (!ready || !isTenant) return;
-    if (route.name !== "maintenance" && route.name !== "documents") {
-      navigate("/maintenance");
-    }
-  }, [ready, isTenant, route.name, navigate]);
-
-  useEffect(() => {
-    if (!ready || !isLandlord) return;
-    if (!landlordHomeRoute(route)) {
-      navigate("/properties");
-    }
-  }, [ready, isLandlord, route, navigate]);
+    if (!ready) return;
+    const audience: PortalAudience = isTenant ? "tenant" : isLandlord ? "landlord" : "staff";
+    const landing = resolveReadyLanding({
+      search: window.location.search,
+      origin: window.location.origin,
+      pathname: window.location.pathname,
+      audience,
+    });
+    if (!landing.shouldNavigate) return;
+    navigate(landing.path, { replace: true, search: landing.search });
+  }, [ready, isTenant, isLandlord, path, navigate]);
 
   if (auth.gate.state === "loading") {
     return (
@@ -213,7 +211,11 @@ export function App() {
     );
   }
 
-  const homePath = isTenant ? "/maintenance" : isLandlord ? "/properties" : "/dashboard";
+  const homePath = isTenant
+    ? ROLE_HOME.tenant
+    : isLandlord
+      ? ROLE_HOME.landlord
+      : ROLE_HOME.staff;
 
   // reset-password while already authenticated (from email link)
   if (authScreen === "reset-confirm" && window.location.pathname === "/reset-password") {
@@ -222,9 +224,10 @@ export function App() {
         error={auth.authError}
         onSubmit={auth.updatePassword}
         onDone={() => {
-          window.history.replaceState(null, "", homePath);
           setAuthScreen("login");
-          navigate(homePath);
+          // replace:true syncs React path even when URL already matches (avoids
+          // replaceState-then-navigate no-op leaving route stuck on /reset-password).
+          navigate(homePath, { replace: true, search: "" });
         }}
       />
     );
@@ -292,7 +295,7 @@ export function App() {
               {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
               {route.name === "maintenance" && <MaintenancePage />}
               {route.name === "documents" && <LandlordDocumentsPage />}
-              {!landlordHomeRoute(route) && (
+              {!isLandlordAllowedRoute(route) && (
                 <Placeholder
                   title="Landlord portal"
                   message="Read-only view of your properties, maintenance, and documents. Editing is not available yet."
