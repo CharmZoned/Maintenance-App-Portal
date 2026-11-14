@@ -44,6 +44,7 @@ export function PageShell({
               <AccountMenu
                 email={chrome.email}
                 role={chrome.role}
+                displayName={chrome.displayName}
                 onAccount={chrome.onAccount}
                 onSignOut={chrome.onSignOut}
               />

@@ -16,17 +16,23 @@ import { displayNameFromEmail, initialsFromName, roleLabel } from "@/lib/portal-
 export function AccountMenu({
   email,
   role,
+  displayName,
   onAccount,
   onSignOut,
   className,
 }: {
   email: string;
   role: string;
+  /** Prefer Auth `user_metadata.full_name` when set. */
+  displayName?: string | null;
   onAccount?: () => void;
   onSignOut: () => void;
   className?: string;
 }) {
-  const name = displayNameFromEmail(email);
+  const name =
+    typeof displayName === "string" && displayName.trim()
+      ? displayName.trim()
+      : displayNameFromEmail(email);
   const initials = initialsFromName(name);
   const label = roleLabel(role);
 

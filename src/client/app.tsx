@@ -235,9 +235,12 @@ export function App() {
 
   const navItems = navItemsForAudience(audience);
   const useMobileTabs = audience !== "staff";
+  const metaFullName = auth.gate.user.user_metadata?.full_name;
   const chrome = {
     email: auth.gate.user.email ?? "",
     role: auth.gate.role.role,
+    displayName:
+      typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null,
     onNotifications: () => navigate("/messages"),
     onAccount: () => navigate("/account"),
     onSignOut: () => void auth.logout(),
@@ -278,6 +281,7 @@ export function App() {
                   {route.name === "documents" && <TenantDocumentsPage />}
                   {route.name === "account" && (
                     <AccountPage
+                      userId={auth.gate.user.id}
                       email={auth.gate.user.email ?? ""}
                       role={auth.gate.role.role}
                       onSignOut={() => void auth.logout()}
@@ -316,9 +320,9 @@ export function App() {
                   {route.name === "documents" && <LandlordDocumentsPage />}
                   {route.name === "account" && (
                     <AccountPage
+                      userId={auth.gate.user.id}
                       email={auth.gate.user.email ?? ""}
                       role={auth.gate.role.role}
-                      showStaffAlerts
                       onSignOut={() => void auth.logout()}
                     />
                   )}
@@ -344,9 +348,9 @@ export function App() {
                   {route.name === "calendar" && <CalendarPage navigate={navigate} />}
                   {route.name === "account" && (
                     <AccountPage
+                      userId={auth.gate.user.id}
                       email={auth.gate.user.email ?? ""}
                       role={auth.gate.role.role}
-                      showStaffAlerts
                       onSignOut={() => void auth.logout()}
                     />
                   )}
@@ -385,9 +389,9 @@ export function App() {
                   )}
                   {route.name === "account" && (
                     <AccountPage
+                      userId={auth.gate.user.id}
                       email={auth.gate.user.email ?? ""}
                       role={auth.gate.role.role}
-                      showStaffAlerts
                       onSignOut={() => void auth.logout()}
                     />
                   )}

@@ -8,6 +8,7 @@ import { ErrorRetry } from "@/components/patterns/error-retry";
 import { displayNameFromEmail, roleLabel } from "@/lib/portal-nav";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { cn } from "@/lib/utils";
+import type { AppRole } from "@/types.supabase";
 
 type Prefs = {
   emailRequestUpdates: boolean;
@@ -16,16 +17,11 @@ type Prefs = {
   pushThisDevice: boolean;
 };
 
-const PREFS_KEY = "lg-account-notification-prefs";
+const NAME_MAX = 80;
+const PHONE_MAX = 40;
 
-function loadPrefs(): Prefs {
-  try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) return { ...defaultPrefs(), ...JSON.parse(raw) };
-  } catch {
-    /* ignore */
-  }
-  return defaultPrefs();
+function prefsKey(userId: string): string {
+  return `lg-account-notification-prefs:${userId}`;
 }
 
 function defaultPrefs(): Prefs {
@@ -35,6 +31,21 @@ function defaultPrefs(): Prefs {
     alertNewRequests: true,
     pushThisDevice: true,
   };
+}
+
+function loadPrefs(userId: string): Prefs {
+  try {
+    const raw = localStorage.getItem(prefsKey(userId));
+    if (!raw) return defaultPrefs();
+    const parsed = JSON.parse(raw) as Partial<Record<keyof Prefs, unknown>>;
+    const base = defaultPrefs();
+    (Object.keys(base) as (keyof Prefs)[]).forEach((key) => {
+      if (typeof parsed[key] === "boolean") base[key] = parsed[key];
+    });
+    return base;
+  } catch {
+    return defaultPrefs();
+  }
 }
 
 function ToggleRow({
@@ -76,17 +87,17 @@ function ToggleRow({
  * where possible; notification prefs are local stubs (Q7).
  */
 export function AccountPage({
+  userId,
   email,
   role,
-  showStaffAlerts = false,
   onSignOut,
 }: {
+  userId: string;
   email: string;
-  role: string;
-  /** Admin/landlord/maintenance get “Alert me about new requests”. */
-  showStaffAlerts?: boolean;
+  role: AppRole;
   onSignOut: () => void;
 }) {
+  const showStaffAlerts = role !== "tenant";
   const [name, setName] = useState(() => displayNameFromEmail(email));
   const [phone, setPhone] = useState("");
   const [loading, setLoading] = useState(true);
@@ -101,7 +112,7 @@ export function AccountPage({
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [pwErr, setPwErr] = useState<string | null>(null);
 
-  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs());
+  const [prefs, setPrefs] = useState<Prefs>(() => loadPrefs(userId));
 
   async function loadProfile() {
     setLoading(true);
@@ -115,7 +126,7 @@ export function AccountPage({
       } else {
         setName(displayNameFromEmail(data.user?.email ?? email));
       }
-      if (typeof meta.phone === "string") setPhone(meta.phone);
+      setPhone(typeof meta.phone === "string" ? meta.phone : "");
     } catch (err) {
       setLoadError((err as Error).message);
     } finally {
@@ -127,10 +138,14 @@ export function AccountPage({
     void loadProfile();
   }, [email]);
 
+  useEffect(() => {
+    setPrefs(loadPrefs(userId));
+  }, [userId]);
+
   function savePrefs(next: Prefs) {
     setPrefs(next);
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      localStorage.setItem(prefsKey(userId), JSON.stringify(next));
     } catch {
       /* ignore */
     }
@@ -141,11 +156,30 @@ export function AccountPage({
     setProfileBusy(true);
     setProfileMsg(null);
     setProfileErr(null);
+    const trimmedName = name.trim();
+    const trimmedPhone = phone.trim();
+    if (!trimmedName) {
+      setProfileErr("Enter your name.");
+      setProfileBusy(false);
+      return;
+    }
+    if (trimmedName.length > NAME_MAX) {
+      setProfileErr(`Name must be at most ${NAME_MAX} characters.`);
+      setProfileBusy(false);
+      return;
+    }
+    if (trimmedPhone.length > PHONE_MAX) {
+      setProfileErr(`Phone must be at most ${PHONE_MAX} characters.`);
+      setProfileBusy(false);
+      return;
+    }
     try {
       const { error } = await supabase.auth.updateUser({
-        data: { full_name: name.trim(), phone: phone.trim() || null },
+        data: { full_name: trimmedName, phone: trimmedPhone || null },
       });
       if (error) throw error;
+      setName(trimmedName);
+      setPhone(trimmedPhone);
       setProfileMsg("Profile saved.");
     } catch (err) {
       setProfileErr((err as Error).message);
@@ -168,12 +202,18 @@ export function AccountPage({
     }
     setPwBusy(true);
     try {
-      // Stub: re-auth with current password before updating (no dedicated verify API).
+      // Stub: prove current password via sign-in (not Auth reauthenticate()).
+      // See docs/ops/auth-password-policy.md — Account password change stub.
       const { error: signErr } = await supabase.auth.signInWithPassword({
         email,
         password: currentPassword,
       });
-      if (signErr) throw new Error("Current password is incorrect.");
+      if (signErr) {
+        if (signErr.code === "invalid_credentials") {
+          throw new Error("Current password is incorrect.");
+        }
+        throw new Error(signErr.message);
+      }
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
       setCurrentPassword("");
@@ -202,6 +242,11 @@ export function AccountPage({
               className="flex flex-col gap-3 rounded-md border border-border bg-card p-4"
             >
               <h2 className="text-[15px] font-semibold">Profile</h2>
+              <p className="text-xs text-muted-foreground">
+                Name and phone save to your Auth profile for this portal. Phone is not synced to the
+                tenant, landlord, or staff directory yet — maintenance and staff may still see the
+                older number from those records.
+              </p>
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="acct-name" className="text-xs font-medium text-muted-foreground">
                   Name
@@ -211,6 +256,7 @@ export function AccountPage({
                   className="h-11"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  maxLength={NAME_MAX}
                   required
                 />
               </div>
@@ -224,6 +270,7 @@ export function AccountPage({
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   inputMode="tel"
+                  maxLength={PHONE_MAX}
                 />
               </div>
               <div className="flex flex-col gap-0.5">
