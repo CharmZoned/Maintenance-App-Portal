@@ -82,17 +82,21 @@ export function useAppState(
       setSettings(DEFAULT_SETTINGS);
       return;
     }
+    // Settings RLS is admin-only (WS-S S2 #10). Staff skip the fetch and keep
+    // DEFAULT_SETTINGS for money formatting (may differ from live admin currency).
     const [props, vens, st, lls] = await Promise.all([
       data.listProperties(),
       data.listVendors().catch(() => [] as Vendor[]),
-      data.getSettings().catch(() => ({} as Record<string, string>)),
+      isAdmin
+        ? data.getSettings().catch(() => null as Record<string, string> | null)
+        : Promise.resolve(null as Record<string, string> | null),
       data.listLandlords().catch(() => [] as Landlord[]),
     ]);
     setProperties(props);
     setVendors(vens);
-    setSettings(parseSettings(st));
+    setSettings(st ? parseSettings(st) : DEFAULT_SETTINGS);
     setLandlords(lls);
-  }, [isTenant, isLandlord]);
+  }, [isTenant, isLandlord, isAdmin]);
 
   useEffect(() => {
     if (!enabled) {

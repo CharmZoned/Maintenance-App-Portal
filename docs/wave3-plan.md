@@ -43,6 +43,6 @@
 
 ## Migrations
 
-Never live-only DDL — file under `supabase/migrations/` on a PR first (`docs/ops/schema-migrations.md`). Latest on `master`: `20261114030000_*`, `20261114040000_*`. S2 claims ≥ `20261114050000`; reserve `20261114100000+` for WS-L.
+Never live-only DDL — file under `supabase/migrations/` on a PR first (`docs/ops/schema-migrations.md`). Latest on `master`: `20261114050000_*` (#37). S2 next slots ≥ `20261114060000`; reserve `20261114100000+` for WS-L.
 
 Full kickoffs, acceptance, and conflict matrix: Project store plan + [parallel-work-plan.md](./parallel-work-plan.md).

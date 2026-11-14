@@ -182,6 +182,17 @@ describe("[R7] Permissions", () => {
       expect((await client.from("Tenants").select("id")).data).toEqual([{ id: world.tenants.tenant.id }]);
     });
 
+    test("cannot read or mutate Settings (admin-only)", async () => {
+      const client = await clientFor("worker");
+      expectDenied(await client.from("Settings").select("*"), "worker must not SELECT Settings");
+      expectDenied(await client.from("Settings").update({ value: "EUR" }).eq("key", "currency").select());
+      expectDenied(await client.from("Settings").insert({ key: "worker_r7", value: "x" }).select());
+      expectDenied(await client.from("Settings").delete().eq("key", "currency").select());
+      expect((await sql<{ value: string }>(`select value from public."Settings" where key = 'currency'`))[0].value).toBe("USD");
+      expect(await sql(`select 1 from public."Settings" where key = 'worker_r7'`)).toHaveLength(0);
+      expect(await sql(`select 1 from public."Settings" where key = 'currency'`)).toHaveLength(1);
+    });
+
     test("cannot update a request that is not assigned to them", async () => {
       const client = await clientFor("worker2");
       expectDenied(await client.from("MaintenanceRequests").update({ hold_reason: "mine now" }).eq("id", requestId).select());

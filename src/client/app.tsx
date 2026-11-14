@@ -44,7 +44,7 @@ const OPERATIONS: AppNavItem[] = [
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
   { id: "calendar", label: "Calendar", href: "/calendar", icon: "calendar-days", color: "blue" },
 ];
-/** Admin-only: Users queue + rental Applications (applicant income PII). */
+/** Admin-only: Users queue, rental Applications (applicant income PII), and Settings. */
 const ADMIN_ITEMS: AppNavItem[] = [
   { id: "users", label: "Users", href: "/users", icon: "users", color: "violet" },
   { id: "applications", label: "Rental applications", href: "/applications", icon: "clipboard-list", color: "blue" },
@@ -235,7 +235,7 @@ export function App() {
     );
   }
 
-  const adminNav = isAdmin ? ADMIN_ITEMS : ADMIN_ITEMS.filter((i) => i.id === "settings");
+  // Settings (and Users / Applications) are admin-only — staff must not see the Admin nav group.
   const groups = isTenant
     ? [{ items: TENANT_NAV }]
     : isLandlord
@@ -243,7 +243,7 @@ export function App() {
       : [
           { items: PORTFOLIO },
           { label: "Operations", items: OPERATIONS },
-          { label: "Admin", items: adminNav },
+          ...(isAdmin ? [{ label: "Admin", items: ADMIN_ITEMS }] : []),
         ];
 
   const portalTitle = isTenant
@@ -338,7 +338,15 @@ export function App() {
                     message="The Users approval queue is restricted to admins."
                   />
                 ))}
-              {route.name === "settings" && <SettingsPage />}
+              {route.name === "settings" &&
+                (isAdmin ? (
+                  <SettingsPage />
+                ) : (
+                  <Placeholder
+                    title="Admins only"
+                    message="Rent policy and portal settings are restricted to admins."
+                  />
+                ))}
               {route.name === "not-found" && (
                 <Placeholder title="Not found" message="That page doesn't exist." />
               )}
