@@ -24,9 +24,12 @@ Supabase MCP `apply_migration` often **stamps a new clock version** (e.g. live `
 **Required when applying to a shared DB:**
 
 1. Prefer applying so the recorded version **equals** the repo file prefix (CLI `supabase db push` / linked migration apply against that file), **or**
-2. Immediately after an MCP/Dashboard apply that stamped a different version, run **`supabase migration repair`** (mark the repo version as applied / align history) so live history and `supabase/migrations/` agree.
+2. Immediately after an MCP/Dashboard apply that stamped a different version, align history with **both** steps on the **remote** project (no DDL — history rows only):
+   - `supabase migration repair --remote --yes --status reverted <clock_version>` — remove the MCP/Dashboard clock stamp from history
+   - `supabase migration repair --remote --yes --status applied <repo_file_prefix>` — record the repo filename prefix as applied  
+   Run **reverted + applied back-to-back**. Never run `supabase db push` (or any migrate) between them: reverting the clock without marking the repo prefix applied makes CLI treat already-applied SQL as pending and may re-execute it.
 
-Do not leave a permanent “name matches, version differs” gap without a deferred-work row and a repair plan.
+Do not leave a permanent “name matches, version differs” gap without a deferred-work row and a repair plan. Always pass **`--remote`** when repairing the shared/live project (local default would miss production history).
 
 ## Recommended apply order
 
@@ -73,16 +76,16 @@ Baseline pre-Phase-1 migrations may exist only on the remote history; portal pha
 **Snapshotted:** 2026-11-14 via MCP `list_migrations` / `schema_migrations` on `bgjkjtfgrfiszbzatriq` vs `supabase/migrations/` on `master` @ `33424b7`.  
 **Scope:** History alignment only (`supabase migration repair`). **No DDL.** Do not run while another migration/RLS PR is open.
 
-### A. Already aligned (repo prefix = live version)
+### A. Repo prefix present on live (matching version row exists)
 
-| Version | Name |
-|---------|------|
-| `20261113193000` | `phase1_5_force_rls_payment_rpc` |
-| `20261113241000` | `phase_lga18_landlord_approve_access` |
-| `20261114010000` | `fix_authenticated_portfolio_and_mr_grants` |
-| `20261114020000` | `fix_user_roles_pending_and_set_account_status` |
-| `20261114030000` | `harden_landlord_helpers_and_mr_notes` |
-| `20261114040000` | `property_documents_storage_path_bind` |
+| Version | Name | Note |
+|---------|------|------|
+| `20261113193000` | `phase1_5_force_rls_payment_rpc` | Clean match |
+| `20261113241000` | `phase_lga18_landlord_approve_access` | Clean match |
+| `20261114010000` | `fix_authenticated_portfolio_and_mr_grants` | Matching row **and** duplicate clock — see **§B** |
+| `20261114020000` | `fix_user_roles_pending_and_set_account_status` | Matching row **and** duplicate clock — see **§B** |
+| `20261114030000` | `harden_landlord_helpers_and_mr_notes` | Clean match |
+| `20261114040000` | `property_documents_storage_path_bind` | Clean match |
 
 ### B. True duplicate live entries (same logical migration stamped twice)
 
@@ -127,6 +130,8 @@ If a secondary env must match listings DDL, capture those two into a dedicated r
 
 Requires `supabase` CLI logged in / `SUPABASE_ACCESS_TOKEN`, linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed.
 
+**Atomicity (High):** Run step 1 then step 2 **immediately** as one ops action. After step 1 alone, repo prefixes for §C/lga15 are unmarked — `supabase db push` would treat already-applied Phase 1–5 / lga15 SQL as pending and **re-run** it. Do **not** `db push`, migrate, or leave the DB mid-repair between the two commands.
+
 ```bash
 # From repo root, linked to project bgjkjtfgrfiszbzatriq
 # HISTORY ONLY — updates supabase_migrations rows; does NOT run or undo SQL/DDL.
@@ -141,7 +146,7 @@ supabase migration repair --remote --yes --status reverted \
   20261113212113 20261113213318 \
   20261113213530 20261113215737
 
-# 2) Mark repo prefixes as applied in history (C + lga15 canonical)
+# 2) IMMEDIATELY — mark repo prefixes as applied (C + lga15 canonical). Do not db push before this.
 supabase migration repair --remote --yes --status applied \
   20261113160000 20261113180000 \
   20261113200000 20261113203000 \

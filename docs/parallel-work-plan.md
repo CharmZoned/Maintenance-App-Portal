@@ -112,7 +112,7 @@ Latest repo prefixes on `master` (as of Wave 2 merge / `33424b7`):
 Rules (also `docs/ops/schema-migrations.md`):
 
 1. Never reuse a prefix on `master` or any open PR.
-2. File migration in repo → PR → then apply live **with matching version** (or `migration repair` after MCP clock stamp).
+2. File migration in repo → PR → then apply live **with matching version**, or after an MCP clock stamp run `supabase migration repair --remote` **reverted (clock) + applied (repo prefix)** back-to-back (never `db push` between). See `docs/ops/schema-migrations.md`.
 3. One logical concern per migration file when parallel agents are shipping; do not edit another stream’s migration.
 4. Emulator auto-replays every file under `supabase/migrations/` — a bad migration fails `#18` by name.
 
