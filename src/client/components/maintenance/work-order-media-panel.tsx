@@ -11,7 +11,7 @@ import type {
   MaintenancePhoto,
   MaintenanceStatusEvent,
 } from "@/types";
-import { takePhotoFiles } from "./work-order-status";
+import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
 
 interface PhotoPreview {
   file: File;
@@ -25,6 +25,8 @@ export interface WorkOrderMediaPanelProps {
   comments: MaintenanceComment[];
   photoFiles: File[];
   photoPreviews: PhotoPreview[];
+  /** How many more photos may be added (cap minus existing). */
+  remainingPhotoSlots?: number;
   onPhotoFilesChange: (files: File[]) => void;
   onUploadPhotos: () => void;
   commentBody: string;
@@ -44,6 +46,7 @@ export function WorkOrderMediaPanel({
   comments,
   photoFiles,
   photoPreviews,
+  remainingPhotoSlots = MAX_MAINTENANCE_PHOTOS,
   onPhotoFilesChange,
   onUploadPhotos,
   commentBody,
@@ -90,14 +93,17 @@ export function WorkOrderMediaPanel({
             )}
           </div>
         )}
-        {!isLandlord && (
+        {!isLandlord && remainingPhotoSlots > 0 && (
           <div className="mt-2 space-y-2">
             <Input
               type="file"
               accept="image/*"
               multiple
-              onChange={(e) => onPhotoFilesChange(takePhotoFiles(e.target.files))}
+              onChange={(e) => onPhotoFilesChange(takePhotoFiles(e.target.files, remainingPhotoSlots))}
             />
+            <p className="text-xs text-muted-foreground">
+              Up to {remainingPhotoSlots} more (max {MAX_MAINTENANCE_PHOTOS} total).
+            </p>
             {photoPreviews.length > 0 && (
               <div className="grid grid-cols-3 gap-2">
                 {photoPreviews.map((p) => (
@@ -116,6 +122,9 @@ export function WorkOrderMediaPanel({
               </Button>
             )}
           </div>
+        )}
+        {!isLandlord && remainingPhotoSlots <= 0 && (
+          <p className="mt-2 text-xs text-muted-foreground">Photo limit reached ({MAX_MAINTENANCE_PHOTOS}).</p>
         )}
       </div>
 

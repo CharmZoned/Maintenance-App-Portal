@@ -15,11 +15,15 @@ export const ADMIN_STATUSES: { value: WorkOrderStatus; label: string }[] = [
   { value: "closed", label: "Closed" },
 ];
 
-/** Cap shared by create / edit / media upload file pickers. */
+/** Cap shared by create / edit / media upload file pickers (matches DB trigger). */
 export const MAX_MAINTENANCE_PHOTOS = 5;
 
-export function takePhotoFiles(files: FileList | File[] | null | undefined): File[] {
-  return Array.from(files ?? []).slice(0, MAX_MAINTENANCE_PHOTOS);
+/** Take up to `remaining` files (default full cap). Use remaining slots when adding after existing photos. */
+export function takePhotoFiles(
+  files: FileList | File[] | null | undefined,
+  remaining: number = MAX_MAINTENANCE_PHOTOS,
+): File[] {
+  return Array.from(files ?? []).slice(0, Math.max(0, remaining));
 }
 
 /** Staff status dropdown — include In progress when work can start (assigned or already past Open). */

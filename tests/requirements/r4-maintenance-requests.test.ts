@@ -214,6 +214,26 @@ describe("[R4] Maintenance requests", () => {
       await expect(data.uploadMaintenancePhoto(id, pdfFile("not-a-photo.pdf"))).rejects.toThrow(/mime type/i);
     });
 
+    test("a sixth photo is refused by the database cap", async () => {
+      const id = await seedRequest({ title: "Photo cap — six" });
+      await signInApp("tenant");
+      for (let i = 0; i < 5; i++) {
+        await data.uploadMaintenancePhoto(id, pngFile(`cap-${i}.png`));
+      }
+      expect(
+        await sql(`select 1 from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`, [id]),
+      ).toHaveLength(5);
+
+      await expect(data.uploadMaintenancePhoto(id, pngFile("cap-sixth.png"))).rejects.toThrow(
+        /at most 5 photos/i,
+      );
+      expect(
+        await sql(`select 1 from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`, [id]),
+      ).toHaveLength(5);
+      // FE best-effort removes the just-uploaded object on insert failure; residual
+      // storage orphans (if remove is denied) are not path-bound to a photo row.
+    });
+
     test("a tenant cannot add photos to another tenant's request", async () => {
       const id = await seedRequest({ tenant: "tenant2" });
       await signInApp("tenant");
