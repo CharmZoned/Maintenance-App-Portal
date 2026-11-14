@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { intentLoginLabel } from "@/lib/safe-redirect";
 
 interface Props {
@@ -25,7 +26,7 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim() || !password) return;
+    if (!email.trim() || password.length < PASSWORD_MIN_LENGTH) return;
     setBusy(true);
     setInfo(null);
     try {
@@ -89,8 +90,13 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={PASSWORD_MIN_LENGTH}
             />
+            {mode === "signup" && (
+              <p className="text-xs text-muted-foreground">
+                At least {PASSWORD_MIN_LENGTH} characters.
+              </p>
+            )}
           </div>
           <Button type="submit" className="w-full" disabled={busy || !configured}>
             {busy
