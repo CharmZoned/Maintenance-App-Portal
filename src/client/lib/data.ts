@@ -534,6 +534,34 @@ async function clearTenantUnitsMatching(tenantIds: number[], leaseUnitId: number
   if (error) throwSb(error);
 }
 
+/**
+ * After deleting a lease, clear unit_id only for tenants who are not on another lease
+ * (membership or primary). A concurrent replacement lease on the same unit would share
+ * unit_id — clearing by unit match alone would wipe that new assignment.
+ */
+async function clearTenantUnitsAfterLeaseDelete(
+  tenantIds: number[],
+  leaseUnitId: number,
+): Promise<void> {
+  if (tenantIds.length === 0) return;
+
+  const [{ data: members, error: mErr }, { data: primaries, error: pErr }] = await Promise.all([
+    supabase.from("LeaseTenants").select("tenant_id").in("tenant_id", tenantIds),
+    supabase.from("Leases").select("primary_tenant_id").in("primary_tenant_id", tenantIds),
+  ]);
+  if (mErr) throwSb(mErr);
+  if (pErr) throwSb(pErr);
+
+  const keep = new Set<number>([
+    ...(members ?? []).map((m) => m.tenant_id),
+    ...(primaries ?? [])
+      .map((p) => p.primary_tenant_id)
+      .filter((id): id is number => id != null),
+  ]);
+  const toClear = tenantIds.filter((id) => !keep.has(id));
+  await clearTenantUnitsMatching(toClear, leaseUnitId);
+}
+
 async function unlinkTenantFromLease(
   leaseId: number,
   tenantId: number,
@@ -899,8 +927,9 @@ export async function deleteLease(id: number): Promise<void> {
     throw new Error(LEASE_CONCURRENT_MSG);
   }
 
-  // Clear unit links only after the lease is gone (product rule: clear, no reassign).
-  await clearTenantUnitsMatching(tenantIds, snapshot.unit_id);
+  // Clear unit links only after the lease is gone, and only if the tenant is not
+  // already on a replacement (or other) lease — same unit_id must not be wiped.
+  await clearTenantUnitsAfterLeaseDelete(tenantIds, snapshot.unit_id);
 }
 
 // ── Rent ──────────────────────────────────────────────────────────

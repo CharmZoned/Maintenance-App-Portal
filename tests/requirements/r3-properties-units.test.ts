@@ -227,6 +227,45 @@ describe("[R3] Properties and units", () => {
       );
     });
 
+    test("deleteLease does not clear unit_id when a replacement lease already links the tenant (gap R3)", async () => {
+      const [{ id: tenantId }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Rep', 'Laced', 'rep@laced.test', false, false) returning id`,
+      );
+      const [{ id: unitId }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Rep-U', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const oldLease = await data.createLease({
+        unit_id: Number(unitId),
+        primary_tenant_id: Number(tenantId),
+        start_date: "2025-01-01",
+        end_date: "2025-12-31",
+        monthly_rent: 800,
+      });
+      const newLease = await data.createLease({
+        unit_id: Number(unitId),
+        primary_tenant_id: Number(tenantId),
+        start_date: "2026-01-01",
+        end_date: "2026-12-31",
+        monthly_rent: 850,
+      });
+      await data.deleteLease(oldLease.id);
+      const [tenant] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantId],
+      );
+      expect(Number(tenant.unit_id), "replacement lease keeps the unit assignment").toBe(Number(unitId));
+      expect(tenant.primary_on_lease).toBe(true);
+      expect(
+        await sql(`select 1 from public."LeaseTenants" where lease_id = $1 and tenant_id = $2`, [
+          newLease.id,
+          tenantId,
+        ]),
+      ).toHaveLength(1);
+    });
+
     test("deleteLease clears tenant.unit_id and leaves no LeaseTenants orphans (gap R3)", async () => {
       const [{ id: tenantId }] = await sql<{ id: number }>(
         `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
