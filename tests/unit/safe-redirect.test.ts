@@ -41,12 +41,15 @@ describe("safeInternalPath", () => {
     expect(safeInternalPath("   ", ORIGIN)).toBeNull();
   });
 
-  test("rejects unknown path prefixes outside the portal allowlist", () => {
+  test("rejects paths the SPA router does not recognize", () => {
     expect(safeInternalPath("/login", ORIGIN)).toBeNull();
     expect(safeInternalPath("/api/admin", ORIGIN)).toBeNull();
     expect(safeInternalPath("/reset-password", ORIGIN)).toBeNull();
     expect(safeInternalPath("/../etc/passwd", ORIGIN)).toBeNull();
     expect(safeInternalPath("/maintenance//evil.com", ORIGIN)).toBeNull();
+    expect(safeInternalPath("/properties/1/edit", ORIGIN)).toBeNull();
+    expect(safeInternalPath("/users/1", ORIGIN)).toBeNull();
+    expect(safeInternalPath("/settings/%3Cscript%3E", ORIGIN)).toBeNull();
   });
 });
 

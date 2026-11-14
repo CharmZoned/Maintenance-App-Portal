@@ -36,9 +36,14 @@ export function parseRoute(path: string): Route {
 }
 
 export type NavigateOptions = {
-  /** Use history.replaceState instead of pushState. */
+  /** Use history.replaceState instead of pushState. Always syncs React path. */
   replace?: boolean;
-  /** Query string including `?`, or `""` to clear. Defaults to keeping current search when omitted. */
+  /**
+   * Query string including `?`, or `""` to clear.
+   * - When `replace: true` and omitted: keep the current search.
+   * - When pushing (default) and omitted: clear search (path-only URL).
+   * - When provided: use this value (including `""`).
+   */
   search?: string;
 };
 

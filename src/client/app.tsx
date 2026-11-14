@@ -245,9 +245,10 @@ export function App() {
         error={auth.authError}
         onSubmit={auth.updatePassword}
         onDone={() => {
-          window.history.replaceState(null, "", homePath);
           setAuthScreen("login");
-          navigate(homePath);
+          // replace:true syncs React path even when URL already matches (avoids
+          // replaceState-then-navigate no-op leaving route stuck on /reset-password).
+          navigate(homePath, { replace: true, search: "" });
         }}
       />
     );

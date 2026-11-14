@@ -1,9 +1,11 @@
+import { parseRoute } from "../hooks/use-router";
+
 /**
  * Post-login navigation helpers for `?redirect=` / `?intent=` (Phase 4b / WS-R).
  *
- * Security: only same-origin pathnames (or allowlisted intent defaults). External
- * absolute URLs, protocol-relative hosts, and scheme tricks are rejected so login
- * links cannot open-redirect.
+ * Security: only same-origin pathnames that `parseRoute` recognizes (plus intent
+ * defaults). External absolute URLs, protocol-relative hosts, and scheme tricks
+ * are rejected so login links cannot open-redirect.
  *
  * Signup / confirm (documented):
  * - Email confirmation uses a fixed `emailRedirectTo` of `{origin}/dashboard`
@@ -31,30 +33,10 @@ export function intentLoginLabel(intent: string | null | undefined): string {
   return "Staff and admin sign-in";
 }
 
-/**
- * Known portal path prefixes (aligned with `parseRoute` in use-router).
- * Same-origin paths outside this allowlist are rejected.
- */
-const ALLOWED_PREFIXES = [
-  "/dashboard",
-  "/properties",
-  "/landlords",
-  "/tenants",
-  "/leases",
-  "/rent",
-  "/maintenance",
-  "/documents",
-  "/applications",
-  "/users",
-  "/settings",
-] as const;
-
+/** True when pathname is a real portal route (same rules as the SPA router). */
 function isAllowedPathname(pathname: string): boolean {
-  if (pathname === "/" || pathname === "") return true;
   if (pathname.includes("//")) return false;
-  return ALLOWED_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
+  return parseRoute(pathname).name !== "not-found";
 }
 
 /**
