@@ -105,7 +105,8 @@ Same advisor gap → Phase 1 policies.
 
 ### `Settings`
 
-Key/value: `key` PK, `value`, `updated_at`. Phase 1: admin (and optionally maintenance staff) read/write. **Phase 1.5:** `FORCE ROW LEVEL SECURITY`.
+Key/value: `key` PK, `value`, `updated_at`. Phase 1: staff/admin SELECT; admin DML. **Phase 1.5:** `FORCE ROW LEVEL SECURITY`.  
+**WS-S S2 #10** (`20261114060000_*`): SELECT + DML all require `private.is_admin()` — maintenance staff cannot read Settings via PostgREST (portal nav hides Settings for staff).
 
 ### `Applications`
 
