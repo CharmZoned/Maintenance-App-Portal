@@ -16,6 +16,9 @@ import {
   unitStatusToDb,
   workOrderStatusToDb,
   workOrderPriorityToDb,
+  workOrderStatusFromDb,
+  workOrderPriorityFromDb,
+  WORK_ORDER_OPEN_STATUSES_DB,
   maintenanceCategoryToDb,
 } from "./mappers";
 import type {
@@ -74,6 +77,23 @@ export interface StaffMember {
 
 function throwSb(error: { message: string } | null): never {
   throw new Error(error?.message || "Supabase request failed");
+}
+
+/** PostgREST default max-rows is 1000 — page so list/KPI paths are not silently truncated. */
+const REST_PAGE_SIZE = 1000;
+
+async function selectAllPages<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += REST_PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + REST_PAGE_SIZE - 1);
+    if (error) throwSb(error);
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < REST_PAGE_SIZE) break;
+  }
+  return out;
 }
 
 async function assertOk<T>(result: { data: T; error: { message: string } | null }): Promise<T> {
@@ -447,11 +467,17 @@ export async function listLeases(params?: {
   tenant_id?: number;
   unit_id?: number;
   status?: string;
+  /** When set, only these lease ids are loaded (avoids full-table enrich for charge lists). */
+  ids?: number[];
 }): Promise<Lease[]> {
   let q = supabase.from("Leases").select("*").order("start_date", { ascending: false });
   if (params?.unit_id) q = q.eq("unit_id", params.unit_id);
   if (params?.status) q = q.eq("status", params.status);
   if (params?.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
+  if (params?.ids !== undefined) {
+    if (params.ids.length === 0) return [];
+    q = q.in("id", params.ids);
+  }
   const { data: leases, error } = await q;
   if (error) throwSb(error);
 
@@ -934,22 +960,6 @@ export async function deleteLease(id: number): Promise<void> {
 
 // ── Rent ──────────────────────────────────────────────────────────
 
-function chargeExtrasFromLease(l: Lease | undefined): Partial<RentCharge> {
-  if (!l) return {};
-  return {
-    unit_id: l.unit_id,
-    lease_rent: l.monthly_rent,
-    rent_due_day: l.rent_due_day,
-    unit_name: l.unit_name,
-    property_id: l.property_id,
-    property_name: l.property_name,
-    property_color: l.property_color,
-    tenant_id: l.primary_tenant_id,
-    tenant_first_name: l.tenant_first_name,
-    tenant_last_name: l.tenant_last_name,
-  };
-}
-
 /** Enrich one charge row with lease/unit/tenant display fields (no full charges refetch). */
 async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   const { data: leaseRow, error } = await supabase
@@ -988,100 +998,173 @@ async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   });
 }
 
-/** Enrich only the leases referenced by charge rows (avoid full listLeases on every period). */
-async function leasesByIds(leaseIds: number[]): Promise<Map<number, Lease>> {
-  if (!leaseIds.length) return new Map();
-  const { data: leases, error } = await supabase.from("Leases").select("*").in("id", leaseIds);
-  if (error) throwSb(error);
-  const rows = leases ?? [];
-  const unitIds = [...new Set(rows.map((l) => l.unit_id))];
-  const tenantIds = [...new Set(rows.map((l) => l.primary_tenant_id).filter(Boolean))] as number[];
-  const [{ data: units }, { data: tenants }] = await Promise.all([
+/** Chunk size for PostgREST `.in()` filters (URL length / practical batching). */
+const IN_FILTER_CHUNK = 200;
+
+/** Slim lease→unit→property→tenant enrich for charges (no full listLeases graph). */
+async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Partial<RentCharge>>> {
+  const extras = new Map<number, Partial<RentCharge>>();
+  if (!leaseIds.length) return extras;
+
+  type SlimLease = {
+    id: number;
+    unit_id: number;
+    monthly_rent: number;
+    rent_due_day: number;
+    primary_tenant_id: number | null;
+  };
+  const leaseRows: SlimLease[] = [];
+  for (let i = 0; i < leaseIds.length; i += IN_FILTER_CHUNK) {
+    const chunk = leaseIds.slice(i, i + IN_FILTER_CHUNK);
+    const { data, error } = await supabase
+      .from("Leases")
+      .select("id, unit_id, monthly_rent, rent_due_day, primary_tenant_id")
+      .in("id", chunk);
+    if (error) throwSb(error);
+    leaseRows.push(...((data ?? []) as SlimLease[]));
+  }
+
+  const unitIds = [...new Set(leaseRows.map((l) => l.unit_id))];
+  const tenantIds = [
+    ...new Set(leaseRows.map((l) => l.primary_tenant_id).filter((id): id is number => id != null)),
+  ];
+
+  const [{ data: units, error: unitErr }, { data: tenants, error: tenantErr }] = await Promise.all([
     unitIds.length
-      ? supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
-      : Promise.resolve({ data: [] as { id: number; unit_label: string; property_id: number }[] }),
-    tenantIds.length
-      ? supabase.from("Tenants").select("id, first_name, last_name, email, mobile_phone").in("id", tenantIds)
+      ? (async () => {
+          const rows: { id: number; unit_label: string; property_id: number }[] = [];
+          for (let i = 0; i < unitIds.length; i += IN_FILTER_CHUNK) {
+            const chunk = unitIds.slice(i, i + IN_FILTER_CHUNK);
+            const { data, error } = await supabase
+              .from("Units")
+              .select("id, unit_label, property_id")
+              .in("id", chunk);
+            if (error) return { data: null, error };
+            rows.push(...(data ?? []));
+          }
+          return { data: rows, error: null };
+        })()
       : Promise.resolve({
-          data: [] as {
-            id: number;
-            first_name: string;
-            last_name: string;
-            email: string | null;
-            mobile_phone: string | null;
-          }[],
+          data: [] as { id: number; unit_label: string; property_id: number }[],
+          error: null,
+        }),
+    tenantIds.length
+      ? (async () => {
+          const rows: { id: number; first_name: string; last_name: string }[] = [];
+          for (let i = 0; i < tenantIds.length; i += IN_FILTER_CHUNK) {
+            const chunk = tenantIds.slice(i, i + IN_FILTER_CHUNK);
+            const { data, error } = await supabase
+              .from("Tenants")
+              .select("id, first_name, last_name")
+              .in("id", chunk);
+            if (error) return { data: null, error };
+            rows.push(...(data ?? []));
+          }
+          return { data: rows, error: null };
+        })()
+      : Promise.resolve({
+          data: [] as { id: number; first_name: string; last_name: string }[],
+          error: null,
         }),
   ]);
-  const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
-  const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
-  const propIds = [...new Set((units ?? []).map((u) => u.property_id))];
-  const { data: props } = propIds.length
-    ? await supabase.from("Properties").select("id, property_name, color").in("id", propIds)
-    : { data: [] as { id: number; property_name: string | null; color: string }[] };
-  const propMap = new Map((props ?? []).map((p) => [p.id, p]));
+  if (unitErr) throwSb(unitErr);
+  if (tenantErr) throwSb(tenantErr);
 
-  const out = new Map<number, Lease>();
-  for (const row of rows) {
-    const unit = unitMap.get(row.unit_id);
-    const prop = unit ? propMap.get(unit.property_id) : undefined;
-    const tenant = row.primary_tenant_id != null ? tenantMap.get(row.primary_tenant_id) : undefined;
-    out.set(
-      row.id,
-      mapLease(row, {
-        unit_name: unit?.unit_label ?? null,
-        property_id: unit?.property_id ?? null,
-        property_name: prop?.property_name ?? null,
-        property_color: prop?.color ?? null,
-        tenant_first_name: tenant?.first_name ?? null,
-        tenant_last_name: tenant?.last_name ?? null,
-        tenant_email: tenant?.email ?? null,
-        tenant_phone: tenant?.mobile_phone ?? null,
-      }),
-    );
+  const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
+  const propIds = [...new Set((units ?? []).map((u) => u.property_id))];
+  const props: { id: number; property_name: string | null; color: string }[] = [];
+  for (let i = 0; i < propIds.length; i += IN_FILTER_CHUNK) {
+    const chunk = propIds.slice(i, i + IN_FILTER_CHUNK);
+    const { data, error } = await supabase
+      .from("Properties")
+      .select("id, property_name, color")
+      .in("id", chunk);
+    if (error) throwSb(error);
+    props.push(...(data ?? []));
   }
-  return out;
+  const propMap = new Map(props.map((p) => [p.id, p]));
+  const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
+
+  for (const lease of leaseRows) {
+    const unit = unitMap.get(lease.unit_id);
+    const prop = unit ? propMap.get(unit.property_id) : undefined;
+    const tenant = lease.primary_tenant_id ? tenantMap.get(lease.primary_tenant_id) : undefined;
+    extras.set(lease.id, {
+      unit_id: lease.unit_id,
+      lease_rent: Number(lease.monthly_rent),
+      rent_due_day: lease.rent_due_day,
+      unit_name: unit?.unit_label,
+      property_id: unit?.property_id,
+      property_name: prop?.property_name,
+      property_color: prop?.color,
+      tenant_id: lease.primary_tenant_id,
+      tenant_first_name: tenant?.first_name,
+      tenant_last_name: tenant?.last_name,
+    });
+  }
+  return extras;
 }
 
 export async function listCharges(period?: string): Promise<RentCharge[]> {
-  let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false });
-  if (period) q = q.eq("period", period);
-  const { data: charges, error } = await q;
-  if (error) throwSb(error);
+  const charges = await selectAllPages<Tables<"RentCharges">>((from, to) => {
+    let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false }).range(from, to);
+    if (period) q = q.eq("period", period);
+    return q;
+  });
 
-  const leaseIds = [...new Set((charges ?? []).map((c) => c.lease_id))];
-  const leaseMap = await leasesByIds(leaseIds);
+  const leaseIds = [...new Set(charges.map((c) => c.lease_id))];
+  const leaseExtras = await loadChargeLeaseExtras(leaseIds);
 
-  return (charges ?? []).map((c) => mapCharge(c, chargeExtrasFromLease(leaseMap.get(c.lease_id))));
+  return charges.map((c) => mapCharge(c, leaseExtras.get(c.lease_id)));
 }
 
 export async function generateCharges(period: string): Promise<{ created: number; period: string }> {
-  const leases = await listLeases({ status: "active" });
-  const [year, month] = period.split("-").map(Number);
+  // Slim active-lease fetch — charge gen only needs id / rent / due day (no unit/tenant enrich).
+  // Page past PostgREST max-rows so large portfolios are not silently truncated.
+  const [leases, existingRows] = await Promise.all([
+    selectAllPages<{ id: number; monthly_rent: number; rent_due_day: number }>((from, to) =>
+      supabase
+        .from("Leases")
+        .select("id, monthly_rent, rent_due_day")
+        .eq("status", "active")
+        .range(from, to),
+    ),
+    selectAllPages<{ lease_id: number }>((from, to) =>
+      supabase.from("RentCharges").select("lease_id").eq("period", period).range(from, to),
+    ),
+  ]);
+  if (!leases.length) return { created: 0, period };
+
+  const existing = new Set(existingRows.map((r) => r.lease_id));
+
   const dueDayDefault = 1;
-  let created = 0;
-  for (const lease of leases) {
-    const dueDay = Math.min(lease.rent_due_day || dueDayDefault, 28);
-    const due_date = `${period}-${String(dueDay).padStart(2, "0")}`;
-    const { data: existing } = await supabase
-      .from("RentCharges")
-      .select("id")
-      .eq("lease_id", lease.id)
-      .eq("period", period)
-      .maybeSingle();
-    if (existing) continue;
-    const { error } = await supabase.from("RentCharges").insert({
-      lease_id: lease.id,
-      period,
-      due_date,
-      amount: lease.monthly_rent,
-      amount_paid: 0,
-      status: "open",
+  const toInsert = leases
+    .filter((lease) => !existing.has(lease.id))
+    .map((lease) => {
+      const dueDay = Math.min(lease.rent_due_day || dueDayDefault, 28);
+      return {
+        lease_id: lease.id,
+        period,
+        due_date: `${period}-${String(dueDay).padStart(2, "0")}`,
+        amount: lease.monthly_rent,
+        amount_paid: 0,
+        status: "open",
+      };
     });
-    if (!error) created += 1;
-    void year;
-    void month;
-  }
-  return { created, period };
+
+  if (!toInsert.length) return { created: 0, period };
+
+  // Batch upsert: UNIQUE(lease_id, period). ignoreDuplicates is load-bearing — never switch to
+  // merge-duplicates (would overwrite amount_paid / status on races). RETURNING = inserted only.
+  const { data: inserted, error: insertErr } = await supabase
+    .from("RentCharges")
+    .upsert(toInsert, {
+      onConflict: "lease_id,period",
+      ignoreDuplicates: true,
+    })
+    .select("id");
+  if (insertErr) throwSb(insertErr);
+  return { created: (inserted ?? []).length, period };
 }
 
 export async function listPayments(chargeId: number): Promise<Payment[]> {
@@ -1670,6 +1753,160 @@ export async function listMaintenanceStatusHistory(
 
 // ── Dashboard ─────────────────────────────────────────────────────
 
+type DashboardChargeRow = {
+  amount: number | string;
+  amount_paid: number | string;
+  status: string;
+  due_date: string;
+};
+
+type DashboardLeaseRow = {
+  id: number;
+  status: string;
+  end_date: string;
+  unit_id: number;
+  primary_tenant_id: number | null;
+};
+
+type DashboardWoRow = {
+  id: number;
+  title: string;
+  priority: string;
+  status: string;
+  property_id: number | null;
+  unit_id: number | null;
+  created_at: string;
+};
+
+function chargeBalance(c: DashboardChargeRow): number {
+  return Number(c.amount) - Number(c.amount_paid);
+}
+
+async function loadDashboardAggregateRows(period: string): Promise<{
+  propertyCount: number;
+  units: { id: number; status: string }[];
+  activeLeases: DashboardLeaseRow[];
+  charges: DashboardChargeRow[];
+  workOrders: DashboardWoRow[];
+}> {
+  // Slim aggregates — avoid full listProperties/listUnits/listLeases/listCharges/listWorkOrders graphs.
+  // Page open WOs + period charges past PostgREST max-rows so money/WO KPIs stay accurate.
+  const [propertyRows, units, activeLeases, charges, workOrders] = await Promise.all([
+    selectAllPages<{ id: number }>((from, to) =>
+      supabase.from("Properties").select("id").range(from, to),
+    ),
+    selectAllPages<{ id: number; status: string }>((from, to) =>
+      supabase.from("Units").select("id, status").range(from, to),
+    ),
+    selectAllPages<DashboardLeaseRow>((from, to) =>
+      supabase
+        .from("Leases")
+        .select("id, status, end_date, unit_id, primary_tenant_id")
+        .eq("status", "active")
+        .range(from, to),
+    ),
+    selectAllPages<DashboardChargeRow>((from, to) =>
+      supabase
+        .from("RentCharges")
+        .select("amount, amount_paid, status, due_date")
+        .eq("period", period)
+        .range(from, to),
+    ),
+    selectAllPages<DashboardWoRow>((from, to) =>
+      supabase
+        .from("MaintenanceRequests")
+        .select("id, title, priority, status, property_id, unit_id, created_at")
+        .in("status", [...WORK_ORDER_OPEN_STATUSES_DB])
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    ),
+  ]);
+
+  return {
+    propertyCount: propertyRows.length,
+    units,
+    activeLeases,
+    charges,
+    workOrders,
+  };
+}
+
+async function enrichDashboardSlices(
+  recentTop: DashboardWoRow[],
+  upcomingTop: DashboardLeaseRow[],
+): Promise<{
+  unitMap: Map<number, { id: number; unit_label: string; property_id: number }>;
+  propMap: Map<number, { id: number; property_name: string | null }>;
+  tenantMap: Map<number, { id: number; first_name: string; last_name: string }>;
+}> {
+  const unitIds = [
+    ...new Set(
+      [...recentTop.map((w) => w.unit_id), ...upcomingTop.map((l) => l.unit_id)].filter(
+        (id): id is number => id != null,
+      ),
+    ),
+  ];
+  const tenantIds = [
+    ...new Set(upcomingTop.map((l) => l.primary_tenant_id).filter((id): id is number => id != null)),
+  ];
+  const knownPropIds = [
+    ...new Set(recentTop.map((w) => w.property_id).filter((id): id is number => id != null)),
+  ];
+
+  // Units + tenants + WO property ids in parallel; fill any unit-only property ids after.
+  const [
+    { data: sliceUnits, error: unitErr },
+    { data: tenants, error: tenantErr },
+    { data: knownProps, error: knownPropErr },
+  ] = await Promise.all([
+    unitIds.length
+      ? supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
+      : Promise.resolve({
+          data: [] as { id: number; unit_label: string; property_id: number }[],
+          error: null,
+        }),
+    tenantIds.length
+      ? supabase.from("Tenants").select("id, first_name, last_name").in("id", tenantIds)
+      : Promise.resolve({
+          data: [] as { id: number; first_name: string; last_name: string }[],
+          error: null,
+        }),
+    knownPropIds.length
+      ? supabase.from("Properties").select("id, property_name").in("id", knownPropIds)
+      : Promise.resolve({
+          data: [] as { id: number; property_name: string | null }[],
+          error: null,
+        }),
+  ]);
+  if (unitErr) throwSb(unitErr);
+  if (tenantErr) throwSb(tenantErr);
+  if (knownPropErr) throwSb(knownPropErr);
+
+  const unitMap = new Map((sliceUnits ?? []).map((u) => [u.id, u]));
+  const propMap = new Map((knownProps ?? []).map((p) => [p.id, p]));
+  const missingPropIds = [
+    ...new Set(
+      (sliceUnits ?? [])
+        .map((u) => u.property_id)
+        .filter((id) => !propMap.has(id)),
+    ),
+  ];
+  if (missingPropIds.length) {
+    const { data: moreProps, error: propErr } = await supabase
+      .from("Properties")
+      .select("id, property_name")
+      .in("id", missingPropIds);
+    if (propErr) throwSb(propErr);
+    for (const p of moreProps ?? []) propMap.set(p.id, p);
+  }
+
+  return {
+    unitMap,
+    propMap,
+    tenantMap: new Map((tenants ?? []).map((t) => [t.id, t])),
+  };
+}
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   const now = new Date();
   const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -1678,29 +1915,37 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const in30Iso = in30.toISOString().slice(0, 10);
   const todayIso = now.toISOString().slice(0, 10);
 
-  const [properties, units, leases, charges, workOrders] = await Promise.all([
-    listProperties(),
-    listUnits(),
-    listLeases(),
-    listCharges(period),
-    listWorkOrders(),
-  ]);
+  const { propertyCount, units, activeLeases, charges, workOrders } =
+    await loadDashboardAggregateRows(period);
 
-  const occupied = units.filter((u) => u.status === "occupied").length;
-  const vacant = units.filter((u) => u.status === "vacant").length;
-  const activeLeases = leases.filter((l) => l.status === "active");
-  const upcoming = activeLeases.filter((l) => l.end_date <= in30Iso && l.end_date >= todayIso);
+  const occupied = units.filter((u) => lower(u.status) === "occupied").length;
+  const vacant = units.filter((u) => lower(u.status) === "vacant").length;
+  // Sort by end_date (soonest first) — intentional vs old listLeases start_date order for top-5 membership.
+  const upcoming = activeLeases
+    .filter((l) => l.end_date <= in30Iso && l.end_date >= todayIso)
+    .sort((a, b) => a.end_date.localeCompare(b.end_date));
+  const upcomingTop = upcoming.slice(0, 5);
+
   const month_outstanding = charges
     .filter((c) => c.status !== "paid" && c.status !== "waived")
-    .reduce((s, c) => s + (c.amount - c.amount_paid), 0);
-  const month_collected = charges.reduce((s, c) => s + c.amount_paid, 0);
-  const overdue = charges.filter((c) => c.status === "overdue" || (c.due_date < todayIso && c.status !== "paid" && c.status !== "waived"));
-  const openWo = workOrders.filter((w) => w.status !== "closed");
-  const urgentWo = openWo.filter((w) => w.priority === "urgent");
+    .reduce((s, c) => s + chargeBalance(c), 0);
+  const month_collected = charges.reduce((s, c) => s + Number(c.amount_paid), 0);
+  const overdue = charges.filter(
+    (c) =>
+      c.status === "overdue" ||
+      (c.due_date < todayIso && c.status !== "paid" && c.status !== "waived"),
+  );
+
+  // Query already filters open statuses; normalize via shared mappers for display + urgent count.
+  const openWo = workOrders.filter((w) => workOrderStatusFromDb(w.status) !== "closed");
+  const urgentWo = openWo.filter((w) => workOrderPriorityFromDb(w.priority) === "urgent");
+  const recentTop = openWo.slice(0, 5);
+
+  const { unitMap, propMap, tenantMap } = await enrichDashboardSlices(recentTop, upcomingTop);
 
   return {
     period,
-    properties: properties.length,
+    properties: propertyCount,
     units: units.length,
     occupied,
     vacant,
@@ -1709,27 +1954,37 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     upcoming_move_outs: upcoming.length,
     month_outstanding,
     month_collected,
-    overdue_total: overdue.reduce((s, c) => s + (c.amount - c.amount_paid), 0),
+    overdue_total: overdue.reduce((s, c) => s + chargeBalance(c), 0),
     overdue_count: overdue.length,
     open_work_orders: openWo.length,
     urgent_work_orders: urgentWo.length,
-    recent_work_orders: openWo.slice(0, 5).map((w) => ({
-      id: w.id,
-      title: w.title,
-      priority: w.priority,
-      status: w.status,
-      property_name: w.property_name ?? null,
-      unit_name: w.unit_name ?? null,
-      created_at: w.created_at,
-    })),
-    upcoming_expirations: upcoming.slice(0, 5).map((l) => ({
-      id: l.id,
-      end_date: l.end_date,
-      tenant_first_name: l.tenant_first_name ?? null,
-      tenant_last_name: l.tenant_last_name ?? null,
-      unit_name: l.unit_name ?? null,
-      property_name: l.property_name ?? null,
-    })),
+    recent_work_orders: recentTop.map((w) => {
+      const u = w.unit_id != null ? unitMap.get(w.unit_id) : undefined;
+      const propId = w.property_id ?? u?.property_id;
+      const p = propId != null ? propMap.get(propId) : undefined;
+      return {
+        id: w.id,
+        title: w.title,
+        priority: workOrderPriorityFromDb(w.priority),
+        status: workOrderStatusFromDb(w.status),
+        property_name: p?.property_name ?? null,
+        unit_name: u?.unit_label ?? null,
+        created_at: w.created_at,
+      };
+    }),
+    upcoming_expirations: upcomingTop.map((l) => {
+      const u = unitMap.get(l.unit_id);
+      const p = u ? propMap.get(u.property_id) : undefined;
+      const t = l.primary_tenant_id ? tenantMap.get(l.primary_tenant_id) : undefined;
+      return {
+        id: l.id,
+        end_date: l.end_date,
+        tenant_first_name: t?.first_name ?? null,
+        tenant_last_name: t?.last_name ?? null,
+        unit_name: u?.unit_label ?? null,
+        property_name: p?.property_name ?? null,
+      };
+    }),
   };
 }
 

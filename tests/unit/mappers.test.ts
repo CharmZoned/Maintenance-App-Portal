@@ -8,8 +8,11 @@ import {
   propertyTypeToDb,
   unitReadinessToDb,
   unitStatusToDb,
+  workOrderPriorityFromDb,
   workOrderPriorityToDb,
+  workOrderStatusFromDb,
   workOrderStatusToDb,
+  WORK_ORDER_OPEN_STATUSES_DB,
 } from "@/lib/mappers";
 import type { Tables } from "@/types.supabase";
 
@@ -73,7 +76,14 @@ describe("[R4] work order field mapping (database ↔ screen)", () => {
     ["Urgent", "urgent"],
   ] as const)("priority %s round-trips", (db, ui) => {
     expect(mapWorkOrder(mr({ priority: db })).priority).toBe(ui);
+    expect(workOrderPriorityFromDb(db)).toBe(ui);
     expect(workOrderPriorityToDb(ui)).toBe(db);
+  });
+
+  test("shared fromDb helpers match mapWorkOrder and list live open statuses", () => {
+    expect(workOrderStatusFromDb("In Progress")).toBe("in_progress");
+    expect(workOrderStatusFromDb("completed")).toBe("closed");
+    expect(WORK_ORDER_OPEN_STATUSES_DB).toEqual(["Open", "Scheduled", "In Progress", "On Hold"]);
   });
 
   test("renames database columns to the names the screens use", () => {
