@@ -70,11 +70,14 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     app.isLandlord || app.isTenant || (Boolean(workOrder) && !app.isAdmin);
   const canEdit = app.canEditWorkOrders;
   const isViewer = app.isTenant || app.isLandlord;
+  // Persisted Open + form still Open — hide when admin switches status dropdown
+  // so Accept and Scheduled companion fields don't both bind assignee/date.
   const showAccept =
     Boolean(workOrder) &&
     app.canAcceptAndSchedule &&
     !isViewer &&
-    workOrder?.status === "open";
+    workOrder?.status === "open" &&
+    status === "open";
 
   useEffect(() => {
     if (!open || isViewer) return;
@@ -128,14 +131,6 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const listHistory = app.listMaintenanceStatusHistory;
   const workOrderId = workOrder?.id;
 
-  async function refreshMedia(id: number) {
-    const [p, c, h] = await Promise.all([listPhotos(id), listComments(id), listHistory(id)]);
-    setPhotos(p);
-    // Landlords: tenant_visible only (also enforced by maintenance_comments_select RLS).
-    setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
-    setHistory(h);
-  }
-
   useEffect(() => {
     if (!open || workOrderId == null) {
       setPhotos([]);
@@ -143,11 +138,24 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       setHistory([]);
       return;
     }
+    // Clear prior WO media immediately so a slow response cannot flash stale rows.
+    setPhotos([]);
+    setComments([]);
+    setHistory([]);
     let cancelled = false;
     (async () => {
       try {
         setDetailLoading(true);
-        await refreshMedia(workOrderId);
+        const [p, c, h] = await Promise.all([
+          listPhotos(workOrderId),
+          listComments(workOrderId),
+          listHistory(workOrderId),
+        ]);
+        if (cancelled) return;
+        setPhotos(p);
+        // Landlords: tenant_visible only (also enforced by maintenance_comments_select RLS).
+        setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
+        setHistory(h);
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
       } finally {
@@ -157,8 +165,15 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, workOrderId, listPhotos, listComments, listHistory, setError]);
+  }, [
+    open,
+    workOrderId,
+    listPhotos,
+    listComments,
+    listHistory,
+    setError,
+    app.isLandlord,
+  ]);
 
   const filteredUnits = useMemo(() => {
     if (!propertyId) return units;
@@ -354,7 +369,14 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         photoFiles.slice(0, 5).map((file) => app.uploadMaintenancePhoto(workOrder.id, file)),
       );
       setPhotoFiles([]);
-      await refreshMedia(workOrder.id);
+      const [p, c, h] = await Promise.all([
+        listPhotos(workOrder.id),
+        listComments(workOrder.id),
+        listHistory(workOrder.id),
+      ]);
+      setPhotos(p);
+      setComments(app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c);
+      setHistory(h);
       app.setNotice("Photos uploaded.");
     } catch (err) {
       app.setError((err as Error).message);
