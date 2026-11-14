@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardList, Plus } from "lucide-react";
 import * as data from "@/lib/data";
 import { useApp } from "@/context";
+import { queryId } from "@/lib/deep-link";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +21,13 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "withdrawn", label: "Withdrawn" },
 ];
 
-export function ApplicationsPage() {
+export function ApplicationsPage({
+  search = "",
+  replace,
+}: {
+  search?: string;
+  replace?: (to: string) => void;
+} = {}) {
   const { setError, isAdmin } = useApp();
   const [rows, setRows] = useState<Application[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -32,9 +39,12 @@ export function ApplicationsPage() {
   const loadApps = useCallback(async () => {
     setLoading(true);
     try {
-      setRows(await data.listApplications("all"));
+      const list = await data.listApplications("all");
+      setRows(list);
+      return list;
     } catch (err) {
       setError((err as Error).message);
+      return [] as Application[];
     } finally {
       setLoading(false);
     }
@@ -50,6 +60,26 @@ export function ApplicationsPage() {
       }
     })();
   }, [loadApps, setError]);
+
+  useEffect(() => {
+    const appId = queryId(search, "app");
+    if (appId == null) return;
+    let cancelled = false;
+    (async () => {
+      const list = rows.length ? rows : await loadApps();
+      if (cancelled) return;
+      const found = list.find((a) => a.id === appId);
+      if (found) {
+        setEditing(found);
+        setOpen(true);
+      }
+      replace?.("/applications");
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [search]);
 
   const visible = useMemo(
     () => (filter === "all" ? rows : rows.filter((r) => r.status === filter)),

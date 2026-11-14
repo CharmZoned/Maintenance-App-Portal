@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, Plus, Search } from "lucide-react";
 import { useApp } from "@/context";
+import { queryId } from "@/lib/deep-link";
 import { cn, daysBetween, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +20,15 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "outline",
 };
 
-export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
+export function LeasesPage({
+  navigate,
+  search = "",
+  replace,
+}: {
+  navigate: (to: string) => void;
+  search?: string;
+  replace?: (to: string) => void;
+}) {
   const app = useApp();
   const [leases, setLeases] = useState<Lease[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,14 +42,43 @@ export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
       setLoading(true);
       const list = await app.listLeases();
       setLeases(list);
+      return list;
     } catch (err) {
       app.setError((err as Error).message);
+      return [] as Lease[];
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    load();
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, []);
+
+  useEffect(() => {
+    const leaseId = queryId(search, "lease");
+    if (leaseId == null) return;
+    let cancelled = false;
+    (async () => {
+      const list = leases.length ? leases : await load();
+      if (cancelled) return;
+      const found = list.find((l) => l.id === leaseId);
+      if (found?.primary_tenant_id != null) {
+        navigate(`/tenants/${found.primary_tenant_id}`);
+      } else if (found && app.canMutatePortfolio) {
+        setEditing(found);
+        setDialogOpen(true);
+        replace?.("/leases");
+      } else {
+        replace?.("/leases");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [search]);
 
   const filtered = useMemo(() => {
     let out = leases;

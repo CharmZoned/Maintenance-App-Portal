@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Receipt, Sparkles } from "lucide-react";
 import { useApp } from "@/context";
+import { queryPeriod } from "@/lib/deep-link";
 import { addMonths, cn, currentPeriod, formatDate, formatMoney, formatPeriod } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,13 +19,26 @@ const STATUS_TONE: Record<ChargeStatus, string> = {
   waived: "bg-muted text-muted-foreground",
 };
 
-export function RentPage() {
+export function RentPage({
+  search = "",
+  replace,
+}: {
+  search?: string;
+  replace?: (to: string) => void;
+} = {}) {
   const app = useApp();
-  const [period, setPeriod] = useState<string>(currentPeriod());
+  const [period, setPeriod] = useState<string>(() => queryPeriod(search) ?? currentPeriod());
   const [charges, setCharges] = useState<RentCharge[]>([]);
   const [loading, setLoading] = useState(true);
   const [paymentTarget, setPaymentTarget] = useState<RentCharge | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  useEffect(() => {
+    const fromQuery = queryPeriod(search);
+    if (!fromQuery) return;
+    setPeriod(fromQuery);
+    replace?.("/rent");
+  }, [search, replace]);
 
   async function load() {
     try {

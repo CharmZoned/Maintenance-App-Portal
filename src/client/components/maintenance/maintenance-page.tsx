@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleAlert, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
+import { queryId } from "@/lib/deep-link";
 import { cn, formatDate, formatMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,13 @@ function tenantStatusLabel(status: WorkOrderStatus): string {
   }
 }
 
-export function MaintenancePage() {
+export function MaintenancePage({
+  search = "",
+  replace,
+}: {
+  search?: string;
+  replace?: (to: string) => void;
+} = {}) {
   const app = useApp();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,8 +69,10 @@ export function MaintenancePage() {
       setLoading(true);
       const list = await app.listWorkOrders();
       setOrders(list);
+      return list;
     } catch (err) {
       app.setError((err as Error).message);
+      return [] as WorkOrder[];
     } finally {
       setLoading(false);
     }
@@ -73,6 +82,28 @@ export function MaintenancePage() {
     load();
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, []);
+
+  // Calendar (and other) deep-links: open existing WO without touching work-order-dialog.
+  useEffect(() => {
+    const woId = queryId(search, "wo");
+    if (woId == null) return;
+    let cancelled = false;
+    (async () => {
+      const list = orders.length ? orders : await load();
+      if (cancelled) return;
+      const found = list.find((w) => w.id === woId);
+      if (found) {
+        setEditing(found);
+        setDialogOpen(true);
+        if (staffFilter !== "all" && found.status === "closed") setStaffFilter("all");
+      }
+      replace?.("/maintenance");
+    })();
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [search]);
 
   useEffect(() => {
     if (!app.isTenant) return;
