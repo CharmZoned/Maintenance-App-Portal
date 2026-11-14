@@ -36,7 +36,7 @@
 - Users: tenant link picker; approve tenant when linked
 - Tenant submit dialog: category, description, permission_to_enter, photos (toast on success)
 - Staff WO dialog: category, photos, comments (`tenant_visible` \| `internal`), status history; admin-only schedule
-- Status mapping aligned to live CHECK: `Open | Scheduled | In Progress | On Hold | Closed`
+- Status mapping aligned to live CHECK: `Open | Scheduled | In Progress | On Hold | Closed` (product SoT — keep these five; do not rename to New/Assigned/Completed; tenant UI may show Open as Submitted)
 
 ---
 
