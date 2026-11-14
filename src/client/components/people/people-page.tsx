@@ -57,6 +57,7 @@ export function PeoplePage({
     landlords,
     vendors,
     canMutatePortfolio,
+    loading: appLoading,
   } = useApp();
   const [tab, setTab] = useState<PeopleTabId>("tenants");
   const [state, setState] = useState<LoadState>("loading");
@@ -287,7 +288,13 @@ export function PeoplePage({
           <p className="text-[13px] text-muted-foreground">
             Name, contact, and portal status for each landlord.
           </p>
-          {landlords.length === 0 ? (
+          {appLoading && landlords.length === 0 ? (
+            <div className="overflow-hidden rounded-md border border-border">
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+            </div>
+          ) : landlords.length === 0 ? (
             <EmptyState
               message="No landlords yet. Create a landlord before adding properties."
               actionLabel={canMutatePortfolio ? "Add landlord" : undefined}
@@ -359,7 +366,13 @@ export function PeoplePage({
           <p className="text-[13px] text-muted-foreground">
             Vendors directory with category and contact details.
           </p>
-          {vendors.length === 0 ? (
+          {appLoading && vendors.length === 0 ? (
+            <div className="overflow-hidden rounded-md border border-border">
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+            </div>
+          ) : vendors.length === 0 ? (
             <EmptyState message="No vendors yet." />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
