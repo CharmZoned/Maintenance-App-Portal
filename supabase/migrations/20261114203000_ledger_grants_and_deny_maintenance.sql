@@ -20,7 +20,29 @@ grant select, insert, update, delete on table
   public."Applications"
   to service_role;
 
-grant usage, select on all sequences in schema public to authenticated, service_role;
+do $$
+declare
+  identity_sequence regclass;
+  qualified_table text;
+begin
+  foreach qualified_table in array array[
+    'public."Leases"',
+    'public."LeaseTenants"',
+    'public."RentCharges"',
+    'public."Payments"',
+    'public."Applications"'
+  ]
+  loop
+    select pg_get_serial_sequence(qualified_table, 'id')::regclass
+      into identity_sequence;
+    if identity_sequence is not null then
+      execute format(
+        'grant usage, select on sequence %s to authenticated, service_role',
+        identity_sequence
+      );
+    end if;
+  end loop;
+end $$;
 
 drop policy if exists leases_select on public."Leases";
 create policy leases_select on public."Leases"
