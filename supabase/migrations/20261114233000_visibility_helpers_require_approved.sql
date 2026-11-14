@@ -155,7 +155,22 @@ as $$
 $$;
 
 comment on function private.staff_can_see_tenant(bigint) is
-  'True when an approved maintenance JWT is assigned to a WO on the tenant unit.';
+  'True when an approved maintenance user is assigned to a work order on the tenant unit (via current_staff_id()).';
+
+comment on function private.staff_assigned_to_unit(bigint) is
+  'True when an approved maintenance user is assigned to a work order on the unit (via current_staff_id()).';
+
+comment on function private.staff_assigned_to_property(bigint) is
+  'True when an approved maintenance user is assigned to a work order on the property (via current_staff_id()).';
+
+comment on function private.staff_can_see_landlord(bigint) is
+  'True when an approved maintenance user is assigned to a work order on a unit owned by the landlord (via current_staff_id()).';
+
+comment on function private.tenant_can_see_staff(bigint) is
+  'True when an approved tenant submitted a work order assigned to that staff (via current_tenant_id()).';
+
+comment on function private.tenant_can_see_landlord(bigint) is
+  'True when an approved tenant lives in a unit owned by that landlord (via current_tenant_id()).';
 
 comment on function private.landlord_owns_unit(bigint) is
-  'True when an approved landlord JWT owns the unit property.';
+  'True when an approved landlord owns the property for the unit (via current_landlord_id()).';

@@ -221,6 +221,37 @@ describe("[R7] Permissions", () => {
       expect((await client.from("Staff").select("id")).data).toEqual([{ id: world.staff.worker.id }]);
     });
 
+    test("a suspended tenant loses staff and landlord visibility even with a leftover tenant_id", async () => {
+      // Regression: tenant_can_see_* used to resolve tenant_id from user_roles without
+      // account_status = 'approved'.
+      const approved = await clientFor("tenant");
+      expect((await approved.from("Staff").select("id")).data).toEqual([{ id: world.staff.worker.id }]);
+      expect((await approved.from("Landlords").select("id")).data).toEqual([{ id: world.landlord.id }]);
+
+      await sql(`update public.user_roles set account_status = 'suspended' where user_id = $1`, [
+        world.users.tenant.id,
+      ]);
+      try {
+        const [link] = await sql<{ tenant_id: number; account_status: string }>(
+          `select tenant_id, account_status from public.user_roles where user_id = $1`,
+          [world.users.tenant.id],
+        );
+        expect(link.tenant_id).toBe(world.tenants.tenant.id);
+        expect(link.account_status).toBe("suspended");
+
+        const suspended = await clientFor("tenant");
+        for (const table of ["Staff", "Landlords"] as const) {
+          const result = await suspended.from(table).select("id");
+          expect(result.error, `${table} select must succeed`).toBeNull();
+          expect(result.data).toEqual([]);
+        }
+      } finally {
+        await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [
+          world.users.tenant.id,
+        ]);
+      }
+    });
+
     test("cannot see vendors, rental applications, settings, or other users", async () => {
       const client = await clientFor("tenant");
       for (const table of ["Vendors", "Applications", "Settings"]) {
@@ -257,23 +288,25 @@ describe("[R7] Permissions", () => {
       await sql(`update public.user_roles set account_status = 'suspended' where user_id = $1`, [
         world.users.worker.id,
       ]);
-      const [link] = await sql<{ staff_id: number; account_status: string }>(
-        `select staff_id, account_status from public.user_roles where user_id = $1`,
-        [world.users.worker.id],
-      );
-      expect(link.staff_id).toBe(world.staff.worker.id);
-      expect(link.account_status).toBe("suspended");
+      try {
+        const [link] = await sql<{ staff_id: number; account_status: string }>(
+          `select staff_id, account_status from public.user_roles where user_id = $1`,
+          [world.users.worker.id],
+        );
+        expect(link.staff_id).toBe(world.staff.worker.id);
+        expect(link.account_status).toBe("suspended");
 
-      const suspended = await clientFor("worker");
-      expect((await suspended.from("Tenants").select("id")).data ?? []).toEqual([]);
-      expect((await suspended.from("Units").select("id")).data ?? []).toEqual([]);
-      expect((await suspended.from("Properties").select("id")).data ?? []).toEqual([]);
-      expect((await suspended.from("Landlords").select("id")).data ?? []).toEqual([]);
-      expect((await suspended.from("MaintenanceRequests").select("id")).data ?? []).toEqual([]);
-
-      await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [
-        world.users.worker.id,
-      ]);
+        const suspended = await clientFor("worker");
+        for (const table of ["Tenants", "Units", "Properties", "Landlords", "MaintenanceRequests"] as const) {
+          const result = await suspended.from(table).select("id");
+          expect(result.error, `${table} select must succeed`).toBeNull();
+          expect(result.data).toEqual([]);
+        }
+      } finally {
+        await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [
+          world.users.worker.id,
+        ]);
+      }
     });
 
     test("cannot read or mutate Settings (admin-only)", async () => {

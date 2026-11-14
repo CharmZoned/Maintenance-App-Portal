@@ -430,7 +430,7 @@ describe("[R3] Properties and units", () => {
            values ($1, current_date, current_date + 60, 'active', 1100)`,
           [unitId],
         ),
-      ).rejects.toThrow(/leases_one_active_per_unit|duplicate key/i);
+      ).rejects.toThrow(/leases_one_active_per_unit/i);
     });
 
     test("rejects a work order whose property_id does not match the unit", async () => {
