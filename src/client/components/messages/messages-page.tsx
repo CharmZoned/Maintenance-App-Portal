@@ -13,7 +13,7 @@ import {
   threadsFromWorkOrders,
   type MessageThread,
 } from "@/lib/messages";
-import type { MaintenanceComment, WorkOrder } from "@/types";
+import type { CommentVisibility, MaintenanceComment, WorkOrder } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -31,6 +31,17 @@ export function MessagesPage({
   replace?: (to: string) => void;
 }) {
   const app = useApp();
+  const {
+    listWorkOrders,
+    listMaintenanceComments,
+    addMaintenanceComment,
+    setError,
+    setNotice,
+    isAdmin,
+    isTenant,
+    isLandlord,
+  } = app;
+
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setLocalError] = useState<string | null>(null);
@@ -38,25 +49,31 @@ export function MessagesPage({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [comments, setComments] = useState<MaintenanceComment[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState<string | null>(null);
   const [mobileThread, setMobileThread] = useState(false);
+  const [commentVisibility, setCommentVisibility] = useState<CommentVisibility>("internal");
 
   const load = useCallback(async () => {
     setState("loading");
     setLocalError(null);
     try {
-      const list = await app.listWorkOrders();
+      const list = await listWorkOrders();
       setWorkOrders(list);
       setState("ready");
     } catch (err) {
       setLocalError((err as Error).message);
       setState("error");
-      app.setError((err as Error).message);
+      setError((err as Error).message);
     }
-  }, [app]);
+  }, [listWorkOrders, setError]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setCommentVisibility(isTenant ? "tenant_visible" : "internal");
+  }, [isTenant]);
 
   const threads = useMemo(
     () => threadsFromWorkOrders(workOrders, { openedIds }),
@@ -65,40 +82,63 @@ export function MessagesPage({
 
   const unreadCount = threads.filter((t) => t.unread).length;
 
-  // Deep-link ?thread=wo:123
+  // Deep-link ?thread=wo:123 — mark opened; clear selection when param absent.
   useEffect(() => {
     const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
     const thread = params.get("thread");
     if (thread && threads.some((t) => t.id === thread)) {
       setSelectedId(thread);
+      setOpenedIds((prev) => {
+        if (prev.has(thread)) return prev;
+        return new Set(prev).add(thread);
+      });
       setMobileThread(true);
+      return;
+    }
+    if (!thread) {
+      setSelectedId(null);
+      setMobileThread(false);
     }
   }, [search, threads]);
 
   const selected: MessageThread | undefined = threads.find((t) => t.id === selectedId);
+  const selectedRequestId =
+    selected?.kind === "request" ? selected.requestId ?? null : null;
 
   useEffect(() => {
-    if (!selected || selected.kind !== "request" || selected.requestId == null) {
-      setComments([]);
+    setComments([]);
+    setThreadError(null);
+
+    if (selectedRequestId == null) {
+      setThreadLoading(false);
       return;
     }
+
     let cancelled = false;
     setThreadLoading(true);
-    void app
-      .listMaintenanceComments(selected.requestId)
+    void listMaintenanceComments(selectedRequestId)
       .then((rows) => {
-        if (!cancelled) setComments(rows);
+        if (cancelled) return;
+        // Defense in depth — landlords only see tenant_visible (RLS also enforces).
+        setComments(
+          isLandlord ? rows.filter((row) => row.visibility === "tenant_visible") : rows,
+        );
+        setThreadError(null);
       })
       .catch((err) => {
-        if (!cancelled) app.setError((err as Error).message);
+        if (cancelled) return;
+        setComments([]);
+        setThreadError((err as Error).message);
+        setError((err as Error).message);
       })
       .finally(() => {
         if (!cancelled) setThreadLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [selected, app]);
+  }, [selectedRequestId, listMaintenanceComments, setError, isLandlord]);
 
   function openThread(thread: MessageThread) {
     setSelectedId(thread.id);
@@ -114,18 +154,32 @@ export function MessagesPage({
     if (replace) replace("/messages");
   }
 
-  async function sendComment(body: string) {
-    if (!selected?.requestId || app.isLandlord) return;
-    const created = await app.addMaintenanceComment(selected.requestId, body);
-    setComments((prev) => [...prev, created]);
-    setWorkOrders((prev) =>
-      prev.map((wo) =>
-        wo.id === selected.requestId
-          ? { ...wo, description: body, created_at: wo.created_at }
-          : wo,
-      ),
-    );
+  async function sendComment(body: string, visibility: CommentVisibility) {
+    if (selectedRequestId == null || isLandlord) return;
+    const requestId = selectedRequestId;
+    try {
+      const created = await addMaintenanceComment(requestId, body, visibility);
+      // Drop if the user switched threads while the request was in flight.
+      if (selectedRequestId !== requestId) return;
+      setComments((prev) => [...prev, created]);
+      setWorkOrders((prev) =>
+        prev.map((wo) =>
+          wo.id === requestId ? { ...wo, description: body, created_at: wo.created_at } : wo,
+        ),
+      );
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    }
   }
+
+  const currentRole = isAdmin
+    ? "admin"
+    : isTenant
+      ? "tenant"
+      : isLandlord
+        ? "landlord"
+        : "maintenance";
 
   const meta =
     state === "loading"
@@ -150,11 +204,11 @@ export function MessagesPage({
           <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         ) : null}
         <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{selected.title}</h2>
-        {selected.requestId != null ? (
+        {selectedRequestId != null ? (
           <button
             type="button"
             className="shrink-0 text-[13px] font-medium text-brand-text hover:underline"
-            onClick={() => navigate(`/maintenance?wo=${selected.requestId}`)}
+            onClick={() => navigate(`/maintenance?wo=${selectedRequestId}`)}
           >
             Open request
           </button>
@@ -166,6 +220,30 @@ export function MessagesPage({
             <SkeletonRow />
             <SkeletonRow />
           </>
+        ) : threadError ? (
+          <ErrorRetry
+            message={threadError}
+            onRetry={() => {
+              // Re-trigger effect by clearing then setting same id via noop state bump
+              setThreadError(null);
+              setComments([]);
+              setThreadLoading(true);
+              void listMaintenanceComments(selectedRequestId!)
+                .then((rows) => {
+                  setComments(
+                    isLandlord
+                      ? rows.filter((row) => row.visibility === "tenant_visible")
+                      : rows,
+                  );
+                  setThreadError(null);
+                })
+                .catch((err) => {
+                  setComments([]);
+                  setThreadError((err as Error).message);
+                })
+                .finally(() => setThreadLoading(false));
+            }}
+          />
         ) : comments.length === 0 ? (
           <EmptyState
             message={
@@ -176,15 +254,7 @@ export function MessagesPage({
           />
         ) : (
           comments.map((c) => {
-            const { label, outgoing } = commentSenderLabel(c, {
-              currentRole: app.isAdmin
-                ? "admin"
-                : app.isTenant
-                  ? "tenant"
-                  : app.isLandlord
-                    ? "landlord"
-                    : "maintenance",
-            });
+            const { label, outgoing } = commentSenderLabel(c, { currentRole });
             return (
               <div
                 key={c.id}
@@ -195,6 +265,8 @@ export function MessagesPage({
                   body={c.body}
                   time={formatMessageTime(c.created_at)}
                   side={outgoing ? "outgoing" : "incoming"}
+                  visibility={c.visibility}
+                  showVisibilityLabel={!isTenant}
                 />
               </div>
             );
@@ -202,14 +274,19 @@ export function MessagesPage({
         )}
       </div>
       <MessageComposer
-        disabled={app.isLandlord || selected.kind !== "request"}
+        disabled={isLandlord || selected.kind !== "request"}
         placeholder={
-          app.isLandlord
+          isLandlord
             ? "Landlord portal is read-only"
             : selected.kind !== "request"
               ? "Direct messages unavailable (stub)"
-              : "Write a message…"
+              : isTenant
+                ? "Message staff…"
+                : "Write a message…"
         }
+        showVisibility={!isTenant && !isLandlord && selected.kind === "request"}
+        visibility={commentVisibility}
+        onVisibilityChange={setCommentVisibility}
         onSend={sendComment}
       />
     </div>
@@ -225,13 +302,13 @@ export function MessagesPage({
       meta={meta}
       width="max-w-none"
       actions={
-        !app.isTenant && !app.isLandlord ? (
+        !isTenant && !isLandlord ? (
           <Button
             variant="brand"
             size="header"
             type="button"
             onClick={() =>
-              app.setError(
+              setNotice(
                 "New message is stubbed — start from a work order comment thread for now.",
               )
             }
@@ -254,7 +331,6 @@ export function MessagesPage({
         <EmptyState message="No request conversations yet. Comments on maintenance requests will show up here." />
       ) : (
         <div className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]">
-          {/* List — hidden on mobile when a thread is open */}
           <div
             className={
               mobileThread && selected
@@ -271,7 +347,6 @@ export function MessagesPage({
               />
             ))}
           </div>
-          {/* Thread — always on md+; full-bleed on mobile when open */}
           <div
             className={
               mobileThread && selected
