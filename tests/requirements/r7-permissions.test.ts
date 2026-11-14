@@ -353,6 +353,53 @@ describe("[R7] Permissions", () => {
     });
 
     describe("payment ledger RPCs", () => {
+      test("anon cannot EXECUTE record_payment or delete_payment (privileges + PostgREST)", async () => {
+        const [privs] = await sql<{
+          record_anon: boolean;
+          delete_anon: boolean;
+          record_auth: boolean;
+          delete_auth: boolean;
+        }>(
+          `select
+             has_function_privilege('anon', 'public.record_payment(bigint, numeric, text, text, text, timestamptz)', 'EXECUTE') as record_anon,
+             has_function_privilege('anon', 'public.delete_payment(bigint)', 'EXECUTE') as delete_anon,
+             has_function_privilege('authenticated', 'public.record_payment(bigint, numeric, text, text, text, timestamptz)', 'EXECUTE') as record_auth,
+             has_function_privilege('authenticated', 'public.delete_payment(bigint)', 'EXECUTE') as delete_auth`,
+        );
+        expect(privs).toMatchObject({
+          record_anon: false,
+          delete_anon: false,
+          record_auth: true,
+          delete_auth: true,
+        });
+
+        const anon = anonClient();
+        const record = await anon.rpc("record_payment", { p_charge_id: chargeId, p_amount: 1 });
+        expect(record.error).not.toBeNull();
+        expect(record.data).toBeNull();
+
+        const del = await anon.rpc("delete_payment", { p_payment_id: 1 });
+        expect(del.error).not.toBeNull();
+        expect(del.data).toBeNull();
+      });
+
+      test("authenticated admin path still records and deletes via the RPCs", async () => {
+        const id = await freshCharge("2099-09");
+        await signInApp("admin");
+        const afterRecord = await data.recordPayment({
+          charge_id: id,
+          amount: 125,
+          method: "cash",
+          reference: "anon-revoke-guard",
+        });
+        expect(afterRecord).toMatchObject({ amount_paid: 125, status: "partial" });
+        const payment = (await data.listPayments(id)).find((p) => p.reference === "anon-revoke-guard");
+        expect(payment).toBeTruthy();
+        const afterDelete = await data.deletePayment(payment!.id);
+        expect(afterDelete).toMatchObject({ amount_paid: 0, status: "open" });
+        expect(await sql(`select 1 from public."Payments" where charge_id = $1`, [id])).toHaveLength(0);
+      });
+
       test("deleting a payment reverses the charge balance from the remaining ledger SUM", async () => {
         const id = await freshCharge("2099-02");
         await signInApp("admin");

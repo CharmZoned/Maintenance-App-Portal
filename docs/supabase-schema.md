@@ -95,7 +95,8 @@ Charges: `lease_id`, `period` (`YYYY-MM`), `due_date`, `amount`, `amount_paid`, 
 Payments: `charge_id`, `paid_at`, `amount`, `method`, `reference`, `notes`.
 
 Same advisor gap → Phase 1 policies.  
-**Phase 1.5:** `FORCE ROW LEVEL SECURITY`; portal mutates via RPCs `public.record_payment` / `public.delete_payment` (admin-only; `amount_paid`/`status` from `SUM(Payments)`). Authenticated Payment INSERT/UPDATE/DELETE policies dropped — use RPCs only (SELECT kept for history).
+**Phase 1.5:** `FORCE ROW LEVEL SECURITY`; portal mutates via RPCs `public.record_payment` / `public.delete_payment` (admin-only; `amount_paid`/`status` from `SUM(Payments)`). Authenticated Payment INSERT/UPDATE/DELETE policies dropped — use RPCs only (SELECT kept for history).  
+**WS-S S2 #3:** `EXECUTE` revoked from `anon` (+ `PUBLIC`); re-asserted `GRANT` to `authenticated` (`20261114050000_*`). `service_role` retains EXECUTE via prior defaults. No other payment RPCs.
 
 ### `Vendors`
 
@@ -174,8 +175,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `rent_charge_status_for_paid(amount, paid, due)` | Phase 1.5: derive open/partial/paid/overdue |
 | `public.custom_access_token_hook` | JWT claims |
 | `public.refresh_property_unit_statuses` | Sync property occupancy from units |
-| `public.record_payment(...)` | Phase 1.5: admin-only atomic payment + charge update |
-| `public.delete_payment(id)` | Phase 1.5: admin-only atomic payment delete + balance recompute |
+| `public.record_payment(...)` | Phase 1.5: admin-only atomic payment + charge update; anon EXECUTE revoked (WS-S S2 #3) |
+| `public.delete_payment(id)` | Phase 1.5: admin-only atomic payment delete + balance recompute; anon EXECUTE revoked (WS-S S2 #3) |
 
 ---
 

@@ -97,7 +97,7 @@ app changes):
 
 | Area | Where | What it locks in |
 |---|---|---|
-| Payment ledger RPCs | `requirements/r7-permissions.test.ts` → **payment ledger RPCs** | `record_payment` / `delete_payment` status math, SUM-vs-drift heal, non-admin deny, direct Payment DML deny, positive amount, waived cleared by payment |
+| Payment ledger RPCs | `requirements/r7-permissions.test.ts` → **payment ledger RPCs** | `record_payment` / `delete_payment` status math, SUM-vs-drift heal, non-admin deny, anon EXECUTE deny (WS-S S2 #3), direct Payment DML deny, positive amount, waived cleared by payment |
 | Maintenance photo isolation | `requirements/r4-maintenance-requests.test.ts` → **photo isolation** | Unassigned worker cannot see/upload; landlord read-only on owned requests; photo rows not rewritable |
 | Status history append-only | same file → **status history** | Cross-tenant history isolation; prior rows never rewritten when status advances |
 | Document visibility isolation | `requirements/r5-property-documents.test.ts` → **visibility isolation** | Tenant/landlord/staff storage + row ACL; other-property deny; pending sees nothing |
