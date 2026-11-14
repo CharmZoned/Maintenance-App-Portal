@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Receipt, Sparkles } from "lucide-react";
 import { useApp } from "@/context";
 import { queryPeriod, type DeepLinkProps } from "@/lib/deep-link";
+import { feedbackForGenerateCharges } from "@/lib/generate-charges-feedback";
 import { addMonths, cn, currentPeriod, formatDate, formatMoney, formatPeriod } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -73,9 +73,17 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
     try {
       const res = await app.generateCharges(period);
       await load();
-      app.setError(res.created ? null : "All active leases already have a charge for this period.");
+      // Soft-fail UX: success / already-covered → NoticeBanner; hard insert errors → ErrorBanner.
+      const feedback = feedbackForGenerateCharges(
+        { created: res.created, periodLabel: formatPeriod(period) },
+        null,
+      );
+      app.setError(null);
+      app.setNotice(feedback.message);
     } catch (err) {
-      app.setError((err as Error).message);
+      const feedback = feedbackForGenerateCharges(null, err);
+      app.setNotice(null);
+      app.setError(feedback.message);
     } finally {
       setGenerating(false);
     }
