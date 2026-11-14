@@ -25,9 +25,9 @@ declare
   identity_sequence regclass;
   qualified_table text;
 begin
+  -- LeaseTenants has a composite PK (no identity id sequence).
   foreach qualified_table in array array[
     'public."Leases"',
-    'public."LeaseTenants"',
     'public."RentCharges"',
     'public."Payments"',
     'public."Applications"'

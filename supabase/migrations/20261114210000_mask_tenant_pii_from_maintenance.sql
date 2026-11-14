@@ -79,7 +79,13 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not private.is_admin() then
+  -- Allow admin JWTs, service_role, and SQL-editor/emulator (no JWT) seeds.
+  -- Reject every other authenticated persona (maintenance, landlord, tenant, pending).
+  if not (
+    private.is_admin()
+    or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
+    or ((select auth.uid()) is null and coalesce(auth.jwt() ->> 'role', '') = '')
+  ) then
     raise exception 'forbidden: only admin may insert tenants';
   end if;
 
@@ -132,7 +138,11 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not private.is_admin() then
+  if not (
+    private.is_admin()
+    or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
+    or ((select auth.uid()) is null and coalesce(auth.jwt() ->> 'role', '') = '')
+  ) then
     raise exception 'forbidden: only admin may update tenants';
   end if;
 
@@ -178,7 +188,11 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not private.is_admin() then
+  if not (
+    private.is_admin()
+    or coalesce(auth.jwt() ->> 'role', '') = 'service_role'
+    or ((select auth.uid()) is null and coalesce(auth.jwt() ->> 'role', '') = '')
+  ) then
     raise exception 'forbidden: only admin may delete tenants';
   end if;
   delete from private.tenants where id = old.id;

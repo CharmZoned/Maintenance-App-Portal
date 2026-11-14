@@ -103,6 +103,7 @@ export class EmulatorDb {
       `select format('%I.%I', schemaname, tablename) as t
          from pg_tables
         where schemaname = 'public'
+           or schemaname = 'private'
            or (schemaname = 'auth' and tablename = 'users')
            or (schemaname = 'storage' and tablename = 'objects')`,
     );
