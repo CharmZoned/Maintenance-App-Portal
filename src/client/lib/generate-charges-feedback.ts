@@ -4,12 +4,19 @@ export type GenerateChargesFeedback =
   | { kind: "notice"; message: string }
   | { kind: "error"; message: string };
 
+export type GenerateChargesResultInput = {
+  created: number;
+  periodLabel: string;
+  /** Active leases considered by generateCharges (0 ⇒ empty portfolio). */
+  activeLeases: number;
+};
+
 /**
  * Map generateCharges success / soft outcomes / thrown failures to the
  * portal’s NoticeBanner (green) or ErrorBanner (red) toast slots.
  */
 export function feedbackForGenerateCharges(
-  result: { created: number; periodLabel: string } | null,
+  result: GenerateChargesResultInput | null,
   error: unknown,
 ): GenerateChargesFeedback {
   if (error != null) {
@@ -19,12 +26,20 @@ export function feedbackForGenerateCharges(
         : "Could not generate charges.";
     return { kind: "error", message };
   }
-  const created = result?.created ?? 0;
-  if (created > 0) {
-    const noun = created === 1 ? "charge" : "charges";
+  if (!result) {
+    return { kind: "error", message: "Could not generate charges." };
+  }
+  if (result.created > 0) {
+    const noun = result.created === 1 ? "charge" : "charges";
     return {
       kind: "notice",
-      message: `Created ${created} ${noun} for ${result!.periodLabel}.`,
+      message: `Created ${result.created} ${noun} for ${result.periodLabel}.`,
+    };
+  }
+  if (result.activeLeases === 0) {
+    return {
+      kind: "notice",
+      message: "No active leases to charge for this period.",
     };
   }
   return {
