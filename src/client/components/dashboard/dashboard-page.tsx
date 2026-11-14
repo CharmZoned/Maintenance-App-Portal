@@ -11,6 +11,7 @@ import {
   StatusChip,
 } from "@/components/patterns";
 import * as data from "@/lib/data";
+import { toCalendarDay } from "@/lib/calendar-events";
 import {
   formatActivityStamp,
   isOpenRequest,
@@ -18,21 +19,45 @@ import {
   requestNextStep,
   toRequestStatus,
 } from "@/lib/request-status";
-import { cn } from "@/lib/utils";
-import type { DashboardSummary, Property, WorkOrder } from "@/types";
+import { cn, toIsoDate } from "@/lib/utils";
+import type { DashboardSummary, Property, WorkOrder, WorkOrderPriority } from "@/types";
 import { WorkOrderDialog } from "@/components/maintenance/work-order-dialog";
 
 /**
  * Admin U5 Dashboard (Figma 04 Homes) — needs-attention counters, open requests,
- * upcoming (replaces calendar tiles), recent activity stub, portfolio strip.
+ * upcoming (calendar visits live here), recent activity stub, portfolio strip.
  * No rent / lease KPI tiles per Figma Q1 note.
  */
+
+function priorityRank(priority: WorkOrderPriority): number {
+  if (priority === "urgent") return 0;
+  if (priority === "high") return 1;
+  return 2;
+}
+
+/** Emergency/high first, then oldest created_at. Equal timestamps → 0. */
+function compareOpenForDashboard(a: WorkOrder, b: WorkOrder): number {
+  const pr = priorityRank(a.priority) - priorityRank(b.priority);
+  if (pr !== 0) return pr;
+  if (a.created_at === b.created_at) return 0;
+  return a.created_at < b.created_at ? -1 : 1;
+}
+
+function addLocalDays(isoDay: string, days: number): string {
+  const [y, m, d] = isoDay.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + days);
+  return toIsoDate(dt);
+}
+
 export function DashboardPage({ navigate }: { navigate: (to: string) => void }) {
   const app = useApp();
   const { getDashboardSummary, listWorkOrders, properties, setError, isAdmin } = app;
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [orders, setOrders] = useState<WorkOrder[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState(0);
+  /** null = never loaded / failed (show —); keep last good count on refresh failure. */
+  const [pendingApprovals, setPendingApprovals] = useState<number | null>(null);
+  const [pendingFailed, setPendingFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -44,19 +69,33 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
       setLoading(true);
       setLoadError(null);
       try {
-        const [dash, woList, accounts] = await Promise.all([
+        const [dash, woList] = await Promise.all([
           getDashboardSummary(),
           listWorkOrders(),
-          isAdmin
-            ? data.listUserAccounts().catch(() => [] as data.UserAccountRow[])
-            : Promise.resolve([] as data.UserAccountRow[]),
         ]);
         if (cancelled) return;
         setSummary(dash);
         setOrders(woList);
-        setPendingApprovals(
-          accounts.filter((a) => a.account_status === "pending").length,
-        );
+
+        if (isAdmin) {
+          try {
+            // Prefer listing accounts (RPC) over a direct user_roles count — RLS only
+            // exposes own row to authenticated; admin queue is via RPC.
+            const accounts = await data.listUserAccounts();
+            if (!cancelled) {
+              setPendingApprovals(
+                accounts.filter((a) => a.account_status === "pending").length,
+              );
+              setPendingFailed(false);
+            }
+          } catch {
+            // Do not coerce to 0 — keep previous count and flag the tile.
+            if (!cancelled) setPendingFailed(true);
+          }
+        } else if (!cancelled) {
+          setPendingApprovals(0);
+          setPendingFailed(false);
+        }
       } catch (err) {
         if (!cancelled) {
           const message = (err as Error).message;
@@ -73,7 +112,12 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
   }, [getDashboardSummary, listWorkOrders, setError, isAdmin, reloadKey]);
 
   const openOrders = useMemo(
-    () => orders.filter(isOpenRequest).slice(0, 6),
+    () =>
+      orders
+        .filter(isOpenRequest)
+        .slice()
+        .sort(compareOpenForDashboard)
+        .slice(0, 6),
     [orders],
   );
 
@@ -86,7 +130,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
   );
 
   const overdueFollowUps = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = toIsoDate(new Date());
     return orders.filter(
       (o) =>
         o.status === "on_hold" &&
@@ -96,10 +140,21 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
   }, [orders]);
 
   const upcoming = useMemo(() => {
+    const today = toIsoDate(new Date());
+    const until = addLocalDays(today, 14);
     return orders
-      .filter((o) => o.scheduled_at && isOpenRequest(o))
+      .filter((o) => {
+        if (!isOpenRequest(o) || !o.scheduled_at) return false;
+        const day = toCalendarDay(o.scheduled_at);
+        return day != null && day >= today && day <= until;
+      })
       .slice()
-      .sort((a, b) => (a.scheduled_at! < b.scheduled_at! ? -1 : 1))
+      .sort((a, b) => {
+        const da = a.scheduled_at!;
+        const db = b.scheduled_at!;
+        if (da === db) return 0;
+        return da < db ? -1 : 1;
+      })
       .slice(0, 5);
   }, [orders]);
 
@@ -135,6 +190,15 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
     );
   }
 
+  const pendingDisplay =
+    pendingFailed && pendingApprovals == null
+      ? "—"
+      : pendingFailed && pendingApprovals != null
+        ? String(pendingApprovals)
+        : pendingApprovals == null
+          ? "—"
+          : String(pendingApprovals);
+
   return (
     <PageShell
       title="Dashboard"
@@ -148,9 +212,25 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
       }
     >
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Counter value={unassigned} label="Unassigned requests" />
-        <Counter value={pendingApprovals} label="Awaiting approval" />
-        <Counter value={overdueFollowUps} label="Overdue follow-ups" />
+        <Counter
+          value={unassigned}
+          label="Unassigned requests"
+          muted={unassigned === 0}
+          onClick={() => navigate("/maintenance")}
+        />
+        <Counter
+          value={pendingDisplay}
+          label="Awaiting approval"
+          muted={pendingDisplay === "0" || pendingDisplay === "—"}
+          tone={pendingFailed ? "warn" : undefined}
+          onClick={() => navigate("/users")}
+        />
+        <Counter
+          value={overdueFollowUps}
+          label="Overdue follow-ups"
+          muted={overdueFollowUps === 0}
+          onClick={() => navigate("/maintenance")}
+        />
         {/* Stub: unread messages — Messages group owns inbox counts. */}
         <Counter value={0} label="Unread messages" muted />
       </div>
@@ -158,7 +238,16 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="space-y-4">
           <section className="rounded-md border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold text-foreground">Open requests</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-foreground">Open requests</h2>
+              <button
+                type="button"
+                onClick={() => navigate("/maintenance")}
+                className="text-xs font-medium text-brand-text hover:underline"
+              >
+                View all
+              </button>
+            </div>
             {openOrders.length === 0 ? (
               <EmptyState message="No open requests right now." className="py-8" />
             ) : (
@@ -166,29 +255,17 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
                 {openOrders.map((wo) => {
                   const status = toRequestStatus(wo);
                   const pri = priorityLevel(wo.priority);
+                  const next = requestNextStep(wo);
                   const unitBit = wo.unit_name ? ` · Unit ${wo.unit_name}` : "";
                   return (
-                    <div key={wo.id} className="border-b border-border last:border-b-0">
-                      {pri === "Emergency" ? (
-                        <div className="px-4 pt-2">
-                          <PriorityChip level="Emergency" />
-                        </div>
-                      ) : null}
-                      <ListRow
-                        title={`${wo.title}${unitBit}`}
-                        context={[
-                          wo.property_name,
-                          status,
-                          requestNextStep(wo),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                        status={
-                          <StatusChip status={status} nextStep={requestNextStep(wo)} />
-                        }
-                        onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
-                      />
-                    </div>
+                    <ListRow
+                      key={wo.id}
+                      title={`${wo.title}${unitBit}`}
+                      context={[wo.property_name].filter(Boolean).join(" · ")}
+                      priority={pri ? <PriorityChip level={pri} /> : undefined}
+                      status={<StatusChip status={status} nextStep={next} />}
+                      onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
+                    />
                   );
                 })}
               </div>
@@ -196,11 +273,12 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
           </section>
 
           <section className="rounded-md border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold text-foreground">Upcoming</h2>
+            {/* Calendar D5 visits surface here as Upcoming · next 14 days. */}
+            <h2 className="text-sm font-semibold text-foreground">
+              Upcoming · next 14 days
+            </h2>
             {upcoming.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">
-                No scheduled visits. (Replaces Calendar D5.)
-              </p>
+              <p className="mt-3 text-sm text-muted-foreground">No scheduled visits.</p>
             ) : (
               <ul className="mt-3 space-y-3">
                 {upcoming.map((wo) => (
@@ -226,7 +304,6 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
                 ))}
               </ul>
             )}
-            <p className="mt-3 text-[11px] text-muted-foreground">Replaces Calendar (D5)</p>
           </section>
         </div>
 
@@ -297,10 +374,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
 
       <WorkOrderDialog
         open={createOpen}
-        onOpenChange={(o) => {
-          setCreateOpen(o);
-          if (!o) setReloadKey((k) => k + 1);
-        }}
+        onOpenChange={setCreateOpen}
         onSaved={() => setReloadKey((k) => k + 1)}
       />
     </PageShell>
@@ -311,16 +385,25 @@ function Counter({
   value,
   label,
   muted = false,
+  tone,
+  onClick,
 }: {
-  value: number;
+  value: number | string;
   label: string;
   muted?: boolean;
+  tone?: "warn";
+  onClick?: () => void;
 }) {
+  const Comp = onClick ? "button" : "div";
   return (
-    <div
+    <Comp
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
       className={cn(
-        "flex flex-col gap-1.5 rounded-md border border-border p-4",
+        "flex flex-col gap-1.5 rounded-md border border-border p-4 text-left",
         muted ? "bg-muted text-faint" : "bg-card text-foreground",
+        tone === "warn" && "border-warning/40",
+        onClick && "transition-colors hover:bg-muted/60",
       )}
     >
       <p className="text-[28px] font-semibold leading-[38px]">{value}</p>
@@ -332,6 +415,6 @@ function Counter({
       >
         {label}
       </p>
-    </div>
+    </Comp>
   );
 }

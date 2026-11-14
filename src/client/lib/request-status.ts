@@ -84,12 +84,18 @@ export function priorityLevel(priority: WorkOrderPriority): "Emergency" | "High"
 /** Human "Today 9:12 am" / "Yesterday" / short date for activity stamps. */
 export function formatActivityStamp(iso: string | null | undefined): string {
   if (!iso) return "";
-  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+  const d = new Date(dateOnly ? `${iso}T00:00:00` : iso);
   if (Number.isNaN(d.getTime())) return iso;
   const now = new Date();
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const dayDiff = Math.round((startToday.getTime() - startThat.getTime()) / 86_400_000);
+  if (dateOnly) {
+    if (dayDiff === 0) return "Today";
+    if (dayDiff === 1) return "Yesterday";
+    return formatDate(iso, { weekday: "short", day: "numeric", month: "short" });
+  }
   const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   if (dayDiff === 0) return `Today ${time}`;
   if (dayDiff === 1) return "Yesterday";

@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   compareCreatedDesc,
+  formatActivityStamp,
   isOpenRequest,
   priorityLevel,
   requestNextStep,
@@ -33,6 +34,14 @@ function wo(partial: Partial<WorkOrder>): WorkOrder {
 }
 
 describe("request-status helpers", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 14, 15, 30, 0)); // local Nov 14 2026
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("maps DB status + assignee to Figma RequestStatus", () => {
     expect(toRequestStatus(wo({ status: "open", assigned_staff_id: null }))).toBe("New");
     expect(toRequestStatus(wo({ status: "open", assigned_staff_id: 3 }))).toBe("Assigned");
@@ -70,6 +79,12 @@ describe("request-status helpers", () => {
         wo({ status: "closed", resolution_notes: "Sealed and tested" }),
       ),
     ).toBe("Sealed and tested");
+  });
+
+  it("formats date-only schedules without a midnight clock", () => {
+    expect(formatActivityStamp("2026-11-14")).toBe("Today");
+    expect(formatActivityStamp("2026-11-13")).toBe("Yesterday");
+    expect(formatActivityStamp("2026-11-17")).toMatch(/17/);
   });
 
   it("sorts newest first and ties on id", () => {
