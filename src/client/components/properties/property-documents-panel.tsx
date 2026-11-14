@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PROPERTY_DOCUMENT_ACCEPT } from "@/lib/data";
 import type { DocumentVisibility, PropertyDocument, Unit } from "@/types";
 
 const VISIBILITY_LABEL: Record<DocumentVisibility, string> = {
@@ -278,6 +279,7 @@ function UploadDocumentDialog({
             <Input
               id="doc-file"
               type="file"
+              accept={PROPERTY_DOCUMENT_ACCEPT}
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
           </div>
