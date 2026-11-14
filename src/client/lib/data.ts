@@ -1598,7 +1598,8 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
   const rows = data ?? [];
   if (rows.length === 0) return [];
 
-  // One batch sign instead of N× createSignedUrl (WO dialog open path).
+  // Prefer one batch sign; fall back per path if a batch entry is missing
+  // (older Storage hosts / incomplete responses).
   const paths = rows.map((row) => row.storage_path);
   const { data: signedList } = await supabase.storage
     .from(PHOTO_BUCKET)
@@ -1607,6 +1608,15 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
   for (const entry of signedList ?? []) {
     if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
   }
+  await Promise.all(
+    rows.map(async (row) => {
+      if (urlByPath.has(row.storage_path)) return;
+      const { data: signed } = await supabase.storage
+        .from(PHOTO_BUCKET)
+        .createSignedUrl(row.storage_path, 3600);
+      if (signed?.signedUrl) urlByPath.set(row.storage_path, signed.signedUrl);
+    }),
+  );
 
   return rows.map((row) => ({
     id: row.id,
