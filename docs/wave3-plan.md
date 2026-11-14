@@ -13,7 +13,7 @@
 | **WS-P** Zillow research | **NO** — leave deferred |
 | **WS-Q** website visual | **NO** — leave deferred |
 | **Portal hosting + URL** (**roadmap #3** = hygiene **#13**) | **Out of Wave 3** — deferred until owner provides the link (live landlordgopher.com still old WordPress; Next.js not launched). ≠ hygiene #3 |
-| Status labels (hygiene #11) | **Open** |
+| Status labels (hygiene #11) | **Keep live five** — Open / Scheduled / In Progress / On Hold / Closed (tenant shows Open as Submitted). No CHECK rename. |
 
 ## Streams (staffed)
 
@@ -33,7 +33,7 @@
 7 → **WS-S S3** (leaked-password + min length) — parallel OK  
 8 → **WS-I** (staging + history only)  
 9 → **WS-R**  
-11 → owner decision, then small FE  
+11 → **done (docs)** — keep live five statuses (no New/Assigned/Completed rename)  
 12 web push → **WS-L hold**  
 13 hosting/deploy + portal URL + website env → **deferred-work** (not Wave 3)
 

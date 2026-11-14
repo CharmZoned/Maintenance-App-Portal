@@ -128,6 +128,50 @@ describe("[R5] Property documents", () => {
       expect(doc).toMatchObject({ visibility: "staff", uploaded_by_role: "maintenance" });
     });
 
+    test("staff cannot upload/update/remove storage without a matching PropertyDocuments path", async () => {
+      await signInApp("admin");
+      const client = await clientFor("admin");
+      const unbound = `${world.property.id}/orphan-unbound-${Date.now()}.pdf`;
+
+      const up = await client.storage.from("property-documents").upload(unbound, pdfFile("orphan.pdf"), {
+        contentType: "application/pdf",
+      });
+      expect(up.error, "INSERT without a metadata row must be denied").not.toBeNull();
+      expect(
+        await sql(`select 1 from storage.objects where bucket_id = 'property-documents' and name = $1`, [unbound]),
+      ).toHaveLength(0);
+
+      // Seed an object via SQL (bypass path-bind), then delete the metadata row → orphan path.
+      const orphan = `${world.property.id}/orphan-after-row-${Date.now()}.pdf`;
+      await sql(
+        `insert into public."PropertyDocuments"
+           (property_id, title, file_name, content_type, byte_size, storage_path, visibility, uploaded_by_user_id)
+         values ($1, 'Orphan seed', 'orphan.pdf', 'application/pdf', 12, $2, 'staff', $3)`,
+        [world.property.id, orphan, world.users.admin.id],
+      );
+      const seeded = await client.storage.from("property-documents").upload(orphan, pdfFile("orphan.pdf"), {
+        contentType: "application/pdf",
+      });
+      expect(seeded.error).toBeNull();
+      await sql(`delete from public."PropertyDocuments" where storage_path = $1`, [orphan]);
+
+      const overwritten = await client.storage
+        .from("property-documents")
+        .upload(orphan, pdfFile("overwrite.pdf"), { contentType: "application/pdf", upsert: true });
+      expect(overwritten.error, "UPDATE/upsert on unbound path must be denied").not.toBeNull();
+
+      const removed = await client.storage.from("property-documents").remove([orphan]);
+      // remove may report success with empty list or error; object must remain until SQL cleanup.
+      const stillThere = await sql(
+        `select 1 from storage.objects where bucket_id = 'property-documents' and name = $1`,
+        [orphan],
+      );
+      expect(stillThere, "DELETE on unbound/orphan path must be denied by path-bind").toHaveLength(1);
+      expect(removed.error != null || (removed.data?.length ?? 0) === 0).toBe(true);
+
+      await sql(`delete from storage.objects where bucket_id = 'property-documents' and name = $1`, [orphan]);
+    });
+
     test("deleting a document removes the file as well as the listing", async () => {
       const doc = await uploadAsAdmin("Temporary notice");
       const stored = () => sql(`select 1 from storage.objects where bucket_id = 'property-documents' and name = $1`, [doc.storage_path]);

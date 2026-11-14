@@ -9,6 +9,7 @@ import { propertyToInsert, unitReadinessToDb, unitStatusToDb } from "@/lib/mappe
 import {
   clientFor,
   expectDenied,
+  pdfFile,
   resetWorld,
   serviceClient,
   signInApp,
@@ -308,6 +309,65 @@ describe("[R3] Properties and units", () => {
       await signInApp("admin");
       await data.deleteUnit(Number(id));
       expect(await sql(`select 1 from public."Units" where id = $1`, [id])).toHaveLength(0);
+    });
+
+    test("updateUnit changes name and status fields the dialog mutates", async () => {
+      const [{ id }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status, bedrooms, market_rent)
+         values ($1, 'Edit-Me', 'Vacant', 1, 900) returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const updated = await data.updateUnit(Number(id), {
+        name: "Edit-Me-Renamed",
+        status: "occupied",
+        bedrooms: 2,
+        market_rent: 1250,
+        notes: "Painted",
+      });
+      expect(updated).toMatchObject({
+        name: "Edit-Me-Renamed",
+        status: "occupied",
+        bedrooms: 2,
+        market_rent: 1250,
+        notes: "Painted",
+      });
+    });
+
+    test("deleteProperty removes the property and cascaded property-documents storage", async () => {
+      await signInApp("admin");
+      const property = await data.createProperty({
+        name: "Delete-Me Court",
+        landlord_id: world.otherLandlord.id,
+        type: "single_family",
+        address: "99 Gone St",
+        city: "Baltimore",
+        state: "MD",
+        zip: "21201",
+      });
+      const doc = await data.uploadPropertyDocument({
+        property_id: property.id,
+        title: "Doomed lease",
+        file: pdfFile("doomed.pdf"),
+        visibility: "staff",
+      });
+      expect(
+        await sql(`select 1 from storage.objects where bucket_id = 'property-documents' and name = $1`, [
+          doc.storage_path,
+        ]),
+      ).toHaveLength(1);
+
+      await data.deleteProperty(property.id);
+
+      expect(await sql(`select 1 from public."Properties" where id = $1`, [property.id])).toHaveLength(0);
+      expect(await sql(`select 1 from public."PropertyDocuments" where property_id = $1`, [property.id])).toHaveLength(
+        0,
+      );
+      expect(
+        await sql(`select 1 from storage.objects where bucket_id = 'property-documents' and name = $1`, [
+          doc.storage_path,
+        ]),
+      ).toHaveLength(0);
     });
   });
 
