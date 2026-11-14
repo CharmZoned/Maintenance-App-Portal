@@ -42,7 +42,7 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
-  { id: "calendar", label: "Calendar", href: "/calendar", icon: "clipboard-list", color: "blue" },
+  { id: "calendar", label: "Calendar", href: "/calendar", icon: "calendar-days", color: "blue" },
 ];
 /** Admin-only: Users queue + rental Applications (applicant income PII). */
 const ADMIN_ITEMS: AppNavItem[] = [

@@ -34,19 +34,39 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
     replace?.("/rent");
   }, [search, replace]);
 
+  const listCharges = app.listCharges;
+  const setError = app.setError;
+
   async function load() {
     try {
       setLoading(true);
-      const list = await app.listCharges(period);
+      const list = await listCharges(period);
       setCharges(list);
     } catch (err) {
-      app.setError((err as Error).message);
+      setError((err as Error).message);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const list = await listCharges(period);
+        if (cancelled) return;
+        setCharges(list);
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [period, listCharges, setError]);
 
   async function generate() {
     setGenerating(true);

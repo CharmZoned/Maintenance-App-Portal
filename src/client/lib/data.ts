@@ -988,6 +988,60 @@ async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   });
 }
 
+/** Enrich only the leases referenced by charge rows (avoid full listLeases on every period). */
+async function leasesByIds(leaseIds: number[]): Promise<Map<number, Lease>> {
+  if (!leaseIds.length) return new Map();
+  const { data: leases, error } = await supabase.from("Leases").select("*").in("id", leaseIds);
+  if (error) throwSb(error);
+  const rows = leases ?? [];
+  const unitIds = [...new Set(rows.map((l) => l.unit_id))];
+  const tenantIds = [...new Set(rows.map((l) => l.primary_tenant_id).filter(Boolean))] as number[];
+  const [{ data: units }, { data: tenants }] = await Promise.all([
+    unitIds.length
+      ? supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
+      : Promise.resolve({ data: [] as { id: number; unit_label: string; property_id: number }[] }),
+    tenantIds.length
+      ? supabase.from("Tenants").select("id, first_name, last_name, email, mobile_phone").in("id", tenantIds)
+      : Promise.resolve({
+          data: [] as {
+            id: number;
+            first_name: string;
+            last_name: string;
+            email: string | null;
+            mobile_phone: string | null;
+          }[],
+        }),
+  ]);
+  const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
+  const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
+  const propIds = [...new Set((units ?? []).map((u) => u.property_id))];
+  const { data: props } = propIds.length
+    ? await supabase.from("Properties").select("id, property_name, color").in("id", propIds)
+    : { data: [] as { id: number; property_name: string | null; color: string }[] };
+  const propMap = new Map((props ?? []).map((p) => [p.id, p]));
+
+  const out = new Map<number, Lease>();
+  for (const row of rows) {
+    const unit = unitMap.get(row.unit_id);
+    const prop = unit ? propMap.get(unit.property_id) : undefined;
+    const tenant = row.primary_tenant_id != null ? tenantMap.get(row.primary_tenant_id) : undefined;
+    out.set(
+      row.id,
+      mapLease(row, {
+        unit_name: unit?.unit_label ?? null,
+        property_id: unit?.property_id ?? null,
+        property_name: prop?.property_name ?? null,
+        property_color: prop?.color ?? null,
+        tenant_first_name: tenant?.first_name ?? null,
+        tenant_last_name: tenant?.last_name ?? null,
+        tenant_email: tenant?.email ?? null,
+        tenant_phone: tenant?.mobile_phone ?? null,
+      }),
+    );
+  }
+  return out;
+}
+
 export async function listCharges(period?: string): Promise<RentCharge[]> {
   let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false });
   if (period) q = q.eq("period", period);
@@ -995,8 +1049,7 @@ export async function listCharges(period?: string): Promise<RentCharge[]> {
   if (error) throwSb(error);
 
   const leaseIds = [...new Set((charges ?? []).map((c) => c.lease_id))];
-  const leases = leaseIds.length ? await listLeases() : [];
-  const leaseMap = new Map(leases.map((l) => [l.id, l]));
+  const leaseMap = await leasesByIds(leaseIds);
 
   return (charges ?? []).map((c) => mapCharge(c, chargeExtrasFromLease(leaseMap.get(c.lease_id))));
 }

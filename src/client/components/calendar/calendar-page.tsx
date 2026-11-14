@@ -117,8 +117,9 @@ export function CalendarPage({ navigate }: { navigate: (to: string) => void }) {
   });
 
   const dayEvents = selectedDay ? (byDay.get(selectedDay) ?? []) : [];
-  const monthCount = [...byDay.values()].reduce((n, list) => n + list.length, 0);
-  const loading = catalogLoading && workOrders.length === 0 && leases.length === 0;
+  let monthCount = 0;
+  for (const list of byDay.values()) monthCount += list.length;
+  const loading = catalogLoading;
 
   function shiftMonth(delta: number) {
     setCursor((c) => {

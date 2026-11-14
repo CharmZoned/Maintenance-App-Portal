@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleAlert, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
-import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
+import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import { cn, formatDate, formatMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -102,26 +103,20 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
   }, [flight]);
 
   // Calendar deep-links: open existing WO without touching work-order-dialog (WS-K).
-  useEffect(() => {
-    const woId = queryId(search, "wo");
-    if (woId == null) return;
-    let cancelled = false;
-    (async () => {
-      const list = orders.length ? orders : await flight.load();
-      if (cancelled) return;
-      const found = list.find((w) => w.id === woId);
-      if (found) {
-        setEditing(found);
-        setDialogOpen(true);
-        if (staffFilter !== "all" && found.status === "closed") setStaffFilter("all");
-      }
+  useDeepLinkOpen({
+    search,
+    param: "wo",
+    items: orders,
+    loadList: () => flight.load(),
+    onList: setOrders,
+    onFound: (found) => {
+      setEditing(found);
+      setDialogOpen(true);
+      setStaffFilter((prev) => (prev !== "all" && found.status === "closed" ? "all" : prev));
       replace?.("/maintenance");
-    })();
-    return () => {
-      cancelled = true;
-    };
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [search]);
+    },
+    onMiss: () => replace?.("/maintenance"),
+  });
 
   useEffect(() => {
     if (!app.isTenant) return;

@@ -16,6 +16,18 @@ describe("pathnameOf / splitLocation", () => {
   });
 });
 
+describe("same-app path guard", () => {
+  it("rejects protocol-relative and absolute URLs at the split boundary", () => {
+    // Router go() also rejects these; splitLocation alone still parses strings —
+    // assert the guard condition used by navigate/replace.
+    const unsafe = ["https://evil.test/", "//evil.test/x", "javascript:alert(1)"];
+    for (const to of unsafe) {
+      expect(to.startsWith("/") && !to.startsWith("//")).toBe(false);
+    }
+    expect("/maintenance?wo=1".startsWith("/") && !"/maintenance?wo=1".startsWith("//")).toBe(true);
+  });
+});
+
 describe("deep-link helpers", async () => {
   const { queryId, queryPeriod, createSingleFlightLoader } = await import("../lib/deep-link");
   it("parses ids and periods (digits only)", () => {

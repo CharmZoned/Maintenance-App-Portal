@@ -35,7 +35,13 @@ export const CALENDAR_KIND_LABEL: Record<CalendarEventKind, string> = {
  */
 export function toCalendarDay(iso: string | null | undefined): string | null {
   if (!iso) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    // Reject impossible calendar dates (e.g. 2026-02-31).
+    const [y, m, day] = iso.split("-").map(Number);
+    const d = new Date(y, m - 1, day);
+    if (d.getFullYear() !== y || d.getMonth() !== m - 1 || d.getDate() !== day) return null;
+    return iso;
+  }
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return toIsoDate(d);

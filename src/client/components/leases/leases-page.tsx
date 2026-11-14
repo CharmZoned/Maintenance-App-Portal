@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, Plus, Search } from "lucide-react";
 import { useApp } from "@/context";
-import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
+import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import { cn, daysBetween, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,32 +77,32 @@ export function LeasesPage({
     };
   }, [flight]);
 
-  useEffect(() => {
-    const leaseId = queryId(search, "lease");
-    if (leaseId == null) return;
-    let cancelled = false;
-    (async () => {
-      const list = leases.length ? leases : await flight.load();
-      if (cancelled) return;
-      const found = list.find((l) => l.id === leaseId);
-      // Always replace so Back cannot re-enter ?lease= and re-fire this effect.
-      if (found?.primary_tenant_id != null) {
+  // Always replace so Back cannot re-enter ?lease= and re-fire this effect.
+  useDeepLinkOpen({
+    search,
+    param: "lease",
+    items: leases,
+    loadList: () => flight.load(),
+    onList: setLeases,
+    onFound: (found) => {
+      if (found.primary_tenant_id != null) {
         replace?.(`/tenants/${found.primary_tenant_id}`);
-      } else if (found && app.canMutatePortfolio) {
+        return;
+      }
+      if (app.canMutatePortfolio) {
         setEditing(found);
         setDialogOpen(true);
         replace?.("/leases");
-      } else if (found?.property_id != null) {
-        replace?.(`/properties/${found.property_id}`);
-      } else {
-        replace?.("/leases");
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [search]);
+      if (found.property_id != null) {
+        replace?.(`/properties/${found.property_id}`);
+        return;
+      }
+      replace?.("/leases");
+    },
+    onMiss: () => replace?.("/leases"),
+  });
 
   const filtered = useMemo(() => {
     let out = leases;

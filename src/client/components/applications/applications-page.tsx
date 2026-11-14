@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, Plus } from "lucide-react";
 import * as data from "@/lib/data";
 import { useApp } from "@/context";
-import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
+import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,25 +80,19 @@ export function ApplicationsPage({ search = "", replace }: DeepLinkProps = {}) {
     };
   }, [flight, setError]);
 
-  useEffect(() => {
-    const appId = queryId(search, "app");
-    if (appId == null) return;
-    let cancelled = false;
-    (async () => {
-      const list = rows.length ? rows : await flight.load();
-      if (cancelled) return;
-      const found = list.find((a) => a.id === appId);
-      if (found) {
-        setEditing(found);
-        setOpen(true);
-      }
+  useDeepLinkOpen({
+    search,
+    param: "app",
+    items: rows,
+    loadList: () => flight.load(),
+    onList: setRows,
+    onFound: (found) => {
+      setEditing(found);
+      setOpen(true);
       replace?.("/applications");
-    })();
-    return () => {
-      cancelled = true;
-    };
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [search]);
+    },
+    onMiss: () => replace?.("/applications"),
+  });
 
   const visible = useMemo(
     () => (filter === "all" ? rows : rows.filter((r) => r.status === filter)),

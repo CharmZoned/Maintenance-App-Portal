@@ -55,6 +55,9 @@ describe("toCalendarDay", () => {
   it("passes through date-only strings", () => {
     expect(toCalendarDay("2026-11-01")).toBe("2026-11-01");
   });
+  it("rejects impossible date-only values", () => {
+    expect(toCalendarDay("2026-02-31")).toBeNull();
+  });
   it("returns null for empty", () => {
     expect(toCalendarDay(null)).toBeNull();
     expect(toCalendarDay(undefined)).toBeNull();
