@@ -81,11 +81,18 @@ export function priorityLevel(priority: WorkOrderPriority): "Emergency" | "High"
   return null;
 }
 
+/** Date-only write path stores `YYYY-MM-DDT12:00:00.000Z` (see updateWorkOrder). */
+const NOON_UTC_DATE_SENTINEL = /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.000)?Z$/;
+
 /** Human "Today 9:12 am" / "Yesterday" / short date for activity stamps. */
 export function formatActivityStamp(iso: string | null | undefined): string {
   if (!iso) return "";
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso);
-  const d = new Date(dateOnly ? `${iso}T00:00:00` : iso);
+  const plainDate = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+  const noonUtcSentinel = NOON_UTC_DATE_SENTINEL.test(iso);
+  // Noon-UTC sentinel is date-only intent — show local calendar day, no clock.
+  const dateOnly = plainDate || noonUtcSentinel;
+  const dayKey = dateOnly ? iso.slice(0, 10) : null;
+  const d = dayKey ? new Date(`${dayKey}T00:00:00`) : new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const now = new Date();
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -94,7 +101,7 @@ export function formatActivityStamp(iso: string | null | undefined): string {
   if (dateOnly) {
     if (dayDiff === 0) return "Today";
     if (dayDiff === 1) return "Yesterday";
-    return formatDate(iso, { weekday: "short", day: "numeric", month: "short" });
+    return formatDate(dayKey!, { weekday: "short", day: "numeric", month: "short" });
   }
   const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   if (dayDiff === 0) return `Today ${time}`;

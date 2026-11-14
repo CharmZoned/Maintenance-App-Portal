@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/page-shell";
@@ -16,6 +16,7 @@ import {
   formatActivityStamp,
   isOpenRequest,
   priorityLevel,
+  requestContextLine,
   requestNextStep,
   toRequestStatus,
 } from "@/lib/request-status";
@@ -43,6 +44,12 @@ function compareOpenForDashboard(a: WorkOrder, b: WorkOrder): number {
   return a.created_at < b.created_at ? -1 : 1;
 }
 
+/** Newest created_at first for Recent activity. Equal timestamps → 0. */
+function compareCreatedDesc(a: WorkOrder, b: WorkOrder): number {
+  if (a.created_at === b.created_at) return 0;
+  return a.created_at < b.created_at ? 1 : -1;
+}
+
 function addLocalDays(isoDay: string, days: number): string {
   const [y, m, d] = isoDay.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
@@ -59,14 +66,18 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
   const [pendingApprovals, setPendingApprovals] = useState<number | null>(null);
   const [pendingFailed, setPendingFailed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      const background = hasLoadedRef.current;
+      if (background) setRefreshing(true);
+      else setLoading(true);
       setLoadError(null);
       try {
         const [dash, woList] = await Promise.all([
@@ -76,6 +87,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
         if (cancelled) return;
         setSummary(dash);
         setOrders(woList);
+        hasLoadedRef.current = true;
 
         if (isAdmin) {
           try {
@@ -99,11 +111,19 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
       } catch (err) {
         if (!cancelled) {
           const message = (err as Error).message;
-          setLoadError(message);
-          setError(message);
+          if (hasLoadedRef.current) {
+            // Keep mounted dashboard; surface via app banner.
+            setError(message);
+          } else {
+            setLoadError(message);
+            setError(message);
+          }
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => {
@@ -121,7 +141,17 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
     [orders],
   );
 
-  const unassigned = useMemo(
+  const recentActivity = useMemo(
+    () =>
+      orders
+        .filter(isOpenRequest)
+        .slice()
+        .sort(compareCreatedDesc)
+        .slice(0, 5),
+    [orders],
+  );
+
+  const newToAssign = useMemo(
     () =>
       orders.filter(
         (o) => isOpenRequest(o) && !o.assigned_staff_id && o.status === "open",
@@ -129,15 +159,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
     [orders],
   );
 
-  const overdueFollowUps = useMemo(() => {
-    const today = toIsoDate(new Date());
-    return orders.filter(
-      (o) =>
-        o.status === "on_hold" &&
-        o.next_follow_up_date != null &&
-        o.next_follow_up_date.slice(0, 10) <= today,
-    ).length;
-  }, [orders]);
+  const emergenciesOpen = summary?.urgent_work_orders ?? 0;
 
   const upcoming = useMemo(() => {
     const today = toIsoDate(new Date());
@@ -211,164 +233,179 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
         ) : null
       }
     >
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Counter
-          value={unassigned}
-          label="Unassigned requests"
-          muted={unassigned === 0}
-          onClick={() => navigate("/maintenance")}
-        />
-        <Counter
-          value={pendingDisplay}
-          label="Awaiting approval"
-          muted={pendingDisplay === "0" || pendingDisplay === "—"}
-          tone={pendingFailed ? "warn" : undefined}
-          onClick={() => navigate("/users")}
-        />
-        <Counter
-          value={overdueFollowUps}
-          label="Overdue follow-ups"
-          muted={overdueFollowUps === 0}
-          onClick={() => navigate("/maintenance")}
-        />
-        {/* Stub: unread messages — Messages group owns inbox counts. */}
-        <Counter value={0} label="Unread messages" muted />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="space-y-4">
-          <section className="rounded-md border border-border bg-card p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-foreground">Open requests</h2>
-              <button
-                type="button"
-                onClick={() => navigate("/maintenance")}
-                className="text-xs font-medium text-brand-text hover:underline"
-              >
-                View all
-              </button>
-            </div>
-            {openOrders.length === 0 ? (
-              <EmptyState message="No open requests right now." className="py-8" />
-            ) : (
-              <div className="mt-3 overflow-hidden rounded-md border border-border">
-                {openOrders.map((wo) => {
-                  const status = toRequestStatus(wo);
-                  const pri = priorityLevel(wo.priority);
-                  const next = requestNextStep(wo);
-                  const unitBit = wo.unit_name ? ` · Unit ${wo.unit_name}` : "";
-                  return (
-                    <ListRow
-                      key={wo.id}
-                      title={`${wo.title}${unitBit}`}
-                      context={[wo.property_name].filter(Boolean).join(" · ")}
-                      priority={pri ? <PriorityChip level={pri} /> : undefined}
-                      status={<StatusChip status={status} nextStep={next} />}
-                      onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-md border border-border bg-card p-4">
-            {/* Calendar D5 visits surface here as Upcoming · next 14 days. */}
-            <h2 className="text-sm font-semibold text-foreground">
-              Upcoming · next 14 days
-            </h2>
-            {upcoming.length === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">No scheduled visits.</p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {upcoming.map((wo) => (
-                  <li key={wo.id} className="flex gap-3">
-                    <p className="w-[88px] shrink-0 text-xs font-semibold text-brand-text">
-                      {formatActivityStamp(wo.scheduled_at)}
-                    </p>
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
-                    >
-                      <p className="truncate text-[13px] font-medium text-foreground">
-                        {wo.title}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {[wo.property_name, wo.unit_name ? `Unit ${wo.unit_name}` : null]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+      <div
+        className="space-y-4"
+        aria-busy={refreshing || undefined}
+        data-refreshing={refreshing ? "true" : undefined}
+      >
+        {/* U5 counters: Awaiting approval · New to assign · Emergencies · Unread */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Counter
+            value={pendingDisplay}
+            label="Awaiting approval"
+            muted={pendingDisplay === "0" || pendingDisplay === "—"}
+            tone={pendingFailed ? "warn" : undefined}
+            onClick={() => navigate("/users")}
+          />
+          <Counter
+            value={newToAssign}
+            label="New requests to assign"
+            muted={newToAssign === 0}
+            onClick={() => navigate("/maintenance")}
+          />
+          <Counter
+            value={emergenciesOpen}
+            label="Emergencies open"
+            muted={emergenciesOpen === 0}
+            onClick={() => navigate("/maintenance")}
+          />
+          {/* Stub: unread messages — Messages group owns inbox counts. */}
+          <Counter
+            value={0}
+            label="Unread messages"
+            muted
+            onClick={() => navigate("/messages")}
+          />
         </div>
 
-        <div className="space-y-4">
-          <section className="rounded-md border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold text-foreground">Recent activity</h2>
-            {/* Stub: no activity feed API — derive light signals from open WOs. */}
-            <ul className="mt-3 space-y-2">
-              {openOrders.slice(0, 5).map((wo) => (
-                <li key={wo.id} className="flex gap-2 text-[13px]">
-                  <p className="min-w-0 flex-1 text-foreground">
-                    {wo.title} · {toRequestStatus(wo)}
-                  </p>
-                  <p className="shrink-0 text-[11px] text-muted-foreground">
-                    {formatActivityStamp(wo.created_at)}
-                  </p>
-                </li>
-              ))}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="space-y-4">
+            <section className="rounded-md border border-border bg-card p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-foreground">Open requests</h2>
+                <button
+                  type="button"
+                  onClick={() => navigate("/maintenance")}
+                  className="text-xs font-medium text-brand-text hover:underline"
+                >
+                  View all
+                </button>
+              </div>
               {openOrders.length === 0 ? (
-                <li className="text-sm text-muted-foreground">No recent activity.</li>
-              ) : null}
-            </ul>
-          </section>
+                <EmptyState message="No open requests right now." className="py-8" />
+              ) : (
+                <div className="mt-3 overflow-hidden rounded-md border border-border">
+                  {openOrders.map((wo) => {
+                    const status = toRequestStatus(wo);
+                    const pri = priorityLevel(wo.priority);
+                    const next = requestNextStep(wo);
+                    const unitBit = wo.unit_name ? ` · Unit ${wo.unit_name}` : "";
+                    return (
+                      <ListRow
+                        key={wo.id}
+                        title={`${wo.title}${unitBit}`}
+                        context={requestContextLine(wo, {
+                          includeProperty: true,
+                          titleIncludesUnit: Boolean(wo.unit_name),
+                        })}
+                        priority={pri ? <PriorityChip level={pri} /> : undefined}
+                        status={<StatusChip status={status} nextStep={next} />}
+                        onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </section>
 
-          <section className="rounded-md border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold text-foreground">Portfolio</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(properties as Property[]).slice(0, 8).map((p) => {
-                const open = openByProperty.get(p.id) ?? 0;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => navigate(`/properties/${p.id}`)}
-                    className="min-w-[140px] flex-1 rounded-sm bg-muted p-3 text-left transition-colors hover:bg-muted/80"
-                  >
-                    <p className="text-[13px] font-semibold text-foreground">{p.name}</p>
-                    <p
-                      className={cn(
-                        "text-[11px]",
-                        open > 0 ? "text-info" : "text-faint",
-                      )}
-                    >
-                      {open > 0
-                        ? `${open} open request${open === 1 ? "" : "s"}`
-                        : "No open requests"}
+            <section className="rounded-md border border-border bg-card p-4">
+              {/* Calendar D5 visits surface here as Upcoming · next 14 days. */}
+              <h2 className="text-sm font-semibold text-foreground">
+                Upcoming · next 14 days
+              </h2>
+              {upcoming.length === 0 ? (
+                <p className="mt-3 text-sm text-muted-foreground">No scheduled visits.</p>
+              ) : (
+                <ul className="mt-3 space-y-3">
+                  {upcoming.map((wo) => (
+                    <li key={wo.id} className="flex gap-3">
+                      <p className="w-[88px] shrink-0 text-xs font-semibold text-brand-text">
+                        {formatActivityStamp(wo.scheduled_at)}
+                      </p>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
+                      >
+                        <p className="truncate text-[13px] font-medium text-foreground">
+                          {wo.title}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {[wo.property_name, wo.unit_name ? `Unit ${wo.unit_name}` : null]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+
+          <div className="space-y-4">
+            <section className="rounded-md border border-border bg-card p-4">
+              <h2 className="text-sm font-semibold text-foreground">Recent activity</h2>
+              {/* Stub: no activity feed API — newest open WOs by created_at. */}
+              <ul className="mt-3 space-y-2">
+                {recentActivity.map((wo) => (
+                  <li key={wo.id} className="flex gap-2 text-[13px]">
+                    <p className="min-w-0 flex-1 text-foreground">
+                      {wo.title} · {toRequestStatus(wo)}
                     </p>
-                  </button>
-                );
-              })}
-              {properties.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No properties yet.</p>
-              ) : null}
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {summary.occupied}/{summary.units} units occupied ·{" "}
-              <button
-                type="button"
-                className="font-medium text-brand-text hover:underline"
-                onClick={() => navigate("/properties")}
-              >
-                View all
-              </button>
-            </p>
-          </section>
+                    <p className="shrink-0 text-[11px] text-muted-foreground">
+                      {formatActivityStamp(wo.created_at)}
+                    </p>
+                  </li>
+                ))}
+                {recentActivity.length === 0 ? (
+                  <li className="text-sm text-muted-foreground">No recent activity.</li>
+                ) : null}
+              </ul>
+            </section>
+
+            <section className="rounded-md border border-border bg-card p-4">
+              <h2 className="text-sm font-semibold text-foreground">Portfolio</h2>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(properties as Property[]).slice(0, 8).map((p) => {
+                  const open = openByProperty.get(p.id) ?? 0;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => navigate(`/properties/${p.id}`)}
+                      className="min-w-[140px] flex-1 rounded-sm bg-muted p-3 text-left transition-colors hover:bg-muted/80"
+                    >
+                      <p className="text-[13px] font-semibold text-foreground">{p.name}</p>
+                      <p
+                        className={cn(
+                          "text-[11px]",
+                          open > 0 ? "text-info" : "text-faint",
+                        )}
+                      >
+                        {open > 0
+                          ? `${open} open request${open === 1 ? "" : "s"}`
+                          : "No open requests"}
+                      </p>
+                    </button>
+                  );
+                })}
+                {properties.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No properties yet.</p>
+                ) : null}
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground">
+                {summary.occupied}/{summary.units} units occupied ·{" "}
+                <button
+                  type="button"
+                  className="font-medium text-brand-text hover:underline"
+                  onClick={() => navigate("/properties")}
+                >
+                  View all
+                </button>
+              </p>
+            </section>
+          </div>
         </div>
       </div>
 
