@@ -26,8 +26,9 @@ export const ROLE_HOME: Record<PortalAudience, string> = {
   staff: "/dashboard",
   /** Maintenance workers: assigned jobs list (not the admin dashboard). */
   maintenance: "/maintenance",
-  tenant: "/maintenance",
-  landlord: "/properties",
+  /** Tenant / landlord land on Figma N1 / N2 Home. */
+  tenant: "/home",
+  landlord: "/home",
 };
 
 /** @deprecated Prefer ROLE_HOME — kept as alias for intent map clarity. */
