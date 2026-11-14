@@ -112,7 +112,7 @@ Latest repo prefixes on `master` (as of Wave 2 merge / `33424b7`):
 Rules (also `docs/ops/schema-migrations.md`):
 
 1. Never reuse a prefix on `master` or any open PR.
-2. File migration in repo → PR → then apply live **with matching version**, or after an MCP clock stamp run `supabase migration repair --remote` **reverted (clock) + applied (repo prefix)** back-to-back (never `db push` between). See `docs/ops/schema-migrations.md`.
+2. File migration in repo → PR → then apply live **with matching version**, or after an MCP clock stamp run `supabase migration repair --remote --yes` **reverted (clock) + applied (repo prefix)** back-to-back (never `db push` between). True duplicates: revert-only. See `docs/ops/schema-migrations.md`.
 3. One logical concern per migration file when parallel agents are shipping; do not edit another stream’s migration.
 4. Emulator auto-replays every file under `supabase/migrations/` — a bad migration fails `#18` by name.
 
@@ -346,19 +346,19 @@ Run manual Phase 2 + LGA-18 approve/link matrix on live Landlord Gopher after Wa
 
 | Item | Source | Notes |
 |------|--------|-------|
-| Supabase staging + **duplicate migration history cleanup** / version repair | **hygiene #8** · **deferred** | Full inventory + repair commands in `docs/ops/schema-migrations.md`. Staging create **paused** pending owner confirm of ~$0.01344/hr. No live-only DDL. |
+| Supabase staging + **duplicate migration history cleanup** / version repair | **hygiene #8** · **deferred** | See ops SoT: [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) § Staging recommendation + §E. No live-only DDL. |
 
 **Out of scope for WS-I:** portal hosting/deploy config; portal URL; website `NEXT_PUBLIC_PORTAL_URL` / login-link wiring; WordPress retirement / Next.js launch — see deferred-work **“Portal hosting + URL: deferred until owner provides the link”**.
 
-**Acceptance:** Staging created **or** explicitly re-parked with cost note; migration history repaired **or** ops doc lists mismatches + repair plan; no hosting/URL claimed as WS-I.
-
-**Status (2026-11-14):** Staging proposed + cost parked; history inventory + repair plan shipped in ops doc (live `migration repair` still pending CLI/ops go-ahead).
+**Acceptance (split):**
+- **Docs / proposal (done on PR #31):** staging re-parked with cost note; mismatch inventory + repair plan in ops doc; no hosting/URL claimed as WS-I.
+- **Remaining (live ops):** owner confirms staging cost → create `staging`; ops go-ahead → run §E repair; then clear deferred-work rows.
 
 **Kickoff prompt:**
 
 ```text
 OPS: WS-I from docs/wave3-plan.md / parallel-work-plan. Staging + migration history only.
-Propose staging Supabase; create only after owner confirms ~$0.01344/hr. Migration version/history cleanup per schema-migrations.md (§E). Never live-only DDL. Do NOT deploy portal, invent a host, or set NEXT_PUBLIC_PORTAL_URL. Coordinate with WS-S if both touch history repair.
+Propose staging only until owner confirms ~$0.01344/hr; then create. Migration history cleanup per schema-migrations.md (§E). Never live-only DDL. Do NOT deploy portal, invent a host, or set NEXT_PUBLIC_PORTAL_URL. Coordinate with WS-S if both touch history repair.
 ```
 
 ---

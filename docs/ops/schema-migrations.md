@@ -37,10 +37,12 @@ Do not leave a permanent “name matches, version differs” gap without a defer
 2. Add `supabase/migrations/YYYYMMDDHHMMSS_<name>.sql` on a `cursor/...` branch.
 3. Open PR; keep SQL reviewable (additive preferred; never break `inquiries`).
 4. Prefer applying first on a **staging** Supabase branch / non-production project when available.
-5. After human review (or with explicit ops go-ahead), apply the same SQL to live **with matching version** (or repair afterward).
+5. After human review (or with explicit ops go-ahead), apply the same SQL to live **with matching version**, or if MCP stamped a clock version, repair per [Applying without version drift](#applying-without-version-drift) / §E (`--remote` reverted+applied; never mid-repair `db push`).
 6. Update `docs/deferred-work.md` / `docs/supabase-schema.md` if the change is user-visible or ops-relevant.
 
 ## Staging recommendation (WS-I / hygiene #8)
+
+**Source of truth for WS-I staging + history status:** this section + §E below. Other docs should link here instead of restating cost/paused/repair-pending facts.
 
 Today this org uses a single shared project for portal + website Auth (`bgjkjtfgrfiszbzatriq`). That makes live-only experiments costly.
 
@@ -71,10 +73,12 @@ Name-only checks miss MCP clock stamps. Track mismatches in `docs/deferred-work.
 
 Baseline pre-Phase-1 migrations may exist only on the remote history; portal phase work starts at `20261113160000_*`. New work must always land in this folder. Pre-repo maintenance ACL still live on prod is summarized in [`live-maintenance-acl-baseline.md`](./live-maintenance-acl-baseline.md).
 
-## Migration history inventory + repair plan (hygiene #8)
+## One-shot repair inventory (hygiene #8) — snapshotted 2026-11-14
 
-**Snapshotted:** 2026-11-14 via MCP `list_migrations` / `schema_migrations` on `bgjkjtfgrfiszbzatriq` vs `supabase/migrations/` on `master` @ `33424b7`.  
-**Scope:** History alignment only (`supabase migration repair`). **No DDL.** Do not run while another migration/RLS PR is open.
+**Not standing daily ops** — a dated inventory + command sequence for this drift episode. After a successful §E run, update the §E status line (repaired @ date/SHA) and the deferred-work repair row; do **not** re-run blindly on a later date without a fresh `list_migrations` diff.
+
+**Snapshotted:** 2026-11-14 via MCP `list_migrations` / `schema_migrations` on `bgjkjtfgrfiszbzatriq` vs `supabase/migrations/` on `master` @ `33424b7` (see PR #31).  
+**Scope:** History alignment only (`supabase migration repair`). **No DDL.** Do not run while another migration/RLS PR is open. **Never repair/revert §D versions.**
 
 ### A. Clean match (repo prefix = live version; no duplicate clock)
 
@@ -128,19 +132,20 @@ If a secondary env must match listings DDL, capture those two into a dedicated r
 
 ### E. Repair command sequence (run after **ops go-ahead** + CLI linked)
 
-Requires `supabase` CLI logged in / `SUPABASE_ACCESS_TOKEN`, linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed. **Gate:** explicit ops go-ahead (staging optional — do not block repair on the paused `staging` create). Do not paste tokens into chat/docs.
+Requires `supabase` CLI logged in (env `SUPABASE_ACCESS_TOKEN` only — **never** commit, paste into chat, or put in repo `.env`). Project must be linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed. **Gate:** explicit ops go-ahead (staging optional — do not block repair on the paused `staging` create).
 
 **Atomicity:** Run step 1 then step 2 as **one** ops action (`&&` below). After step 1 alone, §C repo prefixes are unmarked — `supabase db push` would treat already-applied Phase 1–5 / lga15 SQL as pending and **re-run** it.
 
-**Recovery (if step 1 succeeded and step 2 failed):** Do **not** `db push`. Re-run **only** step 2 (`applied` list). If unsure which stamps landed, compare MCP `list_migrations` to the §C “mark applied” column and apply the missing prefixes only. Leave §D exceptions untouched.
+**Recovery (if step 1 succeeded and step 2 failed):** Do **not** `db push`. Re-run **only** step 2 (`applied` list). If unsure which stamps landed, compare MCP `list_migrations` to the §C “mark applied” column and apply the missing prefixes only. **Do not repair/revert §D.**
 
 ```bash
 # From repo root, linked to project bgjkjtfgrfiszbzatriq
 # HISTORY ONLY — updates supabase_migrations rows; does NOT run or undo SQL/DDL.
 # Must target remote (--remote). --yes skips CLI prompts on hosted changes (ops go-ahead first).
+# Do NOT include §D versions in either list.
+# Reverted list = §B duplicate clocks + §C clocks (incl. both lga15 stamps).
+# Applied list = §C repo prefixes only (incl. 20261113242000). Do not re-applied §B keep-rows.
 set -euo pipefail
-# 1) Revert: §B duplicate clocks + §C clock stamps (incl. both lga15 stamps)
-# 2) Applied: §C repo prefixes only (incl. 20261113242000). §B keep-rows already present — do not re-applied.
 supabase migration repair --remote --yes --status reverted \
   20261113232311 20261113232318 \
   20261113213707 20261113215853 \
@@ -160,4 +165,4 @@ supabase migration repair --remote --yes --status reverted \
 
 **Verify:** MCP `list_migrations` — every portal file under `supabase/migrations/` has a matching version; §B duplicate names gone; §D exceptions remain. Only then is `db push` safe for **new** migrations.
 
-**WS-I status:** Docs inventory + plan done this PR. **Live repair not executed** (no CLI token; serialize with any open mig/RLS PR). Update deferred-work when §E is run successfully.
+**WS-I status (as of 2026-11-14 / PR #31):** Docs inventory + plan done. **Live repair not executed** (no CLI token in agent env; serialize with any open mig/RLS PR). After a successful §E run, replace this line with `Repaired @ <date> / <sha>` and clear the deferred-work repair row.

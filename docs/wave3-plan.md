@@ -1,8 +1,9 @@
-# Wave 3 plan (pointer)
+# Wave 3 plan (repo pointer — not canonical)
 
-**Canonical plan:** Cursor Project store `docs/wave3-plan.md`.  
+**Canonical plan:** Cursor Project store `docs/wave3-plan.md` (not this file).  
+**Also see:** [`docs/parallel-work-plan.md`](./parallel-work-plan.md) stream defs; WS-I ops truth in [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).  
 **Base:** `master` @ Wave 1–2 complete (PRs #19–#29).  
-**Mode:** **Staffing approved** — implementers launched for **I / K / N / O / R / S1**. This pointer indexes streams; do not re-plan scope here.
+**Mode:** **Staffing approved** — implementers launched for **I / K / N / O / R / S1**. **Pointer-only** — do not re-plan scope or treat this copy as authoritative over the store plan.
 
 ## Owner choices (2026-11-14)
 
@@ -18,7 +19,7 @@
 
 | Stream | Size | Conflict | Start |
 |--------|------|----------|-------|
-| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL. Staging create **paused** (~$0.01344/hr pending owner); history inventory + repair plan in [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) |
+| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL. Status SoT: [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) § Staging / §E |
 | **WS-K** Accept & schedule | M | **High** on `work-order-dialog.tsx` | Now |
 | **WS-N** Perf/docs (one lane) | S–M | Low–med | Now |
 | **WS-O** Thin read-only calendar | M | Med; prefer after K | After K (or coordinated) |
