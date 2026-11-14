@@ -110,6 +110,8 @@ Key/value: `key` PK, `value`, `updated_at`. Phase 1: staff/admin SELECT; admin D
 
 **WS-S S2 #5** (`20261114070000_*`): `set_account_status` Approve requires `auth.users.email_confirmed_at IS NOT NULL`. `list_user_accounts_for_admin` returns `email_confirmed_at` for the Users UI badge/disable.
 
+**WS-S S2 #4** (`20261114080000_*`): demote (`admin_set_user_role`) or suspend/reject/pending (`set_account_status`) that would leave **zero** approved admins raises `Cannot remove the last approved admin`.
+
 ### `Applications`
 
 Rental applicants (not account approval). Do not confuse with `user_roles.account_status`.
@@ -252,5 +254,5 @@ select private.assign_admin('you@example.com');
 | Function | Purpose |
 |----------|---------|
 | `list_user_accounts_for_admin()` | Auth users + `user_roles` + email + `email_confirmed_at` |
-| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended`. Approve requires `email_confirmed_at`, and role must be admin or linked maintenance/tenant/landlord (LGA-18). Non-approve UPDATEs existing row (keeps links); INSERTs unlinked maintenance queue row only when missing |
-| `admin_set_user_role(user_id, role, landlord_id?, tenant_id?, staff_id?)` | Role + link-id assignment |
+| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended`. Approve requires `email_confirmed_at`, and role must be admin or linked maintenance/tenant/landlord (LGA-18). Non-approve refuses sole approved-admin lockout; UPDATEs existing row (keeps links); INSERTs unlinked maintenance queue row only when missing |
+| `admin_set_user_role(user_id, role, landlord_id?, tenant_id?, staff_id?)` | Role + link-id assignment; refuses demoting the last approved admin |

@@ -221,6 +221,67 @@ describe("[R2] Account approval", () => {
     });
   });
 
+  describe("last approved admin cannot be removed", () => {
+    async function secondApprovedAdmin(email: string): Promise<string> {
+      const login = await sql<{ id: string }>(
+        `insert into auth.users (email, encrypted_password, email_confirmed_at)
+         values ($1, 'x', now()) returning id`,
+        [email],
+      );
+      await sql(
+        `insert into public.user_roles (user_id, role, account_status)
+         values ($1, 'admin', 'approved')
+         on conflict (user_id) do update
+           set role = 'admin', account_status = 'approved'`,
+        [login[0].id],
+      );
+      return login[0].id;
+    }
+
+    test("suspending the sole approved admin is refused", async () => {
+      await signInApp("admin");
+      await expect(data.setAccountStatus(world.users.admin.id, "suspended")).rejects.toThrow(
+        /cannot remove the last approved admin/i,
+      );
+      expect(await statusOf(world.users.admin.id)).toBe("approved");
+    });
+
+    test("demoting the sole approved admin is refused", async () => {
+      await signInApp("admin");
+      await expect(
+        data.adminSetUserRole(world.users.admin.id, "maintenance", { staff_id: world.staff.worker.id }),
+      ).rejects.toThrow(/cannot remove the last approved admin/i);
+      const [row] = await sql<{ role: string }>(`select role from public.user_roles where user_id = $1`, [
+        world.users.admin.id,
+      ]);
+      expect(row.role).toBe("admin");
+    });
+
+    test("with two approved admins, one may be suspended or demoted", async () => {
+      const otherId = await secondApprovedAdmin("coadmin.lastguard@test.local");
+      await signInApp("admin");
+
+      const suspended = await data.setAccountStatus(otherId, "suspended");
+      expect(suspended.account_status).toBe("suspended");
+      expect(await statusOf(world.users.admin.id)).toBe("approved");
+
+      await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [otherId]);
+      const [spareStaff] = await sql<{ id: number }>(
+        `insert into public."Staff" (first_name, last_name, email, gets_request_alerts)
+         values ('Co', 'Admin', 'coadmin.staff@test.local', true) returning id`,
+      );
+      const demoted = await data.adminSetUserRole(otherId, "maintenance", {
+        staff_id: Number(spareStaff.id),
+      });
+      expect(demoted).toMatchObject({ role: "maintenance", account_status: "approved" });
+
+      // Seed admin remains the sole approved admin and still cannot self-lock out.
+      await expect(data.setAccountStatus(world.users.admin.id, "rejected")).rejects.toThrow(
+        /cannot remove the last approved admin/i,
+      );
+    });
+  });
+
   describe("only admins manage accounts", () => {
     test.each(["worker", "tenant", "landlord", "pending"] as const)(
       "a %s cannot change anyone's account status",
