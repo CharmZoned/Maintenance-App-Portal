@@ -12,9 +12,9 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Lazy-load `MaintenanceRequestStaffNotes` on WO dialog open (not every `listWorkOrders`) | Smaller list payloads for landlords/tenants/dashboard | WS-E ships batched notes enrich on list for staff UX parity; not AuthZ | Next maintenance UX / perf pass (WS-N) |
 | Dashboard / charges **N+1** query reduction | Faster dashboard + rent list under larger portfolios | Perf only; not blocking Phase 1.5 or Phase 2 DoD | When portfolio size or Lighthouse/load complaints make list latency visible |
 | Service-role / SQL Editor **trigger guard** on Payments (block DML unless via RPC or explicit bypass) | Closes ledger bypass for privileged DB roles | Authenticated path already RPC-only after dropping Payment write policies; service role is ops-only today | Before granting broad SQL access to non-ops, or if ops mistakes rewrite Payments outside RPCs |
-| **Set up live portal URL** (roadmap **#3** / **WS-I**) — choose stable Maintenance App Portal origin; deploy if needed; set `NEXT_PUBLIC_PORTAL_URL` on LandlordGopherWebsite (Vercel Preview + Production + `.env.local`) | Unlocks Phase 4 website Login / Staff / Tenant CTAs in production ([website PR #1](https://github.com/CharmZoned/landlordgopherwebsite_/pull/1)) | Portal host not finalized / env not wired in hosting yet | Before merging or shipping website Phase 4 CTAs to production; same Auth project `bgjkjtfgrfiszbzatriq` |
-| **Supabase staging branch / non-prod project** for migration dry-runs | Apply DDL before production; stop live-only drift (see `docs/ops/schema-migrations.md`) | Single shared project `bgjkjtfgrfiszbzatriq` today; agents applied live during phases | Before next multi-agent schema phase, or when preview deploys need isolated DB |
-| **Repair MCP migration version stamps** so live `schema_migrations.version` matches repo file prefixes (or document permanent exceptions) | Stops CLI/`db push` treating already-applied SQL as pending | MCP `apply_migration` used clock versions (e.g. live `20261113201805_phase2_authz…` vs repo `20261113203000_…`; same pattern for most Phase 1–5 files, and LGA-15 live `lga15_maintenance_status_category_checks_241000` vs repo `20261113242000_*`. LGA-18 `20261113241000` was applied with a matching version). See `docs/ops/schema-migrations.md` | Before relying on `supabase db push` / linked migrate against this project; after next live apply |
+| **Set up live portal URL + hosting/deploy** (roadmap **#3** / **WS-I** / hygiene **#13**) — owner chooses host (**open — do not invent**); deploy portal; set `NEXT_PUBLIC_PORTAL_URL` on LandlordGopherWebsite (Preview + Production + `.env.local`) | Unlocks Phase 4 website Login / Staff / Tenant CTAs in production ([website PR #1](https://github.com/CharmZoned/landlordgopherwebsite_/pull/1)) | Portal host not finalized / env not wired in hosting yet | Wave 3 **WS-I** after owner names host; same Auth project `bgjkjtfgrfiszbzatriq` |
+| **Supabase staging + duplicate migration history cleanup** (**WS-I** / hygiene **#8**) | Apply DDL before production; stop live-only drift / duplicate version stamps (see `docs/ops/schema-migrations.md`) | Single shared project `bgjkjtfgrfiszbzatriq` today; MCP clock versions vs repo prefixes | Wave 3 **WS-I**; never live-only DDL |
+| **Repair MCP migration version stamps** so live `schema_migrations.version` matches repo file prefixes (or document permanent exceptions) | Stops CLI/`db push` treating already-applied SQL as pending | MCP `apply_migration` used clock versions (e.g. live `20261113201805_phase2_authz…` vs repo `20261113203000_…`; same pattern for most Phase 1–5 files, and LGA-15 live `lga15_maintenance_status_category_checks_241000` vs repo `20261113242000_*`. LGA-18 `20261113241000` was applied with a matching version). See `docs/ops/schema-migrations.md` | Fold into Wave 3 **WS-I** hygiene #8 |
 | Phase 1.5 **Medium polish** from [#5](https://github.com/CharmZoned/Maintenance-App-Portal/pull/5): guard null `updated` after RPC; document that any payment clears `waived`; decide `amount = 0` never → `paid` rule | Belt-and-suspenders client safety + intentional product rules | Non-blocking after High ledger fixes on `70a9468`; merge already approved; live payment RPCs applied 2026-11-13 (LGA-16) | Next rent/ledger UX pass or before multi-staff |
 | Ambiguous signup emails (match >1 of Landlord/Tenant/Staff) leave Auth user with **no** `user_roles` row | Admin must assign role manually on Users (upsert via RPC) | Rare; trigger refuses to guess | If multi-entity emails become common, add admin “create role” affordance or pick priority |
 | Route landlord ownership helpers (e.g. `private.landlord_owns_unit`) through hardened `current_landlord_id()` (role + approved) | Pending or re-roled users cannot use a stale `user_roles.landlord_id` for SELECT | **Done (WS-E)** — `20261114030000_harden_landlord_helpers_and_mr_notes.sql` | — |
@@ -25,10 +25,10 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Applications `date_of_birth` column (if product adds DOB) | Match “income/DOB PII” wording; keep admin-only RLS | Table today has `monthly_income` only (no DOB column) | If/when Applications schema adds DOB |
 | Confirm/apply Phase 3 + Phase 5 migrations on any non-primary env (`20261113210000_*` … `20261113233000_*`) | Status history, storage ACL, `PropertyDocuments` + bucket match live | Applied to live Landlord Gopher; SQL on `master` (#10 / #11); other envs may lag | Before tenant submit / docs in that env |
 | Confirm/apply LGA-15 migration `20261113242000_lga15_maintenance_status_category_checks.sql` on any env that predates the live CHECKs | Secondary envs get remapped legacy D1 statuses/categories + same CHECKs as production | Constraints already on live Landlord Gopher; remaps are no-ops there | Before standing up a new Supabase env / staging clone |
-| Richer Accept & schedule UX (**WS-K**) — assign staff + date in one admin action | Faster admin intake; writes `scheduled_at` that a thin calendar can show | Phase 3 gates schedule fields; assignment still manual on the WO | Wave 3 / next maintenance UX pass |
-| **Thin read-only property calendar** (roadmap **#9** skinny) — month view of existing dates only: WO `scheduled_at` / `next_follow_up_date`, lease start/end, rent `due_date`, optional application `desired_move_in`; click → existing detail pages | Staff at-a-glance schedule without a scheduling product | Easy add-on parked until Wave 2 settles; no create/drag/recurrence | After Wave 2 merges, or with **WS-K** so schedule writes stay usable |
-| **Zillow sync research** only (roadmap **#10**) — spike IDX/Zillow/ToS options and map to website `Listing` type; no production sync | Unblocks a go/no-go before listings syndication work | Research-only; live listings still demo (`getListings` mode demo) | When owner wants syndication options vs Jayla-supplied feed |
-| **Website visual revisions** (roadmap **#11**, small brief only) — targeted CSS/layout/copy tweaks on `landlordgopherwebsite_` | Polish marketing site without a redesign | Needs a tiny owner/Jayla brief; full redesign is out of scope here | When a short visual brief exists (not blocked on full brand overhaul) |
+| Richer Accept & schedule UX (**WS-K**) — assign staff + date in one admin action | Faster admin intake; writes `scheduled_at` that a thin calendar can show | Phase 3 gates schedule fields; assignment still manual on the WO | Wave 3 **WS-K** after plan approval |
+| **Thin read-only property calendar** (roadmap **#9** skinny / **WS-O**) — month view of existing dates only: WO `scheduled_at` / `next_follow_up_date`, lease start/end, rent `due_date`, optional application `desired_move_in`; click → existing detail pages | Staff at-a-glance schedule without a scheduling product | Owner **YES** for Wave 3; no create/drag/recurrence | Wave 3 **WS-O** after plan approval (prefer after WS-K) |
+| **Zillow sync research** only (roadmap **#10** / **WS-P**) — spike IDX/Zillow/ToS options and map to website `Listing` type; no production sync | Unblocks a go/no-go before listings syndication work | Owner **NO** for Wave 3 staffing; live listings still demo | Later when owner wants syndication options vs Jayla-supplied feed |
+| **Website visual revisions** (roadmap **#11** / **WS-Q**, small brief only) — targeted CSS/layout/copy tweaks on `landlordgopherwebsite_` | Polish marketing site without a redesign | Owner **NO** for Wave 3 staffing | When owner reopens + short visual brief exists |
 | ~~Automated RLS tests for tenant photo isolation + status history append-only~~ | ~~Regression safety~~ | **Done (WS-J)** — `tests/requirements/r4-maintenance-requests.test.ts` photo isolation + append-only history | Shipped with Wave 2 test expansion |
 | Harden r7 tenant rent-charge exact-set assert (unfiltered list, not `.eq("id", …)`) once ledger fixtures move | Catches over-permissive RentCharges SELECT regressions | Medium leftover from WS-J phase-ship review; current assert still proves tenant can read own charge + tenant2 cannot | Next r7 test hygiene pass |
 | Slim Users tenant-link query (id/name/email only) | Faster Users page | Phase 3 reused full `listTenants` enrich | Next Users UX pass |
@@ -45,8 +45,34 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Slim Applications unit-options query (avoid full `listUnits` graph on page mount) | Faster Applications page open | Unit select only needs id/label/property; full enrich is heavier | Next Applications UX pass or when unit count grows |
 | Manual Phase 2 QA: signup → verify → pending → admin Approve (with Staff link) / Reject / Suspend | Proves end-to-end account queue against real Auth + RLS | PR checklist left open; needs seeded admin session | Soon after Phase 2 deploy (AuthZ + Phase 1.5 verified live 2026-11-13) |
 
-### Owner roadmap — easy add-ons parked (2026-11-13)
+### Owner roadmap — easy add-ons (updated 2026-11-14)
 
-Development-only items from the easy-addon triage. Already tracked above and tagged: portal URL (**#3** / **WS-I**), Accept & schedule (**WS-K**). Newly added: thin read-only calendar (**#9** skinny), Zillow research (**#10**), small website visual tweaks (**#11**).
+| Roadmap | Wave 3 | Stream |
+|---------|--------|--------|
+| Portal URL / hosting **#3** | **YES** (host still open) | **WS-I** (+ hygiene #13) |
+| Accept & schedule | **YES** | **WS-K** |
+| Thin calendar **#9** skinny | **YES** | **WS-O** |
+| Zillow research **#10** | **NO** | deferred (**WS-P** not staffed) |
+| Website visual **#11** | **NO** | deferred (**WS-Q** not staffed) |
 
-**Not** added here (not engineering backlog): Jayla GitHub invite (**#12**) — owner access action.
+**Not** eng backlog: Jayla GitHub invite (roadmap **#12**) — owner access action.
+
+### Wave 3 security & hygiene (plan only — 2026-11-14)
+
+Parked for staffing under **WS-S** / **WS-R** / **WS-I** / **WS-L** after owner approves Project store `docs/wave3-plan.md`. **Do not implement** from this table alone. Order: **#1–2 first**, then criticality.
+
+| # | Task | Stream / lane | Effort | Parallel w/ I/K/N/O? | Why deferred now |
+|---|------|---------------|--------|----------------------|------------------|
+| 1 | Required GitHub CI checks on PRs/`master` | **WS-S S1** | S | Yes | Plan awaiting approval |
+| 2 | Archive D1/Hono/Clawnify primary path; refresh stale IMPLEMENTATION_PLAN; retire `main`↔`master` `sync-branches.yml` (owner confirm) | **WS-S S1** | M | Yes | Plan awaiting approval |
+| 3 | Revoke `anon` EXECUTE on payment RPCs (`record_payment` / `delete_payment`) | **WS-S S2** | S | **No** other mig/RLS | Serialize migrations |
+| 4 | Last-admin guard on `admin_set_user_role` | **WS-S S2** | S–M | **No** mig overlap | Serialize migrations |
+| 5 | Require `email_confirmed_at` before Approve (+ Users badge) | **WS-S S2** | S–M | **No** mig overlap | Serialize migrations |
+| 6 | Enforce 5-photo **DB** cap per maintenance request (FE already slices to 5) | **WS-S S2** | S | **No** mig; avoid K dialog thrash | Serialize migrations |
+| 7 | Leaked-password protection + min length (Auth + UI) | **WS-S S3** | S | Yes | Plan awaiting approval |
+| 8 | Duplicate migration history cleanup + staging | **WS-I** | M | I owns (not dual with S) | Same as staging/repair rows above |
+| 9 | Login `?redirect=` (Phase 4b) | **WS-R** | S | Yes | Plan awaiting approval |
+| 10 | Settings **admin-only** (RLS SELECT today `is_staff_or_admin`; staff still see Settings nav) | **WS-S S2** | S | **No** mig overlap | Serialize migrations |
+| 11 | Status label product decision → shared UI maps | Owner decision → FE | S after decision | Prefer after/near K, not during K mega-edit | **Owner decision still open** |
+| 12 | Web push | **WS-L** hold | — | Do not staff | Phase 6 / R6 hold |
+| 13 | Explicit portal hosting/deploy deliverable | **WS-I** | (in I) | Part of I | **Portal host still open** |
