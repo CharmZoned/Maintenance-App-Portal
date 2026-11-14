@@ -1,14 +1,15 @@
 /**
- * Legacy Cloudflare Worker entry.
+ * Archived Cloudflare Worker entry (see archive/README.md).
  *
  * Phase 1 cutover: portfolio data is served by Supabase (Auth + PostgREST + RLS).
  * The previous unauthenticated Hono/D1 /api/* CRUD surface is retired.
  * Any request under /api returns 410 Gone so accidental Worker deploys cannot
- * expose open D1 mutations.
+ * expose open D1 mutations. Kept only so r7 can assert the 410 surface.
  */
 import { Hono } from "hono";
 
-type Env = { Bindings: { DB: D1Database } };
+/** Bindings unused — stub only returns 410/404 (no D1). */
+type Env = { Bindings: Record<string, unknown> };
 
 const app = new Hono<Env>();
 

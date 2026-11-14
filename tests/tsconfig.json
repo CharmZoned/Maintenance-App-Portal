@@ -1,9 +1,15 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "types": ["node", "vite/client", "@cloudflare/workers-types"],
+    "types": ["node", "vite/client"],
     "baseUrl": "..",
     "paths": { "@/*": ["./src/client/*"] }
   },
-  "include": ["./**/*.ts", "../vitest.config.ts", "../playwright.config.ts", "../src/client/vite-env.d.ts"]
+  "include": [
+    "./**/*.ts",
+    "../vitest.config.ts",
+    "../playwright.config.ts",
+    "../src/client/vite-env.d.ts",
+    "../archive/legacy-d1-hono/index.ts"
+  ]
 }

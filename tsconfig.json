@@ -15,8 +15,8 @@
     "paths": {
       "@/*": ["./src/client/*"]
     },
-    "types": ["@cloudflare/workers-types"]
+    "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx"],
   "exclude": ["node_modules", "dist"]
 }
