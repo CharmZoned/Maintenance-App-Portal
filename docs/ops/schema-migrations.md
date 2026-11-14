@@ -71,7 +71,7 @@ Compare Supabase MCP `list_migrations` to `supabase/migrations/` on `master` on 
 
 Name-only checks miss MCP clock stamps. Track mismatches in `docs/deferred-work.md` until repaired.
 
-Baseline pre-Phase-1 migrations may exist only on the remote history; portal phase work starts at `20261113160000_*`. New work must always land in this folder. Pre-repo maintenance ACL still live on prod is summarized in [`live-maintenance-acl-baseline.md`](./live-maintenance-acl-baseline.md).
+Pre-portal setup scripts (`20261010152511` … `20261109204421`) now ship in this folder so a fresh Supabase project can rebuild from the repo. Live already has those version stamps — **do not re-run** them on production (`db push` should treat them as applied). Portal phase work continues from `20261113160000_*`. Pre-repo maintenance ACL notes: [`live-maintenance-acl-baseline.md`](./live-maintenance-acl-baseline.md).
 
 ## One-shot repair inventory (hygiene #8) — snapshotted 2026-11-14
 
@@ -123,7 +123,7 @@ Matching repo rows that also have a duplicate clock are listed only under **§B*
 
 | Live version | Name | Why keep |
 |--------------|------|----------|
-| `20261010152511` … `20261109204421` | Pre-portal baseline (intake → photos/comments) | Expected remote-only history; see [`live-maintenance-acl-baseline.md`](./live-maintenance-acl-baseline.md) |
+| `20261010152511` … `20261109204421` | Pre-portal setup (intake → photos/comments) | **Now in** `supabase/migrations/` (same prefixes). Live history already stamped — never re-apply SQL; fresh envs get them via normal `db push`. See [`live-maintenance-acl-baseline.md`](./live-maintenance-acl-baseline.md) |
 | `20261113214011` | `phase_acl_mr_update_uses_helper` | Intermediate live ACL step; superseded in effect by later `phase_acl_mr_update_new_row_check` / repo `20261113252100_*` — leave stamped; do not re-apply |
 | `20261114002715` | `public_unit_listings` | Website/listings path; not in portal `supabase/migrations/` |
 | `20261114002848` | `fix_listing_photo_path_check` | Same; website-adjacent |

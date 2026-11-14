@@ -43,7 +43,7 @@ tests/
   unit/                 pure functions (mappers, helpers)
   support/              helpers: sign in as a persona, reset data, ports
   emulator/             local Supabase: REST, Auth, Storage over in-process Postgres
-    baseline/           platform shim + schema history that predates this repo
+    baseline/           emulator-only platform shim (pre-portal SQL is in supabase/migrations/)
     seed.ts             the standard test world and logins
   dashboard/            runner, local server and the dashboard page
 ```
@@ -106,13 +106,15 @@ R6 notification checks stay `test.todo` until that product stream reopens.
 
 ## How the emulator stays faithful
 
-- On start it replays `tests/emulator/baseline/*.sql` and then **every file in
-  `supabase/migrations/`**, in order. A new migration is picked up automatically;
+- On start it replays `tests/emulator/baseline/*.sql` (platform shim only) and then
+  **every file in `supabase/migrations/`**, in order. Pre-portal setup scripts ship
+  in `supabase/migrations/` so a fresh Supabase project can rebuild from the repo.
+  A new migration is picked up automatically;
   one that does not apply cleanly fails the run with the file name.
-- `baseline/` holds the migrations that were applied to the live project before
-  this repo tracked them (copied from its migration history), plus a small shim
-  for what Supabase provides out of the box (roles, `auth`, `storage`, default
-  grants). After replay, table grants and RLS flags match the live project.
+- `baseline/` holds only the small shim for what Supabase provides out of the
+  box (roles, `auth`, `storage`, default grants). Pre-portal setup SQL now lives
+  in `supabase/migrations/` (same version stamps as live history). After replay,
+  table grants and RLS flags match the live project.
 - Requests run as the caller's database role with their JWT claims, so RLS,
   grants, CHECK constraints and triggers are enforced by Postgres itself.
 - It implements the parts of PostgREST / Auth / Storage the app uses. If the app
