@@ -575,6 +575,7 @@ export interface Database {
           staff_id: number | null;
           account_status: AccountStatus;
           created_at: string;
+          email_confirmed_at: string | null;
         }[];
       };
       set_account_status: {

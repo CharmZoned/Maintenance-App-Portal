@@ -65,6 +65,12 @@ export interface UserAccountRow {
   staff_id: number | null;
   account_status: AccountStatus;
   created_at: string;
+  /**
+   * From list RPC after migration 20261114070000.
+   * `null` = unconfirmed (UI blocks Approve). `undefined` = column absent
+   * (FE ahead of live mig) — do not block UI; server enforces after apply.
+   */
+  email_confirmed_at?: string | null;
 }
 
 export interface StaffMember {
@@ -2027,16 +2033,23 @@ export async function listStaff(): Promise<StaffMember[]> {
 export async function listUserAccounts(): Promise<UserAccountRow[]> {
   const { data, error } = await supabase.rpc("list_user_accounts_for_admin");
   if (error) throwSb(error);
-  return (data ?? []).map((row) => ({
-    user_id: row.user_id,
-    email: row.email,
-    role: row.role,
-    landlord_id: row.landlord_id,
-    tenant_id: row.tenant_id,
-    staff_id: row.staff_id,
-    account_status: (row.account_status || "pending") as AccountStatus,
-    created_at: row.created_at,
-  }));
+  return (data ?? []).map((row) => {
+    const mapped: UserAccountRow = {
+      user_id: row.user_id,
+      email: row.email,
+      role: row.role,
+      landlord_id: row.landlord_id,
+      tenant_id: row.tenant_id,
+      staff_id: row.staff_id,
+      account_status: (row.account_status || "pending") as AccountStatus,
+      created_at: row.created_at,
+    };
+    // Preserve absence when live RPC predates the column (do not coerce to null).
+    if ("email_confirmed_at" in row) {
+      mapped.email_confirmed_at = row.email_confirmed_at ?? null;
+    }
+    return mapped;
+  });
 }
 
 export async function setAccountStatus(

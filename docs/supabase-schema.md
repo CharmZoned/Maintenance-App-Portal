@@ -108,6 +108,8 @@ Same advisor gap → Phase 1 policies.
 Key/value: `key` PK, `value`, `updated_at`. Phase 1: staff/admin SELECT; admin DML. **Phase 1.5:** `FORCE ROW LEVEL SECURITY`.  
 **WS-S S2 #10** (`20261114060000_*`): SELECT + DML all require `private.is_admin()` — maintenance staff cannot read Settings via PostgREST (portal nav hides Settings for staff).
 
+**WS-S S2 #5** (`20261114070000_*`): `set_account_status` Approve requires `auth.users.email_confirmed_at IS NOT NULL`. `list_user_accounts_for_admin` returns `email_confirmed_at` for the Users UI badge/disable.
+
 ### `Applications`
 
 Rental applicants (not account approval). Do not confuse with `user_roles.account_status`.
@@ -249,6 +251,6 @@ select private.assign_admin('you@example.com');
 
 | Function | Purpose |
 |----------|---------|
-| `list_user_accounts_for_admin()` | Auth users + `user_roles` + email |
-| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended`. Approve requires admin, or maintenance/tenant/landlord with its link id (LGA-18). Non-approve UPDATEs existing row (keeps links); INSERTs unlinked maintenance queue row only when missing |
+| `list_user_accounts_for_admin()` | Auth users + `user_roles` + email + `email_confirmed_at` |
+| `set_account_status(user_id, status)` | `pending\|approved\|rejected\|suspended`. Approve requires `email_confirmed_at`, and role must be admin or linked maintenance/tenant/landlord (LGA-18). Non-approve UPDATEs existing row (keeps links); INSERTs unlinked maintenance queue row only when missing |
 | `admin_set_user_role(user_id, role, landlord_id?, tenant_id?, staff_id?)` | Role + link-id assignment |

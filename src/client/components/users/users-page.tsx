@@ -37,16 +37,15 @@ function statusVariant(status: AccountStatus): "default" | "secondary" | "destru
   return "outline";
 }
 
-/** Staff/admin, linked tenant shell, or linked landlord read-only shell. */
-function canApproveForPortal(user: UserAccountRow): boolean {
-  if (user.role === "admin") return true;
-  if (user.role === "maintenance" && user.staff_id != null) return true;
-  if (user.role === "tenant" && user.tenant_id != null) return true;
-  if (user.role === "landlord" && user.landlord_id != null) return true;
-  return false;
+/** Explicit null = unconfirmed. Undefined = RPC predates column — do not UI-block. */
+function isEmailUnconfirmed(user: UserAccountRow): boolean {
+  return user.email_confirmed_at === null;
 }
 
 function approveBlockedReason(user: UserAccountRow): string | null {
+  if (isEmailUnconfirmed(user)) {
+    return "Email must be confirmed before approving.";
+  }
   if (!user.role) return "Assign a role before approving.";
   if (user.role === "maintenance" && user.staff_id == null) {
     return "Link a Staff row before approving a maintenance account.";
@@ -58,6 +57,11 @@ function approveBlockedReason(user: UserAccountRow): string | null {
     return "Link a Landlord row before approving a landlord account.";
   }
   return null;
+}
+
+/** True when Approve is allowed (no block reason). */
+function canApproveForPortal(user: UserAccountRow): boolean {
+  return approveBlockedReason(user) == null;
 }
 
 export function UsersPage() {
@@ -249,7 +253,7 @@ export function UsersPage() {
           <UserCog className="size-8 text-faint" aria-hidden />
           <p className="font-medium">No users in this filter</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            New signups appear as pending after email verification.
+            New signups appear as pending; email must be confirmed before Approve.
           </p>
         </div>
       ) : (
@@ -278,6 +282,9 @@ export function UsersPage() {
                       <Badge variant={statusVariant(user.account_status)}>
                         {user.account_status}
                       </Badge>
+                      {isEmailUnconfirmed(user) && (
+                        <Badge variant="outline">unconfirmed email</Badge>
+                      )}
                       <span>role: {user.role ?? "none"}</span>
                       {user.staff_id != null && <span>staff #{user.staff_id}</span>}
                       {user.landlord_id != null && <span>landlord #{user.landlord_id}</span>}

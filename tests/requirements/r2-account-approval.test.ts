@@ -139,6 +139,42 @@ describe("[R2] Account approval", () => {
         /invalid account_status/i,
       );
     });
+
+    test("an admin cannot approve until the email is confirmed", async () => {
+      await sql(
+        `insert into public."Staff" (first_name, last_name, email, gets_request_alerts)
+         values ('Vera', 'Unverified', 'vera.unverified@test.local', true)`,
+      );
+      // Direct auth.users insert fires on_auth_user_created → pending maintenance+staff.
+      const login = await sql<{ id: string }>(
+        `insert into auth.users (email, encrypted_password, email_confirmed_at)
+         values ('vera.unverified@test.local', 'x', null) returning id`,
+      );
+      expect(await statusOf(login[0].id)).toBe("pending");
+
+      await signInApp("admin");
+      const accounts = await data.listUserAccounts();
+      expect(accounts.find((a) => a.user_id === login[0].id)).toMatchObject({
+        email_confirmed_at: null,
+        account_status: "pending",
+        role: "maintenance",
+      });
+      await expect(data.setAccountStatus(login[0].id, "approved")).rejects.toThrow(
+        /email must be confirmed before approving/i,
+      );
+      expect(await statusOf(login[0].id)).toBe("pending");
+
+      // Reject/suspend must still work without email confirmation.
+      const rejected = await data.setAccountStatus(login[0].id, "rejected");
+      expect(rejected.account_status).toBe("rejected");
+      await sql(`update public.user_roles set account_status = 'pending' where user_id = $1`, [
+        login[0].id,
+      ]);
+
+      await sql(`update auth.users set email_confirmed_at = now() where id = $1`, [login[0].id]);
+      const approved = await data.setAccountStatus(login[0].id, "approved");
+      expect(approved.account_status).toBe("approved");
+    });
   });
 
   describe("assigning roles", () => {
