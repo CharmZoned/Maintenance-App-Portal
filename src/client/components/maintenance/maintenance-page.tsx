@@ -365,19 +365,37 @@ export function MaintenancePage({
           <QueueTab
             label={`Needs action (${counts.needs})`}
             active={staffTab === "needs"}
-            onClick={() => setStaffTab("needs")}
+            onClick={() => {
+              setStaffTab("needs");
+              // Dashboard ?filter= intersects status tabs; clear on first tab change
+              // so tabs behave as normal status filters afterward.
+              if (focusFilter) replace?.("/maintenance");
+            }}
           />
           <QueueTab
             label={`Active (${counts.active})`}
             active={staffTab === "active"}
-            onClick={() => setStaffTab("active")}
+            onClick={() => {
+              setStaffTab("active");
+              if (focusFilter) replace?.("/maintenance");
+            }}
           />
           <QueueTab
             label={`Completed (${counts.completed})`}
             active={staffTab === "completed"}
-            onClick={() => setStaffTab("completed")}
+            onClick={() => {
+              setStaffTab("completed");
+              if (focusFilter) replace?.("/maintenance");
+            }}
           />
-          <QueueTab label="All" active={staffTab === "all"} onClick={() => setStaffTab("all")} />
+          <QueueTab
+            label="All"
+            active={staffTab === "all"}
+            onClick={() => {
+              setStaffTab("all");
+              if (focusFilter) replace?.("/maintenance");
+            }}
+          />
         </div>
       )}
 
