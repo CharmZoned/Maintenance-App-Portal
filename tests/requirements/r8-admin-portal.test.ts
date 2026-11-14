@@ -47,14 +47,14 @@ describe("[R8] Admin web portal", () => {
       await signInApp("admin");
       const period = "2098-06";
       const first = await data.generateCharges(period);
-      expect(first.created).toBeGreaterThanOrEqual(2);
+      expect(first.created).toBe(2);
       const second = await data.generateCharges(period);
       expect(second.created).toBe(0);
 
       const listed = await data.listCharges(period);
-      expect(listed.length).toBeGreaterThanOrEqual(2);
+      expect(listed).toHaveLength(2);
       expect(listed.every((c) => c.period === period)).toBe(true);
-      expect(listed.some((c) => c.unit_name === "1A" || c.unit_name === "2B")).toBe(true);
+      expect(listed.map((c) => c.unit_name).sort()).toEqual(["1A", "2B"]);
     });
   });
 

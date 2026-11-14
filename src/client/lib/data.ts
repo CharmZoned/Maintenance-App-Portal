@@ -76,6 +76,23 @@ function throwSb(error: { message: string } | null): never {
   throw new Error(error?.message || "Supabase request failed");
 }
 
+/** PostgREST default max-rows is 1000 — page so list/KPI paths are not silently truncated. */
+const REST_PAGE_SIZE = 1000;
+
+async function selectAllPages<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += REST_PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + REST_PAGE_SIZE - 1);
+    if (error) throwSb(error);
+    const rows = data ?? [];
+    out.push(...rows);
+    if (rows.length < REST_PAGE_SIZE) break;
+  }
+  return out;
+}
+
 async function assertOk<T>(result: { data: T; error: { message: string } | null }): Promise<T> {
   if (result.error) throwSb(result.error);
   return result.data;
@@ -1049,32 +1066,36 @@ async function leasesByIds(leaseIds: number[]): Promise<Map<number, Lease>> {
 }
 
 export async function listCharges(period?: string): Promise<RentCharge[]> {
-  let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false });
-  if (period) q = q.eq("period", period);
-  const { data: charges, error } = await q;
-  if (error) throwSb(error);
+  const charges = await selectAllPages<Tables<"RentCharges">>((from, to) => {
+    let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false }).range(from, to);
+    if (period) q = q.eq("period", period);
+    return q;
+  });
 
-  const leaseIds = [...new Set((charges ?? []).map((c) => c.lease_id))];
+  const leaseIds = [...new Set(charges.map((c) => c.lease_id))];
   const leaseMap = await leasesByIds(leaseIds);
 
-  return (charges ?? []).map((c) => mapCharge(c, chargeExtrasFromLease(leaseMap.get(c.lease_id))));
+  return charges.map((c) => mapCharge(c, chargeExtrasFromLease(leaseMap.get(c.lease_id))));
 }
 
 export async function generateCharges(period: string): Promise<{ created: number; period: string }> {
   // Slim active-lease fetch — charge gen only needs id / rent / due day (no unit/tenant enrich).
-  const { data: leases, error: leaseErr } = await supabase
-    .from("Leases")
-    .select("id, monthly_rent, rent_due_day")
-    .eq("status", "active");
-  if (leaseErr) throwSb(leaseErr);
-  if (!leases?.length) return { created: 0, period };
+  // Page past PostgREST max-rows so large portfolios are not silently truncated.
+  const [leases, existingRows] = await Promise.all([
+    selectAllPages<{ id: number; monthly_rent: number; rent_due_day: number }>((from, to) =>
+      supabase
+        .from("Leases")
+        .select("id, monthly_rent, rent_due_day")
+        .eq("status", "active")
+        .range(from, to),
+    ),
+    selectAllPages<{ lease_id: number }>((from, to) =>
+      supabase.from("RentCharges").select("lease_id").eq("period", period).range(from, to),
+    ),
+  ]);
+  if (!leases.length) return { created: 0, period };
 
-  const { data: existingRows, error: existingErr } = await supabase
-    .from("RentCharges")
-    .select("lease_id")
-    .eq("period", period);
-  if (existingErr) throwSb(existingErr);
-  const existing = new Set((existingRows ?? []).map((r) => r.lease_id));
+  const existing = new Set(existingRows.map((r) => r.lease_id));
 
   const dueDayDefault = 1;
   const toInsert = leases
@@ -1094,12 +1115,16 @@ export async function generateCharges(period: string): Promise<{ created: number
   if (!toInsert.length) return { created: 0, period };
 
   // Batch upsert: UNIQUE(lease_id, period) + ignoreDuplicates keeps races soft (no all-or-nothing fail).
-  const { error: insertErr } = await supabase.from("RentCharges").upsert(toInsert, {
-    onConflict: "lease_id,period",
-    ignoreDuplicates: true,
-  });
+  // RETURNING only includes inserted rows when conflicts are ignored — use that for `created`.
+  const { data: inserted, error: insertErr } = await supabase
+    .from("RentCharges")
+    .upsert(toInsert, {
+      onConflict: "lease_id,period",
+      ignoreDuplicates: true,
+    })
+    .select("id");
   if (insertErr) throwSb(insertErr);
-  return { created: toInsert.length, period };
+  return { created: (inserted ?? []).length, period };
 }
 
 export async function listPayments(chargeId: number): Promise<Payment[]> {
@@ -1744,6 +1769,9 @@ function dashboardWoStatus(status: string): WorkOrderStatus {
   return "open";
 }
 
+/** Live WO CHECK open set (Closed excluded). Matches dashboard open filter. */
+const DASHBOARD_OPEN_WO_STATUSES = ["Open", "Scheduled", "In Progress", "On Hold"] as const;
+
 async function loadDashboardAggregateRows(period: string): Promise<{
   propertyCount: number;
   units: { id: number; status: string }[];
@@ -1752,38 +1780,44 @@ async function loadDashboardAggregateRows(period: string): Promise<{
   workOrders: DashboardWoRow[];
 }> {
   // Slim aggregates — avoid full listProperties/listUnits/listLeases/listCharges/listWorkOrders graphs.
-  const [
-    { data: propertyRows, error: propErr },
-    { data: unitRows, error: unitErr },
-    { data: leaseRows, error: leaseErr },
-    { data: chargeRows, error: chargeErr },
-    { data: woRows, error: woErr },
-  ] = await Promise.all([
-    // id-only (not head/count) — works on PostgREST and the local emulator.
-    supabase.from("Properties").select("id"),
-    supabase.from("Units").select("id, status"),
-    supabase
-      .from("Leases")
-      .select("id, status, end_date, unit_id, primary_tenant_id")
-      .eq("status", "active"),
-    supabase.from("RentCharges").select("amount, amount_paid, status, due_date").eq("period", period),
-    supabase
-      .from("MaintenanceRequests")
-      .select("id, title, priority, status, property_id, unit_id, created_at")
-      .order("created_at", { ascending: false }),
+  // Page open WOs + period charges past PostgREST max-rows so money/WO KPIs stay accurate.
+  const [propertyRows, units, activeLeases, charges, workOrders] = await Promise.all([
+    selectAllPages<{ id: number }>((from, to) =>
+      supabase.from("Properties").select("id").range(from, to),
+    ),
+    selectAllPages<{ id: number; status: string }>((from, to) =>
+      supabase.from("Units").select("id, status").range(from, to),
+    ),
+    selectAllPages<DashboardLeaseRow>((from, to) =>
+      supabase
+        .from("Leases")
+        .select("id, status, end_date, unit_id, primary_tenant_id")
+        .eq("status", "active")
+        .range(from, to),
+    ),
+    selectAllPages<DashboardChargeRow>((from, to) =>
+      supabase
+        .from("RentCharges")
+        .select("amount, amount_paid, status, due_date")
+        .eq("period", period)
+        .range(from, to),
+    ),
+    selectAllPages<DashboardWoRow>((from, to) =>
+      supabase
+        .from("MaintenanceRequests")
+        .select("id, title, priority, status, property_id, unit_id, created_at")
+        .in("status", [...DASHBOARD_OPEN_WO_STATUSES])
+        .order("created_at", { ascending: false })
+        .range(from, to),
+    ),
   ]);
-  if (propErr) throwSb(propErr);
-  if (unitErr) throwSb(unitErr);
-  if (leaseErr) throwSb(leaseErr);
-  if (chargeErr) throwSb(chargeErr);
-  if (woErr) throwSb(woErr);
 
   return {
-    propertyCount: (propertyRows ?? []).length,
-    units: unitRows ?? [],
-    activeLeases: (leaseRows ?? []) as DashboardLeaseRow[],
-    charges: (chargeRows ?? []) as DashboardChargeRow[],
-    workOrders: (woRows ?? []) as DashboardWoRow[],
+    propertyCount: propertyRows.length,
+    units,
+    activeLeases,
+    charges,
+    workOrders,
   };
 }
 
