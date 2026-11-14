@@ -142,6 +142,70 @@ describe("[R7] Permissions", () => {
       }
       expect(leaked, `tables a ${status} account can read`).toEqual([]);
     });
+
+    test.each(["pending", "rejected", "suspended"] as const)(
+      "a %s account cannot write portfolio, photos, storage, comments, or staff notes",
+      async (status) => {
+        await sql(`update public.user_roles set account_status = $2 where user_id = $1`, [
+          world.users.worker2.id,
+          status,
+        ]);
+        const client = await clientFor("worker2");
+
+        expectDenied(await client.from("Vendors").insert({ name: `${status}-vendor` }).select());
+        expectDenied(
+          await client.from("Properties").update({ property_name: "Hacked" }).eq("id", world.property.id).select(),
+        );
+        expectDenied(await client.from("Units").delete().eq("id", world.units.b.id).select());
+        expectDenied(
+          await client
+            .from("MaintenanceRequestPhotos")
+            .insert({
+              maintenance_request_id: requestId,
+              storage_path: `${requestId}/unapproved.png`,
+              uploaded_by_user_id: world.users.worker2.id,
+            })
+            .select(),
+        );
+        expectDenied(
+          await client
+            .from("MaintenanceRequestComments")
+            .insert({
+              maintenance_request_id: requestId,
+              body: "should fail",
+              visibility: "internal",
+              author_user_id: world.users.worker2.id,
+              author_role: "maintenance",
+            })
+            .select(),
+        );
+        expectDenied(
+          await client
+            .from("MaintenanceRequestStaffNotes")
+            .upsert({ maintenance_request_id: requestId, notes: "nope" })
+            .select(),
+        );
+
+        const photoUp = await client.storage
+          .from("maintenance-photos")
+          .upload(`${requestId}/unapproved-${status}.png`, new Blob([new Uint8Array([1])], { type: "image/png" }));
+        expect(photoUp.error).not.toBeNull();
+        const docUp = await client.storage
+          .from("property-documents")
+          .upload(`${world.property.id}/unapproved-${status}.pdf`, new Blob(["x"], { type: "application/pdf" }));
+        expect(docUp.error).not.toBeNull();
+
+        expect(await sql(`select 1 from public."Vendors" where name = $1`, [`${status}-vendor`])).toHaveLength(0);
+        expect(
+          (
+            await sql<{ property_name: string }>(`select property_name from public."Properties" where id = $1`, [
+              world.property.id,
+            ])
+          )[0].property_name,
+        ).not.toBe("Hacked");
+        expect(await sql(`select 1 from public."Units" where id = $1`, [world.units.b.id])).toHaveLength(1);
+      },
+    );
   });
 
   describe("a tenant", () => {
