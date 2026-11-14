@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -152,7 +153,13 @@ export function RequestDetailPage({
     : "Request";
 
   const timeline = useMemo(() => {
-    type TimelineRow = { who: string; when: string; body: string; at: string };
+    type TimelineRow = {
+      who: string;
+      when: string;
+      body: string;
+      at: string;
+      visibility?: CommentVisibility;
+    };
     if (!order) return [] as TimelineRow[];
     const rows: TimelineRow[] = [];
     if (order.description) {
@@ -177,6 +184,7 @@ export function RequestDetailPage({
         when: formatActivityStamp(c.created_at),
         body: c.body,
         at: c.created_at,
+        visibility: c.visibility,
       });
     }
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -254,6 +262,7 @@ export function RequestDetailPage({
           : "internal";
       await app.addMaintenanceComment(order.id, commentBody.trim(), visibility);
       setCommentBody("");
+      if (!app.isTenant) setCommentVisibleToTenant(false);
       setReloadKey((k) => k + 1);
     } catch (err) {
       setError((err as Error).message);
@@ -469,8 +478,17 @@ export function RequestDetailPage({
               <ul className="mt-3 space-y-3">
                 {timeline.map((row, i) => (
                   <li key={`${row.at}-${i}`}>
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {row.who} · {row.when}
+                    <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+                      <span>
+                        {row.who} · {row.when}
+                      </span>
+                      {!app.isTenant && row.visibility ? (
+                        <Badge variant="outline">
+                          {row.visibility === "internal"
+                            ? "Internal"
+                            : "Tenant visible"}
+                        </Badge>
+                      ) : null}
                     </p>
                     <p className="text-[13px] text-foreground">{row.body}</p>
                   </li>
@@ -618,9 +636,13 @@ export function RequestDetailPage({
 
       <WorkOrderDialog
         open={editOpen}
-        onOpenChange={setEditOpen}
+        onOpenChange={(o) => {
+          setEditOpen(o);
+          // Single refresh path on close — picks up dialog comments/photos
+          // (those don't call onSaved) without double-loading after Save.
+          if (!o) setReloadKey((k) => k + 1);
+        }}
         workOrder={order}
-        onSaved={() => setReloadKey((k) => k + 1)}
       />
 
       <Dialog
