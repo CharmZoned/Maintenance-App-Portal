@@ -489,6 +489,32 @@ describe("[R7] Permissions", () => {
         expect(await sql(`select 1 from public."Payments" where id = $1`, [payment.id])).toHaveLength(1);
       });
 
+      test("admin cannot UPDATE RentCharges.amount_paid or status except via payment RPCs", async () => {
+        const id = await freshCharge("2099-10");
+        await signInApp("admin");
+        await data.recordPayment({ charge_id: id, amount: 50, method: "cash" });
+        const client = await clientFor("admin");
+        const paid = await client
+          .from("RentCharges")
+          .update({ amount_paid: 9999 })
+          .eq("id", id)
+          .select("amount_paid");
+        expect(paid.error?.message ?? "").toMatch(/record_payment|delete_payment|amount_paid|status/i);
+        expect(paid.data ?? []).toEqual([]);
+        const status = await client
+          .from("RentCharges")
+          .update({ status: "paid" })
+          .eq("id", id)
+          .select("status");
+        expect(status.error?.message ?? "").toMatch(/record_payment|delete_payment|amount_paid|status/i);
+        expect(status.data ?? []).toEqual([]);
+        const [row] = await sql<{ amount_paid: string; status: string }>(
+          `select amount_paid::text, status from public."RentCharges" where id = $1`,
+          [id],
+        );
+        expect(row).toMatchObject({ amount_paid: "50", status: "partial" });
+      });
+
       test("a zero or negative payment amount is refused", async () => {
         const id = await freshCharge("2099-07");
         await signInApp("admin");
