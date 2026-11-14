@@ -52,6 +52,7 @@ export function MessagesPage({
   const [threadError, setThreadError] = useState<string | null>(null);
   const [mobileThread, setMobileThread] = useState(false);
   const [commentVisibility, setCommentVisibility] = useState<CommentVisibility>("internal");
+  const [threadReloadKey, setThreadReloadKey] = useState(0);
 
   const load = useCallback(async () => {
     setState("loading");
@@ -140,7 +141,7 @@ export function MessagesPage({
     return () => {
       cancelled = true;
     };
-  }, [selectedRequestId, listMaintenanceComments, setError, isLandlord]);
+  }, [selectedRequestId, threadReloadKey, listMaintenanceComments, setError, isLandlord]);
 
   function openThread(thread: MessageThread) {
     setSelectedId(thread.id);
@@ -166,6 +167,8 @@ export function MessagesPage({
       setComments((prev) => [...prev, created]);
     } catch (err) {
       setError((err as Error).message);
+      // Rethrow so MessageComposer keeps the draft (its catch handles it).
+      throw err;
     }
   }
 
@@ -219,26 +222,7 @@ export function MessagesPage({
         ) : threadError ? (
           <ErrorRetry
             message={threadError}
-            onRetry={() => {
-              // Re-trigger effect by clearing then setting same id via noop state bump
-              setThreadError(null);
-              setComments([]);
-              setThreadLoading(true);
-              void listMaintenanceComments(selectedRequestId!)
-                .then((rows) => {
-                  setComments(
-                    isLandlord
-                      ? rows.filter((row) => row.visibility === "tenant_visible")
-                      : rows,
-                  );
-                  setThreadError(null);
-                })
-                .catch((err) => {
-                  setComments([]);
-                  setThreadError((err as Error).message);
-                })
-                .finally(() => setThreadLoading(false));
-            }}
+            onRetry={() => setThreadReloadKey((k) => k + 1)}
           />
         ) : comments.length === 0 ? (
           <EmptyState

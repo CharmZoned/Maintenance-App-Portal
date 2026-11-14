@@ -13,6 +13,9 @@ type Props = {
   variant?: "panel" | "sheet";
 };
 
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 /**
  * Bell flyout — Figma Admin N5 Panel and Tenant N5 Sheet.
  * Notifications are stubbed until R6 / message-center API exists.
@@ -27,19 +30,59 @@ export function NotificationsPanel({
 }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const wasOpenRef = useRef(false);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  // Focus Close only on false→true; restore focus on close. Escape via stable ref.
+  useEffect(() => {
+    const justOpened = open && !wasOpenRef.current;
+    const justClosed = !open && wasOpenRef.current;
+    wasOpenRef.current = open;
+
+    if (justOpened) {
+      previouslyFocusedRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      // Defer so the dialog node is mounted.
+      requestAnimationFrame(() => closeRef.current?.focus());
+    }
+    if (justClosed) {
+      previouslyFocusedRef.current?.focus?.();
+      previouslyFocusedRef.current = null;
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    closeRef.current?.focus();
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const root = panelRef.current;
+      if (!root) return;
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (el) => el.offsetParent != null || el === document.activeElement,
+      );
+      if (nodes.length === 0) return;
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      if (e.shiftKey) {
+        if (document.activeElement === first || !root.contains(document.activeElement)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (document.activeElement === last || !root.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -118,6 +161,7 @@ export function NotificationsPanel({
         type="button"
         className="fixed inset-0 z-40 bg-transparent"
         aria-label="Dismiss notifications"
+        tabIndex={-1}
         onClick={onClose}
       />
       <div

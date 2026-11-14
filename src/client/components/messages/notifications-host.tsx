@@ -99,12 +99,14 @@ export function NotificationsHost({
     if (item.href) onNavigate(item.href);
   }
 
+  const handleClose = useCallback(() => onOpenChange(false), [onOpenChange]);
+
   return (
     <NotificationsPanel
       open={open}
       items={items}
       variant={variant}
-      onClose={() => onOpenChange(false)}
+      onClose={handleClose}
       onMarkAllRead={markAllRead}
       onSelect={selectItem}
     />
