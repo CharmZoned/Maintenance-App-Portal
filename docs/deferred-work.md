@@ -4,6 +4,9 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 
 | Task | Value / what it unlocks | Why deferred | Revisit when |
 |------|-------------------------|--------------|--------------|
+| Unit picker on tenant dialog (set `Tenants.unit_id` without going through a lease) | Direct assign for portfolio tenants before/without lease CRUD | WS-G shipped lease create/update/delete sync (gap R3); optional UI kept S | Next tenants UX pass |
+| Lease tenant/unit sync as a single DB RPC/transaction (`FOR UPDATE`) | Fully atomic create/update/delete; closes residual races (delete∩update TOCTOU; multi-step sync vs a newer CAS winner) beyond FE CAS + `assertLeaseLinkState` + superseded repair | WS-G stayed FE/`data.ts`-only: CAS, absolute occupant set, before/after rechecks, repair without overwriting winner | If concurrent admin edits collide in prod, or next schema AuthZ pass |
+| Return single lease from create/update without full `listLeases()` enrich | Fewer RTTs on lease save | Pre-existing pattern; WS-G left return path unchanged | Next rent/leases perf pass |
 | ~~Payment ledger / status **RPC tests** (record, delete, SUM vs drift, non-admin deny, direct Payment DML deny)~~ | ~~Catches ledger regressions before multi-staff~~ | **Done (WS-J)** — `tests/requirements/r7-permissions.test.ts` payment ledger RPCs | Shipped with Wave 2 test expansion |
 | Soft-fail bootstrap / surface `generateCharges` errors via popup/toast | Admins see failed charge creation instead of silent skips | UX polish; not AuthZ; High/Must Phase 1.5 done | Next rent/charges UX pass or when charge generation is used in production |
 | Lazy-load `MaintenanceRequestStaffNotes` on WO dialog open (not every `listWorkOrders`) | Smaller list payloads for landlords/tenants/dashboard | WS-E ships batched notes enrich on list for staff UX parity; not AuthZ | Next maintenance UX / perf pass (WS-N) |
