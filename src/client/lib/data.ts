@@ -645,39 +645,57 @@ async function syncLeaseTenantLinks(args: {
  * When a slower sync is superseded mid-flight, it may have already upserted a
  * replaced primary into LeaseTenants / set occupant units. Remove those stale
  * writes and re-converge to the *current* lease state — never overwrite the
- * newer lease row.
+ * newer lease row. Re-reads + post-write assert with retry so a second concurrent
+ * update cannot leave repair applying an obsolete snapshot.
  */
 async function repairSupersededLeaseSync(
   leaseId: number,
   afterPrimary: number | null,
   afterUnit: number,
 ): Promise<void> {
-  const { data: lease, error } = await supabase
-    .from("Leases")
-    .select("unit_id, primary_tenant_id")
-    .eq("id", leaseId)
-    .maybeSingle();
-  if (error) throwSb(error);
-  if (!lease) return;
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const { data: lease, error } = await supabase
+      .from("Leases")
+      .select("unit_id, primary_tenant_id")
+      .eq("id", leaseId)
+      .maybeSingle();
+    if (error) throwSb(error);
+    if (!lease) {
+      // Lease deleted under us — only clear our stale afterPrimary unit if still set.
+      if (afterPrimary != null) {
+        await clearTenantUnitsMatching([afterPrimary], afterUnit);
+      }
+      return;
+    }
 
-  const currentPrimary = (lease.primary_tenant_id as number | null) ?? null;
-  const currentUnit = lease.unit_id as number;
+    const currentPrimary = (lease.primary_tenant_id as number | null) ?? null;
+    const currentUnit = lease.unit_id as number;
+    const expected = { unit_id: currentUnit, primary_tenant_id: currentPrimary };
 
-  if (afterPrimary != null && afterPrimary !== currentPrimary) {
-    const { error: ltErr } = await supabase
-      .from("LeaseTenants")
-      .delete()
-      .eq("lease_id", leaseId)
-      .eq("tenant_id", afterPrimary);
-    if (ltErr) throwSb(ltErr);
-    await clearTenantUnitsMatching([afterPrimary], afterUnit);
+    if (afterPrimary != null && afterPrimary !== currentPrimary) {
+      const { error: ltErr } = await supabase
+        .from("LeaseTenants")
+        .delete()
+        .eq("lease_id", leaseId)
+        .eq("tenant_id", afterPrimary);
+      if (ltErr) throwSb(ltErr);
+      await clearTenantUnitsMatching([afterPrimary], afterUnit);
+    }
+
+    await setOccupantsUnit(leaseId, currentUnit, currentPrimary);
+    if (currentPrimary != null) {
+      await linkPrimaryTenantToLease(leaseId, currentUnit, currentPrimary);
+    }
+
+    try {
+      await assertLeaseLinkState(leaseId, expected);
+      return;
+    } catch {
+      // Lease moved again mid-repair — retry with a fresh snapshot.
+    }
   }
-
-  // Occupants may have been parked on our stale afterUnit — snap to winner's unit.
-  await setOccupantsUnit(leaseId, currentUnit, currentPrimary);
-  if (currentPrimary != null) {
-    await linkPrimaryTenantToLease(leaseId, currentUnit, currentPrimary);
-  }
+  throw new Error(LEASE_CONCURRENT_MSG);
 }
 
 /**
@@ -854,6 +872,11 @@ export async function deleteLease(id: number): Promise<void> {
     throw new Error("Lease not found");
   }
 
+  const snapshot = {
+    unit_id: lease.unit_id as number,
+    primary_tenant_id: (lease.primary_tenant_id as number | null) ?? null,
+  };
+
   const { data: members, error: membersErr } = await supabase
     .from("LeaseTenants")
     .select("tenant_id")
@@ -862,16 +885,22 @@ export async function deleteLease(id: number): Promise<void> {
 
   const tenantIds = [...new Set<number>([
     ...(members ?? []).map((m) => m.tenant_id),
-    ...(lease.primary_tenant_id != null ? [lease.primary_tenant_id] : []),
+    ...(snapshot.primary_tenant_id != null ? [snapshot.primary_tenant_id] : []),
   ])];
 
-  // Clear unit links first so tenant RLS scope cannot retain a deleted lease's unit.
-  await clearTenantUnitsMatching(tenantIds, lease.unit_id);
-
-  const { error: ltErr } = await supabase.from("LeaseTenants").delete().eq("lease_id", id);
-  if (ltErr) throwSb(ltErr);
-  const { error } = await supabase.from("Leases").delete().eq("id", id);
+  // CAS-delete the lease while still at the snapshot link state. LeaseTenants
+  // cascade (ON DELETE CASCADE), so memberships go with the row — no clear-first
+  // partial state, and a concurrent updateLease that already moved unit/primary wins.
+  let del = supabase.from("Leases").delete().eq("id", id);
+  del = leaseCasFilter(del as never, snapshot) as typeof del;
+  const { data: deleted, error } = await del.select("id").maybeSingle();
   if (error) throwSb(error);
+  if (!deleted) {
+    throw new Error(LEASE_CONCURRENT_MSG);
+  }
+
+  // Clear unit links only after the lease is gone (product rule: clear, no reassign).
+  await clearTenantUnitsMatching(tenantIds, snapshot.unit_id);
 }
 
 // ── Rent ──────────────────────────────────────────────────────────
