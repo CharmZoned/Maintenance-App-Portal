@@ -297,6 +297,61 @@ describe("[R3] Properties and units", () => {
       expect(tenant.primary_on_lease).toBe(false);
     });
 
+    test("ending an active lease clears tenant.unit_id via DB sync (LD-9)", async () => {
+      const [{ id: tenantId }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('End', 'Status', 'end@status.test', false, false) returning id`,
+      );
+      const [{ id: unitId }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'End-U', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const lease = await data.createLease({
+        unit_id: Number(unitId),
+        primary_tenant_id: Number(tenantId),
+        start_date: "2026-05-01",
+        end_date: "2027-04-30",
+        monthly_rent: 950,
+      });
+      await data.updateLease(lease.id, { status: "ended" });
+      const [tenant] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantId],
+      );
+      expect(tenant.unit_id, "status→ended clears unit when no other active lease").toBeNull();
+      expect(tenant.primary_on_lease).toBe(false);
+    });
+
+    test("removing LeaseTenants membership clears unit_id when no other active lease (LD-9)", async () => {
+      const [{ id: tenantId }] = await sql<{ id: number }>(
+        `insert into public."Tenants" (first_name, last_name, email, primary_on_lease, invite_to_app)
+         values ('Un', 'Link', 'un@link.test', false, false) returning id`,
+      );
+      const [{ id: unitId }] = await sql<{ id: number }>(
+        `insert into public."Units" (property_id, unit_label, status) values ($1, 'Un-U', 'Vacant') returning id`,
+        [world.property.id],
+      );
+      await signInApp("admin");
+      const lease = await data.createLease({
+        unit_id: Number(unitId),
+        primary_tenant_id: Number(tenantId),
+        start_date: "2026-06-01",
+        end_date: "2027-05-31",
+        monthly_rent: 975,
+      });
+      await sql(`delete from public."LeaseTenants" where lease_id = $1 and tenant_id = $2`, [
+        lease.id,
+        tenantId,
+      ]);
+      const [tenant] = await sql<{ unit_id: number | null; primary_on_lease: boolean }>(
+        `select unit_id, primary_on_lease from public."Tenants" where id = $1`,
+        [tenantId],
+      );
+      expect(tenant.unit_id, "LeaseTenants DELETE clears unit when orphaned").toBeNull();
+      expect(tenant.primary_on_lease).toBe(false);
+    });
+
     test("renames a property", async () => {
       await signInApp("admin");
       const updated = await data.updateProperty(world.otherProperty.id, { name: "Birch House (renovated)" });

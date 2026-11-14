@@ -82,9 +82,9 @@ create policy property_documents_insert on public."PropertyDocuments"
   for insert
   to authenticated
   with check (
-    private.can_manage_property_documents()
+    (select private.can_manage_property_documents())
     and uploaded_by_user_id = (select auth.uid())
-    and not (uploaded_by_role is distinct from private.current_role())
+    and not (uploaded_by_role is distinct from (select private.current_role()))
     and storage_path ~ (('^'::text || (property_id)::text) || '/[^/]+$'::text)
-    and (private.is_admin() or (visibility = 'staff'::text))
+    and ((select private.is_admin()) or (visibility = 'staff'::text))
   );

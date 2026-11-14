@@ -55,8 +55,54 @@ create trigger maintenance_request_property_matches_unit
   for each row
   execute function private.maintenance_request_property_matches_unit();
 
--- 4) Keep private.tenants.unit_id aligned with the tenant's active lease unit
-create or replace function private.sync_tenant_unit_from_active_lease()
+-- 4) Recompute private.tenants.unit_id from remaining active lease membership.
+--    p_exclude_lease_id: ignore a lease that is ending/deleting (still visible to the
+--    statement). p_left_lease_unit_id: only clear when unit_id still matches that unit
+--    (same conditional clear as app Gap R3). Prefer another active lease when present.
+create or replace function private.recompute_tenant_unit_from_leases(
+  p_tenant_id bigint,
+  p_left_lease_unit_id bigint default null,
+  p_exclude_lease_id bigint default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  active_unit bigint;
+begin
+  select l.unit_id into active_unit
+  from public."LeaseTenants" lt
+  join public."Leases" l on l.id = lt.lease_id
+  where lt.tenant_id = p_tenant_id
+    and l.status = 'active'
+    and (p_exclude_lease_id is null or l.id is distinct from p_exclude_lease_id)
+  order by l.start_date desc nulls last, l.id desc
+  limit 1;
+
+  if active_unit is not null then
+    update private.tenants t
+       set unit_id = active_unit
+     where t.id = p_tenant_id
+       and t.unit_id is distinct from active_unit;
+    return;
+  end if;
+
+  if p_left_lease_unit_id is null then
+    return;
+  end if;
+
+  update private.tenants t
+     set unit_id = null,
+         primary_on_lease = false
+   where t.id = p_tenant_id
+     and t.unit_id = p_left_lease_unit_id;
+end;
+$$;
+
+-- 5) LeaseTenants insert/update pushes active unit; delete/reassign recomputes
+create or replace function private.sync_tenant_unit_from_lease_tenants()
 returns trigger
 language plpgsql
 security definer
@@ -64,7 +110,34 @@ set search_path = ''
 as $$
 declare
   lease_unit bigint;
+  lease_status text;
 begin
+  if tg_op = 'DELETE' then
+    select l.unit_id, l.status into lease_unit, lease_status
+    from public."Leases" l
+    where l.id = old.lease_id;
+
+    -- Parent already gone (ON DELETE CASCADE from Leases): lease-level trigger handled it.
+    if not found then
+      return old;
+    end if;
+
+    perform private.recompute_tenant_unit_from_leases(old.tenant_id, lease_unit, old.lease_id);
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE'
+     and (
+       old.tenant_id is distinct from new.tenant_id
+       or old.lease_id is distinct from new.lease_id
+     )
+  then
+    select l.unit_id into lease_unit
+    from public."Leases" l
+    where l.id = old.lease_id;
+    perform private.recompute_tenant_unit_from_leases(old.tenant_id, lease_unit, old.lease_id);
+  end if;
+
   select l.unit_id into lease_unit
   from public."Leases" l
   where l.id = new.lease_id
@@ -83,21 +156,44 @@ $$;
 
 drop trigger if exists lease_tenants_sync_tenant_unit on public."LeaseTenants";
 create trigger lease_tenants_sync_tenant_unit
-  after insert or update of lease_id, tenant_id
+  after insert or update of lease_id, tenant_id or delete
   on public."LeaseTenants"
   for each row
-  execute function private.sync_tenant_unit_from_active_lease();
+  execute function private.sync_tenant_unit_from_lease_tenants();
 
--- 5) When a lease becomes active (or its unit changes while active), sync members
-create or replace function private.sync_tenants_on_lease_activation()
+-- 6) Lease become-active / unit change pushes; leave-active and delete clear orphans
+create or replace function private.sync_tenants_on_lease_status()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  member record;
+  left_unit bigint;
 begin
+  if tg_op = 'DELETE' then
+    left_unit := old.unit_id;
+    for member in
+      select lt.tenant_id
+      from public."LeaseTenants" lt
+      where lt.lease_id = old.id
+    loop
+      perform private.recompute_tenant_unit_from_leases(
+        member.tenant_id,
+        left_unit,
+        old.id
+      );
+    end loop;
+    return old;
+  end if;
+
   if new.status = 'active'
-     and (tg_op = 'INSERT' or old.status is distinct from 'active' or old.unit_id is distinct from new.unit_id)
+     and (
+       tg_op = 'INSERT'
+       or old.status is distinct from 'active'
+       or old.unit_id is distinct from new.unit_id
+     )
   then
     update private.tenants t
        set unit_id = new.unit_id
@@ -105,14 +201,46 @@ begin
      where lt.lease_id = new.id
        and lt.tenant_id = t.id
        and t.unit_id is distinct from new.unit_id;
+    return new;
   end if;
+
+  if tg_op = 'UPDATE'
+     and old.status = 'active'
+     and new.status is distinct from 'active'
+  then
+    left_unit := coalesce(old.unit_id, new.unit_id);
+    for member in
+      select lt.tenant_id
+      from public."LeaseTenants" lt
+      where lt.lease_id = new.id
+    loop
+      perform private.recompute_tenant_unit_from_leases(
+        member.tenant_id,
+        left_unit,
+        new.id
+      );
+    end loop;
+  end if;
+
   return new;
 end;
 $$;
 
 drop trigger if exists leases_sync_tenant_units on public."Leases";
+drop trigger if exists leases_sync_tenant_units_before_delete on public."Leases";
+-- Prior draft names from earlier commits of this migration (idempotent).
+drop function if exists private.sync_tenants_on_lease_activation();
+drop function if exists private.sync_tenant_unit_from_active_lease();
+
 create trigger leases_sync_tenant_units
   after insert or update of status, unit_id
   on public."Leases"
   for each row
-  execute function private.sync_tenants_on_lease_activation();
+  execute function private.sync_tenants_on_lease_status();
+
+-- BEFORE DELETE so memberships still exist and we can exclude this lease id.
+create trigger leases_sync_tenant_units_before_delete
+  before delete
+  on public."Leases"
+  for each row
+  execute function private.sync_tenants_on_lease_status();
