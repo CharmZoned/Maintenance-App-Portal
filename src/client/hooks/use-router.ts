@@ -60,10 +60,12 @@ export function useRouter() {
     // replace: always sync React path (even when URL pathname already matches),
     // so callers that replaceState'd first (or pass replace) do not no-op.
     if (!opts?.replace && to === window.location.pathname) return;
+    const url = `${to}${search}${opts?.replace ? window.location.hash : ""}`;
     if (opts?.replace) {
-      window.history.replaceState(null, "", `${to}${search}${window.location.hash}`);
+      window.history.replaceState(null, "", url);
     } else {
-      window.history.pushState(null, "", to);
+      // Honor opts.search when provided; omitted → "" clears leftover query.
+      window.history.pushState(null, "", `${to}${search}`);
     }
     setPath(to);
   }, []);

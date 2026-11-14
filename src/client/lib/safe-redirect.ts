@@ -1,4 +1,4 @@
-import { parseRoute } from "../hooks/use-router";
+import { parseRoute, type Route } from "../hooks/use-router";
 
 /**
  * Post-login navigation helpers for `?redirect=` / `?intent=` (Phase 4b / WS-R).
@@ -18,19 +18,54 @@ import { parseRoute } from "../hooks/use-router";
  *   if still present on the URL.
  */
 
-/** Website `?intent=` → default post-login path (when `?redirect=` absent/unsafe). */
-export const INTENT_DEFAULTS: Record<string, string> = {
+/** Portal audience for shell home / route clamps. */
+export type PortalAudience = "staff" | "tenant" | "landlord";
+
+/** Single source of role home paths (intent defaults + shell clamps + reset onDone). */
+export const ROLE_HOME: Record<PortalAudience, string> = {
   staff: "/dashboard",
   tenant: "/maintenance",
   landlord: "/properties",
 };
 
+/** @deprecated Prefer ROLE_HOME — kept as alias for intent map clarity. */
+export const INTENT_DEFAULTS = ROLE_HOME;
+
+const INTENT_LABELS: Record<string, string> = {
+  tenant: "Tenant sign-in",
+  landlord: "Landlord sign-in",
+  staff: "Staff and admin sign-in",
+};
+
 /** Login page subtitle for website `?intent=` branding. */
 export function intentLoginLabel(intent: string | null | undefined): string {
-  const key = intent?.trim().toLowerCase();
-  if (key === "tenant") return "Tenant sign-in";
-  if (key === "landlord") return "Landlord sign-in";
-  return "Staff and admin sign-in";
+  const key = intent?.trim().toLowerCase() ?? "";
+  return INTENT_LABELS[key] ?? INTENT_LABELS.staff;
+}
+
+export function isTenantAllowedRoute(route: Route): boolean {
+  return route.name === "maintenance" || route.name === "documents";
+}
+
+export function isLandlordAllowedRoute(route: Route): boolean {
+  return (
+    route.name === "properties" ||
+    route.name === "property" ||
+    route.name === "maintenance" ||
+    route.name === "documents"
+  );
+}
+
+/** Clamp a pathname to the audience shell (staff: no clamp). */
+export function clampPathForAudience(pathname: string, audience: PortalAudience): string {
+  const route = parseRoute(pathname);
+  if (audience === "tenant") {
+    return isTenantAllowedRoute(route) ? pathname : ROLE_HOME.tenant;
+  }
+  if (audience === "landlord") {
+    return isLandlordAllowedRoute(route) ? pathname : ROLE_HOME.landlord;
+  }
+  return pathname;
 }
 
 /** True when pathname is a real portal route (same rules as the SPA router). */
@@ -104,7 +139,7 @@ export function resolvePostLoginPath({
   if (intent == null) return null;
   const key = intent.trim().toLowerCase();
   if (!key) return null;
-  return INTENT_DEFAULTS[key] ?? null;
+  return ROLE_HOME[key as PortalAudience] ?? null;
 }
 
 /** Read redirect/intent from the current location search string. */
@@ -130,4 +165,44 @@ export function stripLoginRedirectParams(search: string): string {
   params.delete("intent");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
+}
+
+export type ReadyLandingInput = {
+  search: string;
+  origin: string;
+  pathname: string;
+  audience: PortalAudience;
+};
+
+export type ReadyLanding = {
+  path: string;
+  search: string;
+  /** True when URL path and/or login query params need a replace navigation. */
+  shouldNavigate: boolean;
+};
+
+function normalizeSearch(search: string): string {
+  if (!search) return "";
+  return search.startsWith("?") ? search : `?${search}`;
+}
+
+/**
+ * Single post-ready landing step: honor safe redirect/intent, strip those params,
+ * then clamp to the audience shell — one replace navigation, no effect-order races.
+ */
+export function resolveReadyLanding({
+  search,
+  origin,
+  pathname,
+  audience,
+}: ReadyLandingInput): ReadyLanding {
+  const { target, hadParams } = readLoginRedirectParams(search, origin);
+  const currentSearch = normalizeSearch(search);
+  const nextSearch = hadParams ? stripLoginRedirectParams(search) : currentSearch;
+  const desired = clampPathForAudience(target ?? pathname, audience);
+  return {
+    path: desired,
+    search: nextSearch,
+    shouldNavigate: desired !== pathname || nextSearch !== currentSearch,
+  };
 }

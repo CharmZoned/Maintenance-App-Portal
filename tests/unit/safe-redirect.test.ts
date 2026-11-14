@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
+  clampPathForAudience,
   readLoginRedirectParams,
   resolvePostLoginPath,
+  resolveReadyLanding,
+  ROLE_HOME,
   safeInternalPath,
   stripLoginRedirectParams,
 } from "@/lib/safe-redirect";
@@ -112,5 +115,64 @@ describe("login redirect query helpers", () => {
     expect(stripLoginRedirectParams("?redirect=/rent&foo=1&intent=staff")).toBe("?foo=1");
     expect(stripLoginRedirectParams("?redirect=/rent")).toBe("");
     expect(stripLoginRedirectParams("")).toBe("");
+  });
+});
+
+describe("clampPathForAudience / resolveReadyLanding", () => {
+  test("tenant and landlord clamps match shell homes", () => {
+    expect(clampPathForAudience("/dashboard", "tenant")).toBe(ROLE_HOME.tenant);
+    expect(clampPathForAudience("/documents", "tenant")).toBe("/documents");
+    expect(clampPathForAudience("/maintenance", "tenant")).toBe("/maintenance");
+    expect(clampPathForAudience("/rent", "landlord")).toBe(ROLE_HOME.landlord);
+    expect(clampPathForAudience("/properties/3", "landlord")).toBe("/properties/3");
+    expect(clampPathForAudience("/documents", "landlord")).toBe("/documents");
+    expect(clampPathForAudience("/rent", "staff")).toBe("/rent");
+  });
+
+  test("ready landing applies redirect then role clamp in one step", () => {
+    expect(
+      resolveReadyLanding({
+        search: "?redirect=/documents",
+        origin: ORIGIN,
+        pathname: "/",
+        audience: "tenant",
+      }),
+    ).toEqual({ path: "/documents", search: "", shouldNavigate: true });
+
+    expect(
+      resolveReadyLanding({
+        search: "?redirect=/dashboard&intent=tenant",
+        origin: ORIGIN,
+        pathname: "/",
+        audience: "tenant",
+      }),
+    ).toEqual({ path: ROLE_HOME.tenant, search: "", shouldNavigate: true });
+
+    expect(
+      resolveReadyLanding({
+        search: "?intent=landlord",
+        origin: ORIGIN,
+        pathname: "/dashboard",
+        audience: "landlord",
+      }),
+    ).toEqual({ path: ROLE_HOME.landlord, search: "", shouldNavigate: true });
+
+    expect(
+      resolveReadyLanding({
+        search: "",
+        origin: ORIGIN,
+        pathname: "/maintenance",
+        audience: "tenant",
+      }),
+    ).toEqual({ path: "/maintenance", search: "", shouldNavigate: false });
+
+    expect(
+      resolveReadyLanding({
+        search: "?redirect=https://evil.com&foo=1",
+        origin: ORIGIN,
+        pathname: "/dashboard",
+        audience: "staff",
+      }),
+    ).toEqual({ path: "/dashboard", search: "?foo=1", shouldNavigate: true });
   });
 });

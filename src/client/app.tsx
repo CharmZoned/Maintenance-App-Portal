@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AppNav, reportLocation, type AppNavItem } from "@clawnify/app/client";
 import { useAppState } from "./hooks/use-app-state";
 import { useAuth } from "./hooks/use-auth";
-import { parseRoute, useRouter, type Route } from "./hooks/use-router";
+import { useRouter, type Route } from "./hooks/use-router";
 import { AppContext } from "./context";
 import { ErrorBanner } from "./components/error-banner";
 import { NoticeBanner } from "./components/notice-banner";
@@ -25,8 +25,10 @@ import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-pass
 import { BlockedPage } from "./components/auth/blocked-page";
 import { Button } from "./components/ui/button";
 import {
-  readLoginRedirectParams,
-  stripLoginRedirectParams,
+  isLandlordAllowedRoute,
+  ROLE_HOME,
+  resolveReadyLanding,
+  type PortalAudience,
 } from "./lib/safe-redirect";
 
 const PORTFOLIO: AppNavItem[] = [
@@ -62,15 +64,6 @@ function activeFor(route: Route): string {
   return route.name;
 }
 
-function landlordHomeRoute(route: Route): boolean {
-  return (
-    route.name === "properties" ||
-    route.name === "property" ||
-    route.name === "maintenance" ||
-    route.name === "documents"
-  );
-}
-
 type AuthScreen = "login" | "reset-request" | "reset-confirm";
 
 export function App() {
@@ -101,38 +94,20 @@ export function App() {
     }
   }, []);
 
-  // Phase 4b / WS-R: honor safe ?redirect= (or website ?intent= defaults) once ready.
-  // replace:true always syncs router state (avoids no-op after URL already matches).
+  // Phase 4b / WS-R + role shell: one replace landing (redirect/intent → clamp).
+  // No separate effects — avoids same-tick order races and replace-then-push history.
   useEffect(() => {
     if (!ready) return;
-    const { target, hadParams } = readLoginRedirectParams(
-      window.location.search,
-      window.location.origin,
-    );
-    if (!hadParams && !target) return;
-
-    const cleanedSearch = stripLoginRedirectParams(window.location.search);
-    const nextPath = target ?? window.location.pathname;
-    navigate(nextPath, { replace: true, search: cleanedSearch });
-  }, [ready, navigate]);
-
-  // Read window.location.pathname so same-tick WS-R replaceState is visible
-  // before React path state flushes (avoids clobbering allowlisted deep links).
-  useEffect(() => {
-    if (!ready || !isTenant) return;
-    const here = parseRoute(window.location.pathname);
-    if (here.name !== "maintenance" && here.name !== "documents") {
-      navigate("/maintenance");
-    }
-  }, [ready, isTenant, path, navigate]);
-
-  useEffect(() => {
-    if (!ready || !isLandlord) return;
-    const here = parseRoute(window.location.pathname);
-    if (!landlordHomeRoute(here)) {
-      navigate("/properties");
-    }
-  }, [ready, isLandlord, path, navigate]);
+    const audience: PortalAudience = isTenant ? "tenant" : isLandlord ? "landlord" : "staff";
+    const landing = resolveReadyLanding({
+      search: window.location.search,
+      origin: window.location.origin,
+      pathname: window.location.pathname,
+      audience,
+    });
+    if (!landing.shouldNavigate) return;
+    navigate(landing.path, { replace: true, search: landing.search });
+  }, [ready, isTenant, isLandlord, path, navigate]);
 
   if (auth.gate.state === "loading") {
     return (
@@ -236,7 +211,11 @@ export function App() {
     );
   }
 
-  const homePath = isTenant ? "/maintenance" : isLandlord ? "/properties" : "/dashboard";
+  const homePath = isTenant
+    ? ROLE_HOME.tenant
+    : isLandlord
+      ? ROLE_HOME.landlord
+      : ROLE_HOME.staff;
 
   // reset-password while already authenticated (from email link)
   if (authScreen === "reset-confirm" && window.location.pathname === "/reset-password") {
@@ -316,7 +295,7 @@ export function App() {
               {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
               {route.name === "maintenance" && <MaintenancePage />}
               {route.name === "documents" && <LandlordDocumentsPage />}
-              {!landlordHomeRoute(route) && (
+              {!isLandlordAllowedRoute(route) && (
                 <Placeholder
                   title="Landlord portal"
                   message="Read-only view of your properties, maintenance, and documents. Editing is not available yet."
