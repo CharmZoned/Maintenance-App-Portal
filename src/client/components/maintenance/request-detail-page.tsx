@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { PageShell } from "@/components/page-shell";
 import {
   ErrorRetry,
@@ -16,8 +25,9 @@ import {
   toRequestStatus,
   unitPropertyLabel,
 } from "@/lib/request-status";
-import { formatDate } from "@/lib/utils";
+import { formatDate, toIsoDate } from "@/lib/utils";
 import type {
+  CommentVisibility,
   MaintenanceComment,
   MaintenancePhoto,
   MaintenanceStatusEvent,
@@ -25,6 +35,8 @@ import type {
 } from "@/types";
 import { WorkOrderDialog } from "./work-order-dialog";
 import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
+
+type CompanionKind = "complete" | "hold" | null;
 
 /**
  * N3 Request detail — full page (Figma 03 Request). Role chrome differs:
@@ -48,9 +60,14 @@ export function RequestDetailPage({
   const [reloadKey, setReloadKey] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [commentBody, setCommentBody] = useState("");
+  const [commentVisibleToTenant, setCommentVisibleToTenant] = useState(false);
   const [posting, setPosting] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [companion, setCompanion] = useState<CompanionKind>(null);
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [holdReason, setHoldReason] = useState("");
+  const [followUpDate, setFollowUpDate] = useState("");
 
   const listWorkOrders = app.listWorkOrders;
   const listPhotos = app.listMaintenancePhotos;
@@ -113,8 +130,17 @@ export function RequestDetailPage({
   const nextStep = order ? requestNextStep(order) : undefined;
   const priority = order ? priorityLevel(order.priority) : null;
   const location = order
-    ? unitPropertyLabel(order.unit_name, order.property_name)
+    ? unitPropertyLabel(order.unit_name, order.property_name) ||
+      (app.isTenant ? "Your home" : "—")
     : "";
+  // unitPropertyLabel returns "Your home" for empty — override for staff/landlord.
+  const locationDisplay =
+    order &&
+    !order.unit_name?.trim() &&
+    !order.property_name?.trim() &&
+    !app.isTenant
+      ? "—"
+      : location;
   const reporter = order
     ? [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ") ||
       (app.isTenant ? "You" : "—")
@@ -156,7 +182,10 @@ export function RequestDetailPage({
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
   }, [order, history, comments, app.isTenant, reporter]);
 
-  async function runStatus(next: WorkOrder["status"], extra?: Parameters<typeof app.updateWorkOrder>[1]) {
+  async function runStatus(
+    next: WorkOrder["status"],
+    extra?: Parameters<typeof app.updateWorkOrder>[1],
+  ) {
     if (!order) return;
     setActionBusy(true);
     try {
@@ -165,6 +194,7 @@ export function RequestDetailPage({
         { status: next, ...extra },
         { previousStatus: order.status },
       );
+      setCompanion(null);
       setReloadKey((k) => k + 1);
     } catch (err) {
       setError((err as Error).message);
@@ -173,15 +203,56 @@ export function RequestDetailPage({
     }
   }
 
+  function openComplete() {
+    setResolutionNotes(order?.resolution_notes?.trim() || "");
+    setCompanion("complete");
+  }
+
+  function openHold() {
+    setHoldReason(order?.hold_reason?.trim() || "");
+    setFollowUpDate(
+      order?.next_follow_up_date?.slice(0, 10) || toIsoDate(new Date()),
+    );
+    setCompanion("hold");
+  }
+
+  async function confirmCompanion() {
+    if (companion === "complete") {
+      const notes = resolutionNotes.trim();
+      if (!notes) {
+        setError("Closing requires resolution notes.");
+        return;
+      }
+      await runStatus("closed", { resolution_notes: notes });
+      return;
+    }
+    if (companion === "hold") {
+      const reason = holdReason.trim();
+      if (!reason) {
+        setError("On hold requires a reason.");
+        return;
+      }
+      if (!followUpDate) {
+        setError("On hold requires a follow-up date.");
+        return;
+      }
+      await runStatus("on_hold", {
+        hold_reason: reason,
+        next_follow_up_date: followUpDate,
+      });
+    }
+  }
+
   async function postComment() {
     if (!order || !commentBody.trim() || app.isLandlord) return;
     setPosting(true);
     try {
-      await app.addMaintenanceComment(
-        order.id,
-        commentBody.trim(),
-        app.isTenant ? "tenant_visible" : "tenant_visible",
-      );
+      const visibility: CommentVisibility = app.isTenant
+        ? "tenant_visible"
+        : commentVisibleToTenant
+          ? "tenant_visible"
+          : "internal";
+      await app.addMaintenanceComment(order.id, commentBody.trim(), visibility);
       setCommentBody("");
       setReloadKey((k) => k + 1);
     } catch (err) {
@@ -266,10 +337,10 @@ export function RequestDetailPage({
             size="header"
             disabled={actionBusy}
             onClick={() => {
-              if (primaryAdminAction === "Assign and schedule" || primaryAdminAction === undefined) {
+              if (primaryAdminAction === "Assign and schedule") {
                 setEditOpen(true);
               } else if (primaryAdminAction === "Complete") {
-                void runStatus("closed");
+                openComplete();
               } else if (primaryAdminAction === "Start work") {
                 void runStatus("in_progress");
               }
@@ -299,7 +370,7 @@ export function RequestDetailPage({
           <section className="rounded-md border border-border bg-card p-4">
             <h2 className="text-sm font-semibold text-foreground">Details</h2>
             <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Location" value={location || "—"} />
+              <Field label="Location" value={locationDisplay || "—"} />
               <Field
                 label={app.isTenant ? "Reported" : "Reported by"}
                 value={`${app.isTenant ? "You" : reporter || "—"} · ${formatActivityStamp(order.created_at)}`}
@@ -408,26 +479,39 @@ export function RequestDetailPage({
             )}
 
             {!app.isLandlord ? (
-              <div className="mt-4 flex items-center gap-2 border-t border-border pt-3">
-                <Input
-                  value={commentBody}
-                  onChange={(e) => setCommentBody(e.target.value)}
-                  placeholder="Send a message…"
-                  className="h-8 flex-1"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void postComment();
-                    }
-                  }}
-                />
-                <Button
-                  size="header"
-                  disabled={posting || !commentBody.trim()}
-                  onClick={() => void postComment()}
-                >
-                  Send
-                </Button>
+              <div className="mt-4 space-y-2 border-t border-border pt-3">
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={commentBody}
+                    onChange={(e) => setCommentBody(e.target.value)}
+                    placeholder="Send a message…"
+                    className="h-8 flex-1"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void postComment();
+                      }
+                    }}
+                  />
+                  <Button
+                    size="header"
+                    disabled={posting || !commentBody.trim()}
+                    onClick={() => void postComment()}
+                  >
+                    Send
+                  </Button>
+                </div>
+                {!app.isTenant ? (
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={commentVisibleToTenant}
+                      onChange={(e) => setCommentVisibleToTenant(e.target.checked)}
+                    />
+                    Visible to tenant
+                  </label>
+                ) : null}
               </div>
             ) : (
               <p className="mt-3 text-xs text-muted-foreground">
@@ -499,9 +583,18 @@ export function RequestDetailPage({
                   <Button
                     className="h-11 w-full"
                     disabled={actionBusy}
-                    onClick={() => void runStatus("closed")}
+                    onClick={openComplete}
                   >
                     Complete
+                  </Button>
+                )}
+                {status === "On hold" && (
+                  <Button
+                    className="h-11 w-full"
+                    disabled={actionBusy}
+                    onClick={() => void runStatus("in_progress")}
+                  >
+                    Resume
                   </Button>
                 )}
                 {status !== "On hold" && status !== "Completed" && (
@@ -509,11 +602,7 @@ export function RequestDetailPage({
                     className="h-11 w-full"
                     variant="secondary"
                     disabled={actionBusy}
-                    onClick={() =>
-                      void runStatus("on_hold", {
-                        hold_reason: order.hold_reason || "On hold",
-                      })
-                    }
+                    onClick={openHold}
                   >
                     Put on hold
                   </Button>
@@ -529,13 +618,74 @@ export function RequestDetailPage({
 
       <WorkOrderDialog
         open={editOpen}
-        onOpenChange={(o) => {
-          setEditOpen(o);
-          if (!o) setReloadKey((k) => k + 1);
-        }}
+        onOpenChange={setEditOpen}
         workOrder={order}
         onSaved={() => setReloadKey((k) => k + 1)}
       />
+
+      <Dialog
+        open={companion != null}
+        onOpenChange={(o) => {
+          if (!o) setCompanion(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {companion === "complete" ? "Complete request" : "Put on hold"}
+            </DialogTitle>
+          </DialogHeader>
+          {companion === "complete" ? (
+            <div className="grid gap-2">
+              <Label htmlFor="resolution-notes">Resolution notes</Label>
+              <Textarea
+                id="resolution-notes"
+                value={resolutionNotes}
+                onChange={(e) => setResolutionNotes(e.target.value)}
+                rows={3}
+                placeholder="What fixed it?"
+              />
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="hold-reason">Hold reason</Label>
+                <Input
+                  id="hold-reason"
+                  value={holdReason}
+                  onChange={(e) => setHoldReason(e.target.value)}
+                  placeholder="Waiting on parts…"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="follow-up-date">Follow-up date</Label>
+                <Input
+                  id="follow-up-date"
+                  type="date"
+                  value={followUpDate}
+                  onChange={(e) => setFollowUpDate(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setCompanion(null)} disabled={actionBusy}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                actionBusy ||
+                (companion === "complete"
+                  ? !resolutionNotes.trim()
+                  : !holdReason.trim() || !followUpDate)
+              }
+              onClick={() => void confirmCompanion()}
+            >
+              {companion === "complete" ? "Complete" : "Put on hold"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }
