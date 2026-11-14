@@ -30,6 +30,7 @@ import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
 import { PortalNav, MobileTabBar, ShellChromeProvider } from "./components/chrome";
 import { FoundationGalleryPage } from "./components/foundation/foundation-gallery-page";
+import { PeoplePage } from "./components/people/people-page";
 import { navItemsForAudience } from "./lib/portal-nav";
 import {
   isLandlordAllowedRoute,
@@ -393,11 +394,7 @@ export function App() {
                   {route.name === "properties" && <PropertiesList navigate={navigate} />}
                   {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
                   {route.name === "people" && (
-                    <StubPage
-                      title="People"
-                      meta="Tenants · landlords · team"
-                      message="People screens land in the Messages/People PR. Direct URLs to Landlords, Tenants, and Users still work for admins."
-                    />
+                    <PeoplePage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "messages" && (
                     <StubPage
