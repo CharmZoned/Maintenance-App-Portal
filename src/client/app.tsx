@@ -159,8 +159,8 @@ export function App() {
   if (auth.gate.state === "no_role") {
     return (
       <BlockedPage
-        title="No role assigned"
-        message="Your account is signed in but has no portal role yet. Ask an admin to assign a role on the Users page, or run private.assign_admin for bootstrap."
+        title="Your account isn’t set up yet"
+        message="You’re signed in, but no portal role is linked yet. Message us and we’ll sort it out. Admins can assign a role on the Users page."
         onRetry={() => void auth.retryRole()}
         retryLabel="Check again"
         onLogout={() => void auth.logout()}
@@ -170,14 +170,33 @@ export function App() {
 
   if (auth.gate.state === "unapproved") {
     const status = auth.gate.role.account_status;
-    const pendingCopy =
+    const blocked =
       status === "pending"
-        ? "Your email is verified (or signup is complete). An admin must approve your account before you can use the portal. After approval, use Check again or sign in again."
-        : `Your account status is “${status}”. Contact an admin if you believe this is a mistake. After they change your status, use Check again.`;
+        ? {
+            title: "Thanks — we’re reviewing your account",
+            message:
+              "You’ve confirmed your email. We’ll be in touch within one business day once your account is approved. An admin must approve your account before you can use the portal.",
+          }
+        : status === "suspended"
+          ? {
+              title: "Your access is paused",
+              message:
+                "This account has been suspended. Contact Landlord Gopher if you need access restored.",
+            }
+          : status === "rejected"
+            ? {
+                title: "We couldn’t approve this account",
+                message:
+                  "If you think this is a mistake, reply to the email we sent or contact Landlord Gopher and we’ll take another look.",
+              }
+            : {
+                title: "Account not approved",
+                message: `Your account status is “${status}”. Contact an admin if you believe this is a mistake. After they change your status, use Check again.`,
+              };
     return (
       <BlockedPage
-        title="Account not approved"
-        message={pendingCopy}
+        title={blocked.title}
+        message={blocked.message}
         onRetry={() => void auth.retryRole()}
         retryLabel="Check again"
         onLogout={() => void auth.logout()}
@@ -197,7 +216,7 @@ export function App() {
             : "This portal is for admin, maintenance staff, linked tenants, or linked landlords.";
     return (
       <BlockedPage
-        title="Access required"
+        title="Your account isn’t set up yet"
         message={`Signed in as ${role}. ${hint}`}
         onRetry={() => void auth.retryRole()}
         retryLabel="Check again"

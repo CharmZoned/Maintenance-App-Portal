@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { AuthCard, AuthNotice, AuthShell } from "./auth-card";
 
 interface Props {
   title: string;
@@ -10,19 +11,26 @@ interface Props {
 
 export function BlockedPage({ title, message, onLogout, onRetry, retryLabel = "Retry" }: Props) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50 p-6 text-center">
-      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-      <p className="max-w-md text-sm text-muted-foreground">{message}</p>
-      <div className="flex gap-2">
-        {onRetry && (
-          <Button type="button" onClick={onRetry}>
-            {retryLabel}
+    <AuthShell>
+      <AuthCard>
+        <AuthNotice tone="muted">
+          <h1 className="text-[15px] font-semibold text-foreground">{title}</h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
+        </AuthNotice>
+        <p className="text-xs text-muted-foreground">
+          Need help? Message Landlord Gopher from the email you signed up with.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {onRetry && (
+            <Button type="button" variant="brand" className="h-11" onClick={onRetry}>
+              {retryLabel}
+            </Button>
+          )}
+          <Button type="button" variant="outline" className="h-11" onClick={onLogout}>
+            Sign out
           </Button>
-        )}
-        <Button variant="outline" onClick={onLogout}>
-          Sign out
-        </Button>
-      </div>
-    </div>
+        </div>
+      </AuthCard>
+    </AuthShell>
   );
 }

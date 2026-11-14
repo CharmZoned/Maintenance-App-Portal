@@ -108,21 +108,40 @@ export function useAuth() {
    * open redirects via signup email links. Post-login `?redirect=` is handled
    * in the app shell only after the auth gate is `ready`.
    */
-  const signup = useCallback(async (email: string, password: string): Promise<"session" | "confirm"> => {
-    setAuthError(null);
-    const emailRedirectTo = `${window.location.origin}/dashboard`;
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo },
-    });
-    if (error) {
-      setAuthError(error.message);
-      throw error;
-    }
-    if (data.session) return "session";
-    return "confirm";
-  }, []);
+  const signup = useCallback(
+    async (
+      email: string,
+      password: string,
+      extras?: {
+        fullName?: string;
+        intentRole?: "tenant" | "landlord";
+        address?: string;
+      },
+    ): Promise<"session" | "confirm"> => {
+      setAuthError(null);
+      const emailRedirectTo = `${window.location.origin}/dashboard`;
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo,
+          // Stub: intent metadata for admin review — no schema/API for profile yet.
+          data: {
+            full_name: extras?.fullName ?? null,
+            intent_role: extras?.intentRole ?? null,
+            signup_address: extras?.address || null,
+          },
+        },
+      });
+      if (error) {
+        setAuthError(error.message);
+        throw error;
+      }
+      if (data.session) return "session";
+      return "confirm";
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     setAuthError(null);
