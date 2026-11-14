@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { MAINTENANCE_CATEGORIES, type MaintenanceCategory, type TenantHomeContext } from "@/types";
 import { X } from "lucide-react";
+import { MAX_MAINTENANCE_PHOTOS } from "./work-order-status";
 
 interface Props {
   open: boolean;
@@ -69,7 +70,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
 
   function addFiles(list: FileList | null) {
     if (!list) return;
-    setFiles((prev) => [...prev, ...Array.from(list)].slice(0, 5));
+    setFiles((prev) => [...prev, ...Array.from(list)].slice(0, MAX_MAINTENANCE_PHOTOS));
   }
 
   function removeFile(index: number) {
@@ -91,7 +92,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
       if (files.length) {
         try {
           await Promise.all(
-            files.slice(0, 5).map((file) => app.uploadMaintenancePhoto(created.id, file)),
+            files.slice(0, MAX_MAINTENANCE_PHOTOS).map((file) => app.uploadMaintenancePhoto(created.id, file)),
           );
         } catch (photoErr) {
           photoFail = true;
@@ -191,13 +192,13 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             Permission to enter if nobody is home
           </label>
           <div>
-            <Label htmlFor="tenant-photos">Photos (optional, up to 5)</Label>
+            <Label htmlFor="tenant-photos">Photos (optional, up to {MAX_MAINTENANCE_PHOTOS})</Label>
             <Input
               id="tenant-photos"
               type="file"
               accept="image/*"
               multiple
-              disabled={noUnit || files.length >= 5}
+              disabled={noUnit || files.length >= MAX_MAINTENANCE_PHOTOS}
               onChange={(e) => {
                 addFiles(e.target.files);
                 e.target.value = "";

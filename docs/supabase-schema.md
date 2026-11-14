@@ -112,6 +112,8 @@ Key/value: `key` PK, `value`, `updated_at`. Phase 1: staff/admin SELECT; admin D
 
 **WS-S S2 #4** (`20261114080000_*`): demote (`admin_set_user_role`) or suspend/reject/pending (`set_account_status`) that would leave **zero** approved admins raises `Cannot remove the last approved admin`.
 
+**WS-S S2 #6** (`20261114090000_*`): BEFORE INSERT trigger on `MaintenanceRequestPhotos` refuses a 6th row per request (`A maintenance request may have at most 5 photos`).
+
 ### `Applications`
 
 Rental applicants (not account approval). Do not confuse with `user_roles.account_status`.

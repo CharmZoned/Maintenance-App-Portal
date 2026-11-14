@@ -363,7 +363,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
             photoFiles
               .slice(0, MAX_MAINTENANCE_PHOTOS)
               .map((file) => app.uploadMaintenancePhoto(id!, file)),
-          );
+          ); // create path: no prior photos yet
         } catch (photoErr) {
           photoFail = true;
           app.setError((photoErr as Error).message);
@@ -464,11 +464,10 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   async function uploadMorePhotos() {
     if (!workOrder || !photoFiles.length) return;
     const id = workOrder.id;
+    const remaining = Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length);
     try {
       await Promise.all(
-        photoFiles
-          .slice(0, MAX_MAINTENANCE_PHOTOS)
-          .map((file) => app.uploadMaintenancePhoto(id, file)),
+        photoFiles.slice(0, remaining).map((file) => app.uploadMaintenancePhoto(id, file)),
       );
       if (workOrderId !== id) return;
       setPhotoFiles([]);
@@ -546,6 +545,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 comments={comments}
                 photoFiles={photoFiles}
                 photoPreviews={photoPreviews}
+                remainingPhotoSlots={Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length)}
                 onPhotoFilesChange={setPhotoFiles}
                 onUploadPhotos={() => void uploadMorePhotos()}
                 commentBody={commentBody}
