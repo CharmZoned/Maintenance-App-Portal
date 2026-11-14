@@ -1596,22 +1596,37 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
     .order("created_at", { ascending: true });
   if (error) throwSb(error);
   const rows = data ?? [];
-  return Promise.all(
+  if (rows.length === 0) return [];
+
+  // Prefer one batch sign; fall back per path if a batch entry is missing
+  // (older Storage hosts / incomplete responses).
+  const paths = rows.map((row) => row.storage_path);
+  const { data: signedList } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(paths, 3600);
+  const urlByPath = new Map<string, string>();
+  for (const entry of signedList ?? []) {
+    if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
+  }
+  await Promise.all(
     rows.map(async (row) => {
+      if (urlByPath.has(row.storage_path)) return;
       const { data: signed } = await supabase.storage
         .from(PHOTO_BUCKET)
         .createSignedUrl(row.storage_path, 3600);
-      return {
-        id: row.id,
-        maintenance_request_id: row.maintenance_request_id,
-        storage_path: row.storage_path,
-        caption: row.caption,
-        created_at: row.created_at,
-        uploaded_by_role: row.uploaded_by_role,
-        url: signed?.signedUrl ?? null,
-      };
+      if (signed?.signedUrl) urlByPath.set(row.storage_path, signed.signedUrl);
     }),
   );
+
+  return rows.map((row) => ({
+    id: row.id,
+    maintenance_request_id: row.maintenance_request_id,
+    storage_path: row.storage_path,
+    caption: row.caption,
+    created_at: row.created_at,
+    uploaded_by_role: row.uploaded_by_role,
+    url: urlByPath.get(row.storage_path) ?? null,
+  }));
 }
 
 export async function uploadMaintenancePhoto(

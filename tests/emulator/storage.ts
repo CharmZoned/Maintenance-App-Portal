@@ -62,17 +62,49 @@ export class StorageApi {
     if (seg[0] !== "object") return fail(404, "not_found", `Storage route not supported by the test emulator: ${req.path}`);
 
     try {
-      // POST /object/sign/:bucket/*path → signed URL
+      // POST /object/sign/:bucket  { paths, expiresIn } → batch signed URLs
+      // POST /object/sign/:bucket/*path → single signed URL
       if (req.method === "POST" && seg[1] === "sign") {
         const [bucketId, ...rest] = seg.slice(2);
+        const body = (await req.request.json().catch(() => ({}))) as {
+          expiresIn?: number;
+          paths?: string[];
+        };
+        const expiresIn = body.expiresIn ?? 60;
+
+        // Batch (supabase-js createSignedUrls): no object path in the URL.
+        if (rest.length === 0 && Array.isArray(body.paths)) {
+          const out: Array<{
+            error: string | null;
+            path: string;
+            signedURL: string | null;
+          }> = [];
+          for (const name of body.paths) {
+            if (!(await this.visible(req.role, req.claims, bucketId, name))) {
+              out.push({ error: "Object not found", path: name, signedURL: null });
+              continue;
+            }
+            const token = signJwt({
+              url: `${bucketId}/${name}`,
+              exp: Math.floor(Date.now() / 1000) + expiresIn,
+            });
+            const encoded = [bucketId, ...name.split("/")].map(encodeURIComponent).join("/");
+            out.push({
+              error: null,
+              path: name,
+              signedURL: `/object/sign/${encoded}?token=${token}`,
+            });
+          }
+          return { status: 200, body: out };
+        }
+
         const name = rest.join("/");
         if (!(await this.visible(req.role, req.claims, bucketId, name))) {
           return fail(400, "not_found", "Object not found");
         }
-        const body = (await req.request.json().catch(() => ({}))) as { expiresIn?: number };
         const token = signJwt({
           url: `${bucketId}/${name}`,
-          exp: Math.floor(Date.now() / 1000) + (body.expiresIn ?? 60),
+          exp: Math.floor(Date.now() / 1000) + expiresIn,
         });
         const encoded = [bucketId, ...rest].map(encodeURIComponent).join("/");
         return { status: 200, body: { signedURL: `/object/sign/${encoded}?token=${token}` } };
