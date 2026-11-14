@@ -39,7 +39,7 @@
 - [x] Replace Hono/D1 client fetches with Supabase queries/mutations
 - [x] Field-name mapping layer (`src/client/lib/mappers.ts`)
 - [x] Client does not call `/api` for dashboard/properties/units/tenants/leases/rent/maintenance/vendors/settings
-- [x] Hono/D1 left in repo but unused by client
+- [x] Hono/D1 archived under `archive/legacy-d1-hono/` (unused by client; 410 stub kept for r7)
 
 ### FE — P1c Landlords
 

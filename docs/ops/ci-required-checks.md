@@ -8,7 +8,7 @@ On every PR to `master` and every push to `master`, GitHub Actions runs:
 
 1. `pnpm typecheck`
 2. `pnpm build`
-3. `pnpm test` (emulator suite; **285 pass / 10 R6 `test.todo` is expected green**)
+3. `pnpm test` (emulator suite; **289 pass / 10 R6 `test.todo` is expected green**)
 
 Job name shown in the Checks UI: **`typecheck / build / test`**.
 

@@ -10,6 +10,6 @@
     "../vitest.config.ts",
     "../playwright.config.ts",
     "../src/client/vite-env.d.ts",
-    "../archive/legacy-d1-hono/**/*.ts"
+    "../archive/legacy-d1-hono/index.ts"
   ]
 }
