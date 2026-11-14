@@ -23,29 +23,27 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Login page");
   });
 
-  test("an admin sees the dashboard and every section of the portal", async ({ page }, testInfo) => {
+  test("an admin sees the dashboard and Phase 0 primary nav", async ({ page }, testInfo) => {
     await signIn(page, "admin");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
     await expect(page.getByText("Occupancy").first()).toBeVisible();
     await expect(page.getByText("Open work orders").first()).toBeVisible();
     expect(await navLinks(page)).toEqual([
-      "Properties",
-      "Landlords",
-      "Tenants",
-      "Leases",
-      "Rent",
+      "Dashboard",
       "Maintenance",
-      "Users",
-      "Rental applications",
-      "Settings",
+      "Properties",
+      "People",
+      "Messages",
+      "Documents",
     ]);
+    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toBeVisible();
     await shot(page, testInfo, "Admin dashboard");
   });
 
-  test("a worker gets Assigned jobs + Calendar only (no empty admin shell)", async ({ page }, testInfo) => {
+  test("a worker gets My jobs + Messages only (no empty admin shell)", async ({ page }, testInfo) => {
     await signIn(page, "worker");
-    expect(await navLinks(page)).toEqual(["Calendar"]);
-    await expect(page.getByRole("link", { name: "LG Maintenance Portal" })).toHaveAttribute(
+    expect(await navLinks(page)).toEqual(["My jobs", "Messages"]);
+    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute(
       "href",
       "/maintenance",
     );
@@ -61,14 +59,13 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await expect(page).toHaveURL(/\/maintenance$/);
     await page.goto("/calendar");
     await expect(page).toHaveURL(/\/calendar$/);
-    await shot(page, testInfo, "Worker jobs + calendar shell");
+    await shot(page, testInfo, "Worker jobs + messages shell");
   });
 
-  test("a tenant gets the tenant portal: My requests and Documents only", async ({ page }, testInfo) => {
+  test("a tenant gets Home · Requests · Messages · Documents", async ({ page }, testInfo) => {
     await signIn(page, "tenant");
-    // "My requests" is the home page (the portal title links to it); Documents is the only other section.
-    expect(await navLinks(page)).toEqual(["Documents"]);
-    await expect(page.getByRole("link", { name: "LG Tenant Portal" })).toHaveAttribute("href", "/maintenance");
+    expect(await navLinks(page)).toEqual(["Home", "Requests", "Messages", "Documents"]);
+    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/maintenance");
     await expect(page.getByRole("heading", { name: "My requests" })).toBeVisible();
     await page.goto("/properties");
     await expect(page, "staff pages bounce a tenant back to their requests").toHaveURL(/\/maintenance$/);
@@ -77,12 +74,17 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Tenant portal");
   });
 
-  test("a landlord gets a read-only portal with their properties, maintenance, and documents", async ({ page }, testInfo) => {
+  test("a landlord gets Home · Properties · Maintenance · Messages · Documents", async ({ page }, testInfo) => {
     await signIn(page, "landlord");
-    // Properties is the home page (the portal title links to it); Maintenance + Documents are the other sections.
-    expect(await navLinks(page)).toEqual(["Maintenance", "Documents"]);
-    await expect(page.getByRole("link", { name: "LG Landlord Portal" })).toHaveAttribute("href", "/properties");
-    await expect(page.getByText("Read-only")).toBeVisible();
+    expect(await navLinks(page)).toEqual([
+      "Home",
+      "Properties",
+      "Maintenance",
+      "Messages",
+      "Documents",
+    ]);
+    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/properties");
+    await expect(page.getByText("Read-only")).toHaveCount(0);
     await expect(page.getByText("Maple Court")).toBeVisible();
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);
     await expect(page.getByRole("button", { name: "New property" })).toHaveCount(0);
@@ -113,8 +115,10 @@ test.describe("[R1] Accounts and login — screens", () => {
     await signIn(page, "admin");
     await page.reload();
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await page.getByRole("button", { name: /Account menu/i }).click();
     await expect(page.getByText("admin@test.local")).toBeVisible();
-    await signOut(page);
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
     await page.goto("/dashboard");
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
   });
@@ -156,7 +160,7 @@ test.describe("[R1] Accounts and login — screens", () => {
     await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
     await page.getByLabel("New password").fill("BrandNew456!");
     await page.getByRole("button", { name: "Update password" }).click();
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 
     await signOut(page);
     await signIn(page, { email: "worker2@test.local", password: "BrandNew456!" });
@@ -202,8 +206,8 @@ test.describe("[R2] Account approval — screens", () => {
     await shot(page, testInfo, "Account approved");
 
     await theirPage.getByRole("button", { name: "Check again" }).click();
-    await expect(theirPage.getByRole("button", { name: "Sign out" })).toBeVisible();
     await expect(theirPage.getByRole("navigation", { name: "Primary" })).toBeVisible();
+    await expect(theirPage.getByRole("button", { name: /Account menu/i })).toBeVisible();
     await waiting.close();
   });
 
@@ -256,7 +260,7 @@ test.describe("[R3] Properties and units — screens", () => {
     await dialog.getByRole("button", { name: "Create property" }).click();
     await shot(page, testInfo, "After clicking Create property");
     await expect(dialog, "the dialog closes when the property is saved").toBeHidden();
-    await expect(page.getByText("Cedar Row")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cedar Row" })).toBeVisible();
   });
 });
 

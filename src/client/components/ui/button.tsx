@@ -17,6 +17,8 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[var(--edge-solid)]",
+        /** Header chrome CTAs — brand solid (Figma shell primary action). */
+        brand: "bg-brand text-on-brand hover:bg-brand-hover shadow-[var(--edge-solid)]",
         secondary: "bg-secondary text-secondary-foreground hover:bg-muted shadow-raised",
         outline: "bg-secondary text-secondary-foreground hover:bg-muted shadow-raised",
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -29,6 +31,8 @@ const buttonVariants = cva(
         default: "h-7 px-2",
         sm: "h-7 px-2 text-[0.8125rem]",
         lg: "h-8 px-3",
+        /** Shell header primary — 12px horizontal padding per Figma. */
+        header: "h-7 px-3",
         icon: "h-7 w-7 px-0",
       },
     },

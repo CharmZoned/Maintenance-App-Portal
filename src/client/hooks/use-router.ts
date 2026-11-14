@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 
 export type Route =
   | { name: "dashboard" }
+  | { name: "home" }
   | { name: "properties" }
   | { name: "property"; id: number }
   | { name: "landlords" }
@@ -12,6 +13,10 @@ export type Route =
   | { name: "maintenance" }
   | { name: "calendar" }
   | { name: "documents" }
+  | { name: "people" }
+  | { name: "messages" }
+  | { name: "account" }
+  | { name: "foundation" }
   | { name: "applications" }
   | { name: "users" }
   | { name: "settings" }
@@ -34,6 +39,7 @@ export function pathnameOf(to: string): string {
 /** Exported for WS-R safe-redirect + route clamps. */
 export function parseRoute(path: string): Route {
   if (path === "/" || path === "/dashboard") return { name: "dashboard" };
+  if (path === "/home") return { name: "home" };
   if (path === "/properties") return { name: "properties" };
   let m = path.match(/^\/properties\/(\d+)$/);
   if (m) return { name: "property", id: parseInt(m[1], 10) };
@@ -46,6 +52,10 @@ export function parseRoute(path: string): Route {
   if (path === "/maintenance") return { name: "maintenance" };
   if (path === "/calendar") return { name: "calendar" };
   if (path === "/documents") return { name: "documents" };
+  if (path === "/people") return { name: "people" };
+  if (path === "/messages") return { name: "messages" };
+  if (path === "/account") return { name: "account" };
+  if (path === "/foundation") return { name: "foundation" };
   if (path === "/applications") return { name: "applications" };
   if (path === "/users") return { name: "users" };
   if (path === "/settings") return { name: "settings" };
