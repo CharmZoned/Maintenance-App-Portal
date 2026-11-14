@@ -1655,13 +1655,8 @@ export async function uploadMaintenancePhoto(
   const ext = (rawExt ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
   const path = `${requestId}/${crypto.randomUUID()}.${ext}`;
 
-  const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type || undefined,
-  });
-  if (upErr) throw new Error(upErr.message);
-
+  // Insert metadata first so storage path-bind (EXISTS on storage_path) allows upload;
+  // roll back the row if storage fails (mirrors uploadPropertyDocument).
   const { data, error } = await supabase
     .from("MaintenanceRequestPhotos")
     .insert({
@@ -1673,9 +1668,19 @@ export async function uploadMaintenancePhoto(
     })
     .select("*")
     .single();
-  if (error) {
-    await supabase.storage.from(PHOTO_BUCKET).remove([path]);
-    throwSb(error);
+  if (error) throwSb(error);
+
+  const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (upErr) {
+    const { error: delErr } = await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+    if (delErr) {
+      throw new Error(`${upErr.message} (also failed to roll back photo row: ${delErr.message})`);
+    }
+    throw new Error(upErr.message);
   }
 
   const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);

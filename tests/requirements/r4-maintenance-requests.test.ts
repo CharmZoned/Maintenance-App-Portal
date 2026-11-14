@@ -230,8 +230,51 @@ describe("[R4] Maintenance requests", () => {
       expect(
         await sql(`select 1 from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`, [id]),
       ).toHaveLength(5);
-      // FE best-effort removes the just-uploaded object on insert failure; residual
-      // storage orphans (if remove is denied) are not path-bound to a photo row.
+      // Insert-first FE: cap fails on the photo row insert before storage upload.
+    });
+
+    test("staff cannot upload/update/remove storage without a matching photo path", async () => {
+      const id = await seedRequest();
+      await assign(id);
+      await signInApp("admin");
+      const client = await clientFor("admin");
+      const unbound = `${id}/orphan-unbound-${Date.now()}.png`;
+
+      const up = await client.storage.from("maintenance-photos").upload(unbound, pngFile("orphan.png"), {
+        contentType: "image/png",
+      });
+      expect(up.error, "INSERT without a photo row must be denied").not.toBeNull();
+      expect(
+        await sql(`select 1 from storage.objects where bucket_id = 'maintenance-photos' and name = $1`, [unbound]),
+      ).toHaveLength(0);
+
+      const orphan = `${id}/orphan-after-row-${Date.now()}.png`;
+      await sql(
+        `insert into public."MaintenanceRequestPhotos"
+           (maintenance_request_id, storage_path, uploaded_by_user_id, uploaded_by_role)
+         values ($1, $2, $3, 'admin')`,
+        [id, orphan, world.users.admin.id],
+      );
+      const seeded = await client.storage.from("maintenance-photos").upload(orphan, pngFile("orphan.png"), {
+        contentType: "image/png",
+      });
+      expect(seeded.error).toBeNull();
+      await sql(`delete from public."MaintenanceRequestPhotos" where storage_path = $1`, [orphan]);
+
+      const overwritten = await client.storage
+        .from("maintenance-photos")
+        .upload(orphan, pngFile("overwrite.png"), { contentType: "image/png", upsert: true });
+      expect(overwritten.error, "UPDATE/upsert on unbound path must be denied").not.toBeNull();
+
+      const removed = await client.storage.from("maintenance-photos").remove([orphan]);
+      const stillThere = await sql(
+        `select 1 from storage.objects where bucket_id = 'maintenance-photos' and name = $1`,
+        [orphan],
+      );
+      expect(stillThere, "DELETE on unbound/orphan path must be denied by path-bind").toHaveLength(1);
+      expect(removed.error != null || (removed.data?.length ?? 0) === 0).toBe(true);
+
+      await sql(`delete from storage.objects where bucket_id = 'maintenance-photos' and name = $1`, [orphan]);
     });
 
     test("a tenant cannot add photos to another tenant's request", async () => {
