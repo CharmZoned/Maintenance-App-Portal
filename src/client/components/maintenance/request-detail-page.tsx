@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,50 +75,60 @@ export function RequestDetailPage({
   const listComments = app.listMaintenanceComments;
   const listHistory = app.listMaintenanceStatusHistory;
   const setError = app.setError;
+  const isLandlord = app.isLandlord;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const list = await listWorkOrders();
-      const found = list.find((w) => w.id === id) ?? null;
-      setOrder(found);
-      if (!found) {
-        setPhotos([]);
-        setComments([]);
-        setHistory([]);
-        return;
+  // Still uses listWorkOrders (no single-id API); ignore stale results if id changes mid-flight.
+  useEffect(() => {
+    let cancelled = false;
+    const loadId = id;
+    (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const list = await listWorkOrders();
+        if (cancelled) return;
+        const found = list.find((w) => w.id === loadId) ?? null;
+        if (!found) {
+          setOrder(null);
+          setPhotos([]);
+          setComments([]);
+          setHistory([]);
+          return;
+        }
+        const [p, c, h] = await Promise.all([
+          listPhotos(loadId),
+          listComments(loadId),
+          listHistory(loadId),
+        ]);
+        if (cancelled) return;
+        setOrder(found);
+        setPhotos(p);
+        setComments(
+          isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c,
+        );
+        setHistory(h);
+      } catch (err) {
+        if (cancelled) return;
+        const message = (err as Error).message;
+        setLoadError(message);
+        setError(message);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      const [p, c, h] = await Promise.all([
-        listPhotos(id),
-        listComments(id),
-        listHistory(id),
-      ]);
-      setPhotos(p);
-      setComments(
-        app.isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c,
-      );
-      setHistory(h);
-    } catch (err) {
-      const message = (err as Error).message;
-      setLoadError(message);
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     id,
+    reloadKey,
     listWorkOrders,
     listPhotos,
     listComments,
     listHistory,
     setError,
-    app.isLandlord,
+    isLandlord,
   ]);
-
-  useEffect(() => {
-    void load();
-  }, [load, reloadKey]);
 
   const isWorker = app.canEditWorkOrders && !app.isAdmin;
   const backLabel = app.isTenant
