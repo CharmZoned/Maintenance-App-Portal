@@ -16,6 +16,7 @@ import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
 import { MyJobsPage } from "./components/maintenance/my-jobs-page";
+import { RequestDetailPage } from "./components/maintenance/request-detail-page";
 import { CalendarPage } from "./components/calendar/calendar-page";
 import { TenantDocumentsPage } from "./components/documents/tenant-documents-page";
 import { LandlordDocumentsPage } from "./components/documents/landlord-documents-page";
@@ -46,6 +47,7 @@ import {
 
 function activeFor(route: Route): string {
   if (route.name === "property") return "properties";
+  if (route.name === "request") return "maintenance";
   if (route.name === "tenant" || route.name === "landlords" || route.name === "users") {
     return "people";
   }
@@ -300,7 +302,10 @@ export function App() {
                 <>
                   {route.name === "home" && <TenantHomePage navigate={navigate} />}
                   {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} />
+                    <MaintenancePage search={search} replace={replace} navigate={navigate} />
+                  )}
+                  {route.name === "request" && (
+                    <RequestDetailPage id={route.id} navigate={navigate} />
                   )}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
@@ -316,6 +321,7 @@ export function App() {
                   )}
                   {route.name !== "home" &&
                     route.name !== "maintenance" &&
+                    route.name !== "request" &&
                     route.name !== "messages" &&
                     route.name !== "documents" &&
                     route.name !== "account" && (
@@ -331,7 +337,10 @@ export function App() {
                   {route.name === "properties" && <PropertiesList navigate={navigate} />}
                   {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
                   {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} />
+                    <MaintenancePage search={search} replace={replace} navigate={navigate} />
+                  )}
+                  {route.name === "request" && (
+                    <RequestDetailPage id={route.id} navigate={navigate} />
                   )}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
@@ -357,6 +366,9 @@ export function App() {
                   {route.name === "maintenance" && (
                     <MyJobsPage search={search} replace={replace} />
                   )}
+                  {route.name === "request" && (
+                    <RequestDetailPage id={route.id} navigate={navigate} />
+                  )}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
@@ -370,6 +382,7 @@ export function App() {
                     />
                   )}
                   {route.name !== "maintenance" &&
+                    route.name !== "request" &&
                     route.name !== "messages" &&
                     route.name !== "calendar" &&
                     route.name !== "account" && (
@@ -411,7 +424,10 @@ export function App() {
                   )}
                   {route.name === "rent" && <RentPage search={search} replace={replace} />}
                   {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} />
+                    <MaintenancePage search={search} replace={replace} navigate={navigate} />
+                  )}
+                  {route.name === "request" && (
+                    <RequestDetailPage id={route.id} navigate={navigate} />
                   )}
                   {route.name === "calendar" && <CalendarPage navigate={navigate} />}
                   {route.name === "applications" &&

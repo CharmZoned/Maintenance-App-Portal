@@ -51,6 +51,7 @@ export function isTenantAllowedRoute(route: Route): boolean {
   return (
     route.name === "home" ||
     route.name === "maintenance" ||
+    route.name === "request" ||
     route.name === "messages" ||
     route.name === "documents" ||
     route.name === "account"
@@ -63,6 +64,7 @@ export function isLandlordAllowedRoute(route: Route): boolean {
     route.name === "properties" ||
     route.name === "property" ||
     route.name === "maintenance" ||
+    route.name === "request" ||
     route.name === "messages" ||
     route.name === "documents" ||
     route.name === "account"
@@ -76,6 +78,7 @@ export function isLandlordAllowedRoute(route: Route): boolean {
 export function isMaintenanceAllowedRoute(route: Route): boolean {
   return (
     route.name === "maintenance" ||
+    route.name === "request" ||
     route.name === "messages" ||
     route.name === "calendar" ||
     route.name === "account"

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { pathnameOf, splitLocation } from "./use-router";
+import { parseRoute, pathnameOf, splitLocation } from "./use-router";
+
+describe("parseRoute", () => {
+  it("maps maintenance detail to request", () => {
+    expect(parseRoute("/maintenance")).toEqual({ name: "maintenance" });
+    expect(parseRoute("/maintenance/42")).toEqual({ name: "request", id: 42 });
+    expect(parseRoute("/maintenance/0")).toEqual({ name: "request", id: 0 });
+  });
+});
 
 describe("pathnameOf / splitLocation", () => {
   it("strips query and hash", () => {

@@ -123,7 +123,7 @@ describe("buildCalendarEvents", () => {
       "wo_follow_up",
       "wo_scheduled",
     ]);
-    expect(events.find((e) => e.kind === "wo_scheduled")?.href).toBe("/maintenance?wo=1");
+    expect(events.find((e) => e.kind === "wo_scheduled")?.href).toBe("/maintenance/1");
     expect(events.find((e) => e.kind === "lease_start")?.href).toBe("/tenants/9");
     expect(events.find((e) => e.kind === "rent_due")?.href).toBe("/rent?period=2026-11");
     expect(events.find((e) => e.kind === "application_move_in")?.href).toBe("/applications?app=4");

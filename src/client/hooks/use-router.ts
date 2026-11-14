@@ -11,6 +11,7 @@ export type Route =
   | { name: "leases" }
   | { name: "rent" }
   | { name: "maintenance" }
+  | { name: "request"; id: number }
   | { name: "calendar" }
   | { name: "documents" }
   | { name: "people" }
@@ -50,6 +51,8 @@ export function parseRoute(path: string): Route {
   if (path === "/leases") return { name: "leases" };
   if (path === "/rent") return { name: "rent" };
   if (path === "/maintenance") return { name: "maintenance" };
+  m = path.match(/^\/maintenance\/(\d+)$/);
+  if (m) return { name: "request", id: parseInt(m[1], 10) };
   if (path === "/calendar") return { name: "calendar" };
   if (path === "/documents") return { name: "documents" };
   if (path === "/people") return { name: "people" };

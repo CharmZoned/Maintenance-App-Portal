@@ -72,7 +72,7 @@ export function eventsFromWorkOrders(orders: WorkOrder[]): CalendarEvent[] {
         date: scheduled,
         title: w.title || `Work order #${w.id}`,
         subtitle: place || undefined,
-        href: `/maintenance?wo=${w.id}`,
+        href: `/maintenance/${w.id}`,
       });
     }
     const followUp = toCalendarDay(w.next_follow_up_date);
@@ -83,7 +83,7 @@ export function eventsFromWorkOrders(orders: WorkOrder[]): CalendarEvent[] {
         date: followUp,
         title: w.title || `Work order #${w.id}`,
         subtitle: place ? `Follow-up · ${place}` : "Follow-up",
-        href: `/maintenance?wo=${w.id}`,
+        href: `/maintenance/${w.id}`,
       });
     }
   }
