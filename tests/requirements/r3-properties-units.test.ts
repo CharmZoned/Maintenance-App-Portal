@@ -245,6 +245,8 @@ describe("[R3] Properties and units", () => {
         end_date: "2025-12-31",
         monthly_rent: 800,
       });
+      // One active lease per unit (LD-9): end the prior lease before opening its replacement.
+      await data.updateLease(oldLease.id, { status: "ended" });
       const newLease = await data.createLease({
         unit_id: Number(unitId),
         primary_tenant_id: Number(tenantId),
