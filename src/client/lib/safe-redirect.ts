@@ -19,11 +19,13 @@ import { parseRoute, type Route } from "../hooks/use-router";
  */
 
 /** Portal audience for shell home / route clamps. */
-export type PortalAudience = "staff" | "tenant" | "landlord";
+export type PortalAudience = "staff" | "maintenance" | "tenant" | "landlord";
 
 /** Single source of role home paths (intent defaults + shell clamps + reset onDone). */
 export const ROLE_HOME: Record<PortalAudience, string> = {
   staff: "/dashboard",
+  /** Maintenance workers: assigned jobs list (not the admin dashboard). */
+  maintenance: "/maintenance",
   tenant: "/maintenance",
   landlord: "/properties",
 };
@@ -56,7 +58,12 @@ export function isLandlordAllowedRoute(route: Route): boolean {
   );
 }
 
-/** Clamp a pathname to the audience shell (staff: no clamp). */
+/** Maintenance staff: assigned jobs + calendar only (no empty admin portfolio shell). */
+export function isMaintenanceAllowedRoute(route: Route): boolean {
+  return route.name === "maintenance" || route.name === "calendar";
+}
+
+/** Clamp a pathname to the audience shell (admin staff: no clamp). */
 export function clampPathForAudience(pathname: string, audience: PortalAudience): string {
   const route = parseRoute(pathname);
   if (audience === "tenant") {
@@ -64,6 +71,9 @@ export function clampPathForAudience(pathname: string, audience: PortalAudience)
   }
   if (audience === "landlord") {
     return isLandlordAllowedRoute(route) ? pathname : ROLE_HOME.landlord;
+  }
+  if (audience === "maintenance") {
+    return isMaintenanceAllowedRoute(route) ? pathname : ROLE_HOME.maintenance;
   }
   return pathname;
 }

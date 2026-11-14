@@ -119,7 +119,7 @@ describe("login redirect query helpers", () => {
 });
 
 describe("clampPathForAudience / resolveReadyLanding", () => {
-  test("tenant and landlord clamps match shell homes", () => {
+  test("tenant, landlord, and maintenance clamps match shell homes", () => {
     expect(clampPathForAudience("/dashboard", "tenant")).toBe(ROLE_HOME.tenant);
     expect(clampPathForAudience("/documents", "tenant")).toBe("/documents");
     expect(clampPathForAudience("/maintenance", "tenant")).toBe("/maintenance");
@@ -127,6 +127,10 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
     expect(clampPathForAudience("/properties/3", "landlord")).toBe("/properties/3");
     expect(clampPathForAudience("/documents", "landlord")).toBe("/documents");
     expect(clampPathForAudience("/rent", "staff")).toBe("/rent");
+    expect(clampPathForAudience("/dashboard", "maintenance")).toBe(ROLE_HOME.maintenance);
+    expect(clampPathForAudience("/rent", "maintenance")).toBe(ROLE_HOME.maintenance);
+    expect(clampPathForAudience("/maintenance", "maintenance")).toBe("/maintenance");
+    expect(clampPathForAudience("/calendar", "maintenance")).toBe("/calendar");
   });
 
   test("ready landing applies redirect then role clamp in one step", () => {
@@ -174,5 +178,14 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
         audience: "staff",
       }),
     ).toEqual({ path: "/dashboard", search: "?foo=1", shouldNavigate: true });
+
+    expect(
+      resolveReadyLanding({
+        search: "?intent=staff",
+        origin: ORIGIN,
+        pathname: "/dashboard",
+        audience: "maintenance",
+      }),
+    ).toEqual({ path: ROLE_HOME.maintenance, search: "", shouldNavigate: true });
   });
 });

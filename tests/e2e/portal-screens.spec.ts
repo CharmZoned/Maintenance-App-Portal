@@ -42,20 +42,26 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Admin dashboard");
   });
 
-  test("a worker gets the staff portal without Users, Rental applications, or Settings", async ({ page }, testInfo) => {
+  test("a worker gets Assigned jobs + Calendar only (no empty admin shell)", async ({ page }, testInfo) => {
     await signIn(page, "worker");
+    expect(await navLinks(page)).toEqual(["Calendar"]);
+    await expect(page.getByRole("link", { name: "LG Maintenance Portal" })).toHaveAttribute(
+      "href",
+      "/maintenance",
+    );
+    await expect(page.getByRole("heading", { name: "Maintenance" })).toBeVisible();
     const links = await navLinks(page);
-    expect(links).toContain("Maintenance");
     expect(links).not.toContain("Users");
-    expect(links).not.toContain("Rental applications");
-    expect(links).not.toContain("Settings");
+    expect(links).not.toContain("Dashboard");
+    expect(links).not.toContain("Rent");
+    expect(links).not.toContain("Properties");
     await page.goto("/users");
-    await expect(page.getByRole("heading", { name: "Admins only" })).toBeVisible();
-    await page.goto("/applications");
-    await expect(page.getByRole("heading", { name: "Admins only" })).toBeVisible();
-    await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Admins only" })).toBeVisible();
-    await shot(page, testInfo, "Worker is kept out of admin screens");
+    await expect(page, "admin routes bounce a worker back to assigned jobs").toHaveURL(/\/maintenance$/);
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/maintenance$/);
+    await page.goto("/calendar");
+    await expect(page).toHaveURL(/\/calendar$/);
+    await shot(page, testInfo, "Worker jobs + calendar shell");
   });
 
   test("a tenant gets the tenant portal: My requests and Documents only", async ({ page }, testInfo) => {

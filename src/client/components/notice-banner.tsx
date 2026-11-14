@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useApp } from "../context";
 import { X } from "lucide-react";
 
-/** In-app success toast (Phase 6 notifications deferred — popups/toasts only). */
+/** Ordinary in-app notice (green) — distinct from ErrorBanner (red). Phase 6 push deferred. */
 export function NoticeBanner() {
   const { notice, setNotice } = useApp();
 
@@ -14,7 +14,10 @@ export function NoticeBanner() {
 
   if (!notice) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 flex w-[min(90vw,520px)] -translate-x-1/2 items-start gap-3 rounded-md border border-border bg-card px-4 py-3 text-sm text-foreground shadow-float">
+    <div
+      role="status"
+      className="fixed bottom-4 left-1/2 z-50 flex w-[min(90vw,520px)] -translate-x-1/2 items-start gap-3 rounded-md bg-success-tint px-4 py-3 text-sm text-success shadow-float"
+    >
       <span className="flex-1">{notice}</span>
       <button
         type="button"
