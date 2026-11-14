@@ -73,6 +73,37 @@ describe("[R5] Property documents", () => {
       expect(listed?.unit_name).toBe("1A");
     });
 
+    test("HTML and other non-allowlisted MIME types are refused", async () => {
+      await signInApp("admin");
+      const html = new File([Buffer.from("<html><body>x</body></html>")], "page.html", {
+        type: "text/html",
+      });
+      await expect(
+        data.uploadPropertyDocument({
+          property_id: world.property.id,
+          title: "Malicious HTML",
+          file: html,
+          visibility: "staff",
+        }),
+      ).rejects.toThrow(/file type not allowed|mime type/i);
+      expect(await sql(`select 1 from public."PropertyDocuments" where title = 'Malicious HTML'`)).toHaveLength(0);
+
+      // Bucket allowlist also rejects when the FE check is bypassed (direct storage upload).
+      const client = await clientFor("admin");
+      const path = `${world.property.id}/bypass-html.html`;
+      await sql(
+        `insert into public."PropertyDocuments"
+           (property_id, title, file_name, content_type, byte_size, storage_path, visibility, uploaded_by_user_id)
+         values ($1, 'Bypass HTML', 'bypass.html', 'text/html', 20, $2, 'staff', $3)`,
+        [world.property.id, path, world.users.admin.id],
+      );
+      const up = await client.storage.from("property-documents").upload(path, html, {
+        contentType: "text/html",
+      });
+      expect(up.error?.message ?? "").toMatch(/mime type/i);
+      await sql(`delete from public."PropertyDocuments" where storage_path = $1`, [path]);
+    });
+
     test("a unit from a different property is refused", async () => {
       await signInApp("admin");
       await expect(

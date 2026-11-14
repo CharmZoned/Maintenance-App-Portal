@@ -2166,6 +2166,22 @@ const DOC_BUCKET = "property-documents";
 const DOC_LIST_LIMIT = 200;
 const DOC_SIGNED_URL_TTL_SEC = 120;
 
+/** Mirrors storage.buckets.allowed_mime_types for property-documents (20261114100000). */
+export const PROPERTY_DOCUMENT_ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+] as const;
+
+export const PROPERTY_DOCUMENT_ACCEPT = PROPERTY_DOCUMENT_ALLOWED_MIME_TYPES.join(",");
+
 function mapPropertyDocument(
   row: Tables<"PropertyDocuments">,
   extras?: { unit_name?: string | null; property_name?: string | null },
@@ -2223,13 +2239,16 @@ export async function listPropertyDocuments(params?: {
   );
 }
 
-/** Mint a short-lived signed URL on download click (not on list). */
+/** Mint a short-lived signed URL on download click (not on list). Forces attachment disposition. */
 export async function getPropertyDocumentDownloadUrl(doc: {
   storage_path: string;
+  file_name?: string | null;
 }): Promise<string> {
   const { data, error } = await supabase.storage
     .from(DOC_BUCKET)
-    .createSignedUrl(doc.storage_path, DOC_SIGNED_URL_TTL_SEC);
+    .createSignedUrl(doc.storage_path, DOC_SIGNED_URL_TTL_SEC, {
+      download: doc.file_name?.trim() || true,
+    });
   if (error || !data?.signedUrl) {
     throw new Error(error?.message || "Could not create download link.");
   }
@@ -2248,6 +2267,16 @@ export async function uploadPropertyDocument(input: {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in.");
+
+  const mime = (input.file.type || "").toLowerCase();
+  if (
+    !mime ||
+    !(PROPERTY_DOCUMENT_ALLOWED_MIME_TYPES as readonly string[]).includes(mime)
+  ) {
+    throw new Error(
+      `File type not allowed${mime ? ` (${mime})` : ""}. Allowed: PDF, images, Word, Excel, plain text.`,
+    );
+  }
 
   const { data: roleRow } = await supabase
     .from("user_roles")
