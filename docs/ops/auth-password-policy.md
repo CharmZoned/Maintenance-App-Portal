@@ -2,9 +2,11 @@
 
 ## UI minimum length (repo)
 
-Signup, login, and reset-password forms share `PASSWORD_MIN_LENGTH` (**8**) from
+Signup and reset-confirm share `PASSWORD_MIN_LENGTH` (**8**) from
 [`src/client/lib/password-policy.ts`](../../src/client/lib/password-policy.ts).
-Keep those screens aligned when changing the constant.
+**Login** does **not** enforce this constant (HTML `minLength` or JS) so existing
+Auth-valid 6–7 character passwords can still sign in until users reset. Keep
+signup + reset-confirm aligned when changing the constant.
 
 ## Owner: enable leaked-password protection (dashboard)
 

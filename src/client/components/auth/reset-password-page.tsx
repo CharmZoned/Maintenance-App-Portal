@@ -77,11 +77,16 @@ interface ConfirmProps {
 export function ResetConfirmPage({ onSubmit, onDone, error }: ConfirmProps) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < PASSWORD_MIN_LENGTH) return;
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setLocalError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+      return;
+    }
     setBusy(true);
+    setLocalError(null);
     try {
       await onSubmit(password);
       onDone();
@@ -96,7 +101,9 @@ export function ResetConfirmPage({ onSubmit, onDone, error }: ConfirmProps) {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-white to-emerald-50 p-6">
       <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-xl border bg-white p-6 shadow-sm">
         <h1 className="text-xl font-semibold">Choose a new password</h1>
-        {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+        {(localError || error) && (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{localError ?? error}</p>
+        )}
         <div className="space-y-2">
           <Label htmlFor="new-password">New password</Label>
           <Input
