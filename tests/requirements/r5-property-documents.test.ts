@@ -42,6 +42,26 @@ async function titlesVisibleTo(persona: "tenant" | "tenant2" | "landlord" | "wor
 
 describe("[R5] Property documents", () => {
   describe("uploading and managing", () => {
+    test("authenticated has table DML grants required by storage policy EXISTS", async () => {
+      // Clean staging rebuilds previously missed these GRANTs; without them,
+      // property-documents policies poison all storage.objects access.
+      const rows = await sql<{ privilege_type: string }>(
+        `select privilege_type
+           from information_schema.role_table_grants
+          where table_schema = 'public'
+            and table_name = 'PropertyDocuments'
+            and grantee = 'authenticated'
+            and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+          order by privilege_type`,
+      );
+      expect(rows.map((r) => r.privilege_type)).toEqual([
+        "DELETE",
+        "INSERT",
+        "SELECT",
+        "UPDATE",
+      ]);
+    });
+
     test("an admin uploads a document to a property and can download it", async () => {
       const doc = await uploadAsAdmin("House rules");
       expect(doc).toMatchObject({
