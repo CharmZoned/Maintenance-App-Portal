@@ -358,7 +358,7 @@ Run manual Phase 2 + LGA-18 approve/link matrix on live Landlord Gopher after Wa
 
 ```text
 OPS: WS-I from docs/wave3-plan.md / parallel-work-plan. Staging + migration history only.
-Propose/create staging Supabase; migration version/history cleanup per schema-migrations.md. Never live-only DDL. Do NOT deploy portal, invent a host, or set NEXT_PUBLIC_PORTAL_URL. Coordinate with WS-S if both touch history repair.
+Propose staging Supabase; create only after owner confirms ~$0.01344/hr. Migration version/history cleanup per schema-migrations.md (§E). Never live-only DDL. Do NOT deploy portal, invent a host, or set NEXT_PUBLIC_PORTAL_URL. Coordinate with WS-S if both touch history repair.
 ```
 
 ---

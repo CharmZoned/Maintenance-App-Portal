@@ -24,12 +24,12 @@ Supabase MCP `apply_migration` often **stamps a new clock version** (e.g. live `
 **Required when applying to a shared DB:**
 
 1. Prefer applying so the recorded version **equals** the repo file prefix (CLI `supabase db push` / linked migration apply against that file), **or**
-2. Immediately after an MCP/Dashboard apply that stamped a different version, align history with **both** steps on the **remote** project (no DDL — history rows only):
-   - `supabase migration repair --remote --yes --status reverted <clock_version>` — remove the MCP/Dashboard clock stamp from history
-   - `supabase migration repair --remote --yes --status applied <repo_file_prefix>` — record the repo filename prefix as applied  
-   Run **reverted + applied back-to-back**. Never run `supabase db push` (or any migrate) between them: reverting the clock without marking the repo prefix applied makes CLI treat already-applied SQL as pending and may re-execute it.
+2. Immediately after an MCP/Dashboard apply that stamped a different version, align **remote** history (no DDL — history rows only). Always pass **`--remote`** (local default would miss production history). Cases:
+   - **Clock ≠ repo prefix (repo version not yet in history):** `repair --remote --yes --status reverted <clock>` then **immediately** `repair --remote --yes --status applied <repo_prefix>`. Never `db push` / migrate between those two — a half-finished repair makes CLI treat already-applied SQL as pending and may re-execute it.
+   - **True duplicate (repo prefix already present + extra clock stamp):** `repair --remote --yes --status reverted <duplicate_clock>` **only** — do not re-`applied` the matching repo prefix.
+   - **Recovery if `reverted` succeeded and `applied` failed:** re-run **only** the missing `applied` stamps; never `db push` until `list_migrations` verifies every repo prefix is present.
 
-Do not leave a permanent “name matches, version differs” gap without a deferred-work row and a repair plan. Always pass **`--remote`** when repairing the shared/live project (local default would miss production history).
+Do not leave a permanent “name matches, version differs” gap without a deferred-work row and a repair plan.
 
 ## Recommended apply order
 
@@ -52,7 +52,7 @@ Today this org uses a single shared project for portal + website Auth (`bgjkjtfg
 | **Alt** | Separate non-prod Supabase project in org `rivvzbmemflrcziliczd` (heavier; only if branching is unavailable) |
 | **Quoted cost (2026-11-14)** | Branch create ≈ **$0.01344 / hour** (`get_cost` type=`branch`) — **owner must confirm before create** |
 | **WS-I status** | **Paused** — `create_branch` was attempted and **did not succeed** (tool required cost confirmation ID). No staging branch exists (`list_branches` empty). No further paid create until owner OK. |
-| **Until staging exists** | Treat live as production: file-in-repo + PR before any DDL; prefer history repair (`migration repair`) over re-applying SQL |
+| **Until staging exists** | Treat live as production: file-in-repo + PR before any DDL; prefer history repair per §E (`migration repair --remote` paired reverted/applied) over re-applying SQL |
 
 After owner confirms cost: `create_branch` name=`staging` with `confirm_cost_id` → document resulting `project_ref` here → dry-run new migrations on the branch before live.
 
@@ -76,33 +76,32 @@ Baseline pre-Phase-1 migrations may exist only on the remote history; portal pha
 **Snapshotted:** 2026-11-14 via MCP `list_migrations` / `schema_migrations` on `bgjkjtfgrfiszbzatriq` vs `supabase/migrations/` on `master` @ `33424b7`.  
 **Scope:** History alignment only (`supabase migration repair`). **No DDL.** Do not run while another migration/RLS PR is open.
 
-### A. Repo prefix present on live (matching version row exists)
+### A. Clean match (repo prefix = live version; no duplicate clock)
 
-| Version | Name | Note |
-|---------|------|------|
-| `20261113193000` | `phase1_5_force_rls_payment_rpc` | Clean match |
-| `20261113241000` | `phase_lga18_landlord_approve_access` | Clean match |
-| `20261114010000` | `fix_authenticated_portfolio_and_mr_grants` | Matching row **and** duplicate clock — see **§B** |
-| `20261114020000` | `fix_user_roles_pending_and_set_account_status` | Matching row **and** duplicate clock — see **§B** |
-| `20261114030000` | `harden_landlord_helpers_and_mr_notes` | Clean match |
-| `20261114040000` | `property_documents_storage_path_bind` | Clean match |
+| Version | Name |
+|---------|------|
+| `20261113193000` | `phase1_5_force_rls_payment_rpc` |
+| `20261113241000` | `phase_lga18_landlord_approve_access` |
+| `20261114030000` | `harden_landlord_helpers_and_mr_notes` |
+| `20261114040000` | `property_documents_storage_path_bind` |
 
-### B. True duplicate live entries (same logical migration stamped twice)
+Matching repo rows that also have a duplicate clock are listed only under **§B** (keep the matching row; revert the extra stamp).
 
-These are the hygiene **#8** duplicates: MCP/early apply left a clock (or alt) stamp **and** a later matching (or second) stamp.
+### B. True duplicate live entries (repo prefix already present + extra clock)
 
-| Keep (repo / canonical) | Revert (duplicate live stamp) | Notes |
-|-------------------------|-------------------------------|-------|
+**Action:** `reverted` on the duplicate clock **only** (do not re-`applied` the matching repo prefix).
+
+| Keep (already on live) | Revert (duplicate stamp only) | Notes |
+|------------------------|-------------------------------|-------|
 | `20261114010000` `fix_authenticated_portfolio_and_mr_grants` | `20261113232311` same name | Early Wave-1 apply + later matching stamp |
 | `20261114020000` `fix_user_roles_pending_and_set_account_status` | `20261113232318` same name | Same pattern |
-| `20261113242000` `lga15_maintenance_status_category_checks` (**mark applied** — not on live yet) | `20261113213707` `lga15_maintenance_status_category_checks` **and** `20261113215853` `lga15_maintenance_status_category_checks_241000` | Two live stamps; neither equals repo prefix |
 
-### C. MCP clock stamp ≠ repo prefix (SQL already applied; versions disagree)
+### C. MCP clock stamp ≠ repo prefix (SQL already applied; repo prefix missing from history)
 
-Revert the live clock version, then mark the **repo** prefix as applied (history only — do **not** re-run SQL).
+**Action:** `reverted` on each live clock, then **immediately** `applied` on the repo prefix (history only — do **not** re-run SQL).
 
-| Live clock version | Live name | Repo file prefix to mark applied |
-|--------------------|-----------|----------------------------------|
+| Live clock version(s) to revert | Live name(s) | Repo file prefix to mark applied |
+|---------------------------------|--------------|----------------------------------|
 | `20261113162610` | `phase1_account_status_and_rls` | `20261113160000` |
 | `20261113164630` | `phase1_enforce_account_status` | `20261113180000` |
 | `20261113195835` | `phase2_account_approval_applications` | `20261113200000` |
@@ -114,6 +113,7 @@ Revert the live clock version, then mark the **repo** prefix as applied (history
 | `20261113213318` | `phase5_documents_unit_cascade` | `20261113233000` |
 | `20261113213530` | `phase_acl_landlord_readonly_apps_admin` | `20261113252000` |
 | `20261113215737` | `phase_acl_mr_update_new_row_check` | `20261113252100` |
+| `20261113213707` **and** `20261113215853` | `lga15_maintenance_status_category_checks` / `…_241000` | `20261113242000` (neither live stamp equals repo prefix) |
 
 ### D. Permanent / documented live-only exceptions (do **not** “repair away”)
 
@@ -126,17 +126,21 @@ Revert the live clock version, then mark the **repo** prefix as applied (history
 
 If a secondary env must match listings DDL, capture those two into a dedicated repo (website or portal) migration PR first — still no live-only DDL.
 
-### E. Repair command sequence (run after owner go-ahead + CLI linked)
+### E. Repair command sequence (run after **ops go-ahead** + CLI linked)
 
-Requires `supabase` CLI logged in / `SUPABASE_ACCESS_TOKEN`, linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed.
+Requires `supabase` CLI logged in / `SUPABASE_ACCESS_TOKEN`, linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed. **Gate:** explicit ops go-ahead (staging optional — do not block repair on the paused `staging` create). Do not paste tokens into chat/docs.
 
-**Atomicity (High):** Run step 1 then step 2 **immediately** as one ops action. After step 1 alone, repo prefixes for §C/lga15 are unmarked — `supabase db push` would treat already-applied Phase 1–5 / lga15 SQL as pending and **re-run** it. Do **not** `db push`, migrate, or leave the DB mid-repair between the two commands.
+**Atomicity:** Run step 1 then step 2 as **one** ops action (`&&` below). After step 1 alone, §C repo prefixes are unmarked — `supabase db push` would treat already-applied Phase 1–5 / lga15 SQL as pending and **re-run** it.
+
+**Recovery (if step 1 succeeded and step 2 failed):** Do **not** `db push`. Re-run **only** step 2 (`applied` list). If unsure which stamps landed, compare MCP `list_migrations` to the §C “mark applied” column and apply the missing prefixes only. Leave §D exceptions untouched.
 
 ```bash
 # From repo root, linked to project bgjkjtfgrfiszbzatriq
 # HISTORY ONLY — updates supabase_migrations rows; does NOT run or undo SQL/DDL.
 # Must target remote (--remote). --yes skips CLI prompts on hosted changes (ops go-ahead first).
-# 1) Mark duplicate / clock stamps as reverted in history (B + C + lga15 pair)
+set -euo pipefail
+# 1) Revert: §B duplicate clocks + §C clock stamps (incl. both lga15 stamps)
+# 2) Applied: §C repo prefixes only (incl. 20261113242000). §B keep-rows already present — do not re-applied.
 supabase migration repair --remote --yes --status reverted \
   20261113232311 20261113232318 \
   20261113213707 20261113215853 \
@@ -144,10 +148,8 @@ supabase migration repair --remote --yes --status reverted \
   20261113195835 20261113201805 \
   20261113203316 20261113204421 20261113205730 \
   20261113212113 20261113213318 \
-  20261113213530 20261113215737
-
-# 2) IMMEDIATELY — mark repo prefixes as applied (C + lga15 canonical). Do not db push before this.
-supabase migration repair --remote --yes --status applied \
+  20261113213530 20261113215737 \
+&& supabase migration repair --remote --yes --status applied \
   20261113160000 20261113180000 \
   20261113200000 20261113203000 \
   20261113210000 20261113213000 20261113220000 \
@@ -156,6 +158,6 @@ supabase migration repair --remote --yes --status applied \
   20261113252000 20261113252100
 ```
 
-**Verify:** MCP `list_migrations` — every portal file under `supabase/migrations/` has a matching version; duplicate names from §B gone; §D exceptions remain.
+**Verify:** MCP `list_migrations` — every portal file under `supabase/migrations/` has a matching version; §B duplicate names gone; §D exceptions remain. Only then is `db push` safe for **new** migrations.
 
-**WS-I status:** Inventory + plan documented this PR. **Live repair not executed** in this pass (no CLI token in agent env; serialize with any open mig/RLS PR; prefer after staging exists or with explicit ops go-ahead). Update deferred-work when repair is run.
+**WS-I status:** Docs inventory + plan done this PR. **Live repair not executed** (no CLI token; serialize with any open mig/RLS PR). Update deferred-work when §E is run successfully.
