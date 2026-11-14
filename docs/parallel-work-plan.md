@@ -1,18 +1,18 @@
 # Parallel work plan — remaining MVP + R1–R5 bugs
 
-**Mode:** Planning only (no app/bugfix code in this doc’s PR).  
-**Base:** `master` @ `15e0261` (includes merged [#18](https://github.com/CharmZoned/Maintenance-App-Portal/pull/18) test suite).  
-**Inputs:** gap analysis, `docs/deferred-work.md`, IMPLEMENTATION_PLAN R1–R8, role rundown, owner bug list (PR #18 intentional failures), live Supabase grants/CHECKs verified 2026-11-13.  
-**Product hold:** **R6 notifications stays its own deferred stream** — do not staff until product reopens Phase 6.
+**Mode:** Historical stream definitions + Wave 1–2 context. **Wave 3 staffing:** **approved** — use [`docs/wave3-plan.md`](./wave3-plan.md) (pointer) and the Cursor Project store `docs/wave3-plan.md` (canonical: I/K/N/O + WS-S hygiene + WS-R; **P/Q + portal hosting/URL not staffed**). Implementers launched for **I / K / N / O / R / S1**.  
+**Base (original):** `master` @ `15e0261` (merged [#18](https://github.com/CharmZoned/Maintenance-App-Portal/pull/18) test suite). **Wave 1–2 status:** merged on `master` (PRs #19–#29); no Wave 2 leftovers to re-plan.  
+**Inputs:** gap analysis, `docs/deferred-work.md`, IMPLEMENTATION_PLAN R1–R8, role rundown, owner bug list (PR #18 intentional failures), live Supabase grants/CHECKs verified 2026-11-13; owner Wave 3 choices + hygiene 1–13 + hosting deferral (2026-11-14).  
+**Product hold:** **R6 notifications + web push stays its own deferred stream (WS-L)** — do not staff until product reopens Phase 6.
 
 ---
 
 ## How to use this plan
 
-1. Launch **one chat/agent per workstream** (or per wave-1 stream). Paste the **Kickoff prompt** at the bottom of that stream.
-2. **Wave 1** clears the six intentional reds from `#18` so `pnpm test` can go green. Prefer merging Wave 1 before treating `#18` failures as regressions.
-3. **Migration versions are scarce.** Before writing any `supabase/migrations/YYYYMMDDHHMMSS_*.sql`, scan `master` + all open `cursor/*` PR branches and claim a unique 14-digit prefix (see [Migration number conflict avoidance](#migration-number-conflict-avoidance)).
-4. Tag every item with source: **bug** (PR #18 / owner list), **gap** (gap analysis), **deferred** (`docs/deferred-work.md`), **req** (R1–R8).
+1. For **Wave 3**, prefer kickoffs in [`docs/wave3-plan.md`](./wave3-plan.md) / Project store plan; stream definitions below remain authoritative for I/K/N/O/R/S.
+2. Wave 1–2 historical context (bugs B1–B6, acceptance checkboxes) is retained below — those waves are **Done**; do not re-implement.
+3. **Migration versions are scarce.** Before writing any `supabase/migrations/YYYYMMDDHHMMSS_*.sql`, scan `master` + all open `cursor/*` PR branches and claim a unique 14-digit prefix ≥ `20261114050000` (see [Migration number conflict avoidance](#migration-number-conflict-avoidance)).
+4. Tag every item with source: **bug** (PR #18 / owner list), **gap** (gap analysis), **deferred** (`docs/deferred-work.md`), **req** (R1–R8), **hygiene** (Wave 3 S items).
 
 ---
 
@@ -29,7 +29,7 @@ Confirmed against repo + live project `bgjkjtfgrfiszbzatriq`:
 | **B5** (R4) | Admin cannot delete work order | Live: `MaintenanceRequests` has SELECT/INSERT/UPDATE for `authenticated`, **no DELETE** | Migration: `GRANT DELETE` |
 | **B6** (R5) | Delete document leaves storage object | `deletePropertyDocument` deletes the row **then** `storage.remove`. Storage **SELECT** policy joins `PropertyDocuments` by `storage_path`; after row delete, remove cannot see the object | FE: remove storage first (or adjust storage DELETE/SELECT). Confirm on real Storage |
 
-**PR #18 note:** 23 intentional failures / 10 R6 todos map to B1–B6 + R6 planned. Do not weaken assertions; fix product/schema until they pass. Do **not** make `pnpm test` a required CI gate until Wave 1 clears.
+**PR #18 note:** Intentional R1–R5 failures were cleared in Wave 1; R6 remains todos until WS-L. Do not weaken assertions. Required CI for `pnpm test` is a **WS-S S1 / owner** choice (Wave 1 no longer blocks it).
 
 ---
 
@@ -50,14 +50,20 @@ flowchart TB
     H[WS-H Manual QA]
     J[WS-J Expand automated tests]
   end
-  subgraph W3["Wave 3 — polish / optional"]
+  subgraph W3["Wave 3 — see docs/wave3-plan.md"]
     K[WS-K Maint UX]
     N[WS-N Perf + query slim]
-    I[WS-I Ops URL staging repair]
+    I[WS-I Staging + migration history]
+    O[WS-O Thin calendar]
+    S[WS-S Security hygiene]
+    R[WS-R Login redirect]
   end
   subgraph HOLD["Hold — own streams"]
-    L[WS-L R6 Notifications DEFERRED]
+    L[WS-L R6 + web push DEFERRED]
     M[WS-M Full landlord self-serve]
+    P[WS-P Zillow NO]
+    Q[WS-Q Website visual NO]
+    Host[Portal hosting URL deferred]
   end
   A --> H
   B --> H
@@ -72,15 +78,14 @@ flowchart TB
   E --> M
   F --> M
   H --> L
-  I -.-> W3
 ```
 
 | Wave | Streams (parallel OK) | Merge gate |
 |------|----------------------|------------|
-| **1** | A, B, C, D | Intentional `#18` reds for R1–R5 clear under `pnpm test` (emulator) |
-| **2** | E, F, G, H, J | AuthZ leftovers + landlord docs + lease sync + signed-off manual QA; test coverage expanded |
-| **3** | I (can start anytime), K, N | Ops/URL/staging; UX/perf when capacity |
-| **Hold** | L (R6), M (landlord MVP) | Explicit product reopen only |
+| **1** | A, B, C, D | **Done** — intentional `#18` reds for R1–R5 cleared (`pnpm test` emulator) |
+| **2** | E, F, G, H, J | **Done** — AuthZ leftovers + landlord docs + lease sync + signed-off manual QA; test coverage expanded |
+| **3** | I, K, N, O, S, R | See [`docs/wave3-plan.md`](./wave3-plan.md) — staging + migration history; Accept & schedule; perf; thin calendar; security hygiene; login redirect. **P/Q + portal hosting/URL not staffed** |
+| **Hold** | L (R6 + web push), M (landlord MVP), P, Q, portal hosting/URL | Explicit product reopen / owner link only |
 
 **Suggested merge order inside Wave 1:** A → B → C/D (A/B are independent migrations; merge either first; C is FE-only; D is FE-only). If two BE agents run together, **pre-claim migration timestamps** below.
 
@@ -88,20 +93,21 @@ flowchart TB
 
 ## Migration number conflict avoidance
 
-Latest repo prefixes on `master` (as of `15e0261`):
+Latest repo prefixes on `master` (as of Wave 2 merge / `33424b7`):
 
-- `20261113252000_phase_acl_landlord_readonly_apps_admin.sql`
-- `20261113252100_phase_acl_mr_update_new_row_check.sql`
+- `20261114030000_harden_landlord_helpers_and_mr_notes.sql` (**WS-E**, merged)
+- `20261114040000_property_documents_storage_path_bind.sql` (**WS-E**, merged)
 
-**Claimed slots for Wave 1–2 BE work (reserve when branching; bump if taken):**
+**Wave 1–2 slots (merged — do not reuse):**
 
-| Slot | Owner stream | Suggested filename |
-|------|--------------|--------------------|
-| `20261114010000` | **WS-A** Grants | `…_fix_authenticated_portfolio_and_mr_grants.sql` |
-| `20261114020000` | **WS-B** Roles | `…_fix_user_roles_pending_and_set_account_status.sql` |
-| `20261114030000` | **WS-E** AuthZ | `…_harden_landlord_helpers_and_mr_notes.sql` (split if large) |
-| `20261114040000` | **WS-E/D** optional storage harden | `…_property_documents_storage_path_bind.sql` |
-| `20261114050000+` | Future / WS-L when reopened | leave free |
+| Slot | Owner stream | Status |
+|------|--------------|--------|
+| `20261114010000` | **WS-A** Grants | **Merged** |
+| `20261114020000` | **WS-B** Roles | **Merged** |
+| `20261114030000` | **WS-E** AuthZ | **Merged** |
+| `20261114040000` | **WS-E** storage path bind | **Merged** |
+| `20261114050000+` | Wave 3 **WS-S S2** (or other schema need) | claim before writing; I/K/N/O/R prefer no DDL |
+| `20261114100000+` | **WS-L** when reopened | leave free until Phase 6 |
 
 Rules (also `docs/ops/schema-migrations.md`):
 
@@ -332,24 +338,25 @@ Run manual Phase 2 + LGA-18 approve/link matrix on live Landlord Gopher after Wa
 
 ---
 
-### WS-I — Ops: portal URL, staging, migration repair  
-**Goal:** Unblock Phase 4 website CTAs and safer schema workflow.  
-**Size:** S–M · **Conflict risk:** Low (ops/docs/website repo) · **Deps:** None (parallel anytime)  
-**Agent role:** WEB / ops
+### WS-I — Staging Supabase + migration version / history repair  
+**Goal:** Safer schema workflow only — staging DB + migration-history cleanup (hygiene **#8**).  
+**Size:** S–M · **Conflict risk:** Low–medium vs WS-S only on history/staging docs · **Deps:** None  
+**Agent role:** Ops / BE docs  
+**Hygiene:** owner item **#8** only. **#13** hosting/deploy + portal URL are **out of Wave 3** (deferred until owner provides the link).
 
 | Item | Source | Notes |
 |------|--------|-------|
-| Choose stable portal origin; set `NEXT_PUBLIC_PORTAL_URL` on LandlordGopherWebsite | **deferred** · **gap R8** / Phase 4 | Website PR #1 |
-| Supabase staging branch / non-prod project | **deferred** | |
-| Repair live `schema_migrations` version stamps vs repo prefixes | **deferred** · **gap R7** | `docs/ops/schema-migrations.md` |
+| Supabase staging + **duplicate migration history cleanup** / version repair | **hygiene #8** · **deferred** | `docs/ops/schema-migrations.md`; no live-only DDL |
 
-**Acceptance:** Portal URL documented; website preview CTAs work; drift table in ops doc updated or repaired.
+**Out of scope for WS-I:** portal hosting/deploy config; portal URL; website `NEXT_PUBLIC_PORTAL_URL` / login-link wiring; WordPress retirement / Next.js launch — see deferred-work **“Portal hosting + URL: deferred until owner provides the link”**.
+
+**Acceptance:** Staging created or explicitly re-parked; migration history repaired or documented; no hosting/URL claimed as WS-I deliverables.
 
 **Kickoff prompt:**
 
 ```text
-OPS: WS-I from docs/parallel-work-plan.md. No portal feature code.
-(1) Help choose/document live portal URL and wire NEXT_PUBLIC_PORTAL_URL for LandlordGopherWebsite. (2) Propose/create staging Supabase. (3) Plan or execute migration version repair per docs/ops/schema-migrations.md. Coordinate before any live DDL. Docs PRs OK.
+OPS: WS-I from docs/wave3-plan.md / parallel-work-plan. Staging + migration history only.
+Propose/create staging Supabase; migration version/history cleanup per schema-migrations.md. Never live-only DDL. Do NOT deploy portal, invent a host, or set NEXT_PUBLIC_PORTAL_URL. Coordinate with WS-S if both touch history repair.
 ```
 
 ---
@@ -399,14 +406,15 @@ Maintenance UX polish only: richer Accept & schedule (assign + date) and optiona
 
 ---
 
-### WS-L — R6 Notifications (**own stream — DEFERRED**)  
-**Goal:** When product reopens Phase 6: staff email/push/message center.  
+### WS-L — R6 Notifications + web push (**own stream — DEFERRED**)  
+**Goal:** When product reopens Phase 6: staff email/push/message center (includes owner hygiene **#12** web push).  
 **Size:** L · **Conflict risk:** N/A while held · **Deps:** Product decision; prefer after Wave 1–2 stable  
 **Agent role:** BE (Edge Functions) + FE
 
 | Item | Source | Notes |
 |------|--------|-------|
 | Entire Phase 6 | **req R6** · **deferred** · **gap R6** · `#18` 10 todos | `Staff.gets_request_alerts` unused |
+| Web push | **hygiene #12** | Held here — do not staff under Wave 3 WS-S |
 | Keep interim toasts/banners | **req R6** decision | Do not replace with email until reopened |
 
 **Do not schedule agents** until explicitly reopened. When reopened, convert `tests/requirements/r6-notifications.test.ts` todos into real tests.
@@ -454,6 +462,84 @@ Pick a small coherent subset of deferred perf/docs polish (not all at once). No 
 
 ---
 
+### WS-O — Thin read-only property calendar (roadmap #9 skinny) — **YES staff Wave 3**  
+**Goal:** Staff/admin month view of existing dates only.  
+**Size:** M · **Conflict risk:** Medium (nav + aggregators) · **Deps:** Prefer after WS-K  
+**Agent role:** FE
+
+| Item | Source | Notes |
+|------|--------|-------|
+| Month view: WO `scheduled_at` / `next_follow_up_date`, lease start/end, rent `due_date`, optional application `desired_move_in` | **deferred** · roadmap **#9** | Click → existing detail pages |
+| No create/drag/recurrence | product | Full calendar stays out of Wave 3 |
+
+**Acceptance:** Read-only month view; navigation works; typecheck/build green. Fetches are **date-windowed** and **slim-select** (no full `listWorkOrders` / `listLeases` / charges enrich for the whole portfolio); no per-event N+1; do not re-pull staff notes on every list.
+
+**Kickoff prompt:**
+
+```text
+IMPLEMENT: WS-O from docs/wave3-plan.md (Wave 3). Thin read-only calendar only. Prefer after WS-K. Date-window + slim queries only — no unbounded list enrich / N+1. No R6, no landlord mutate, no recurrence. Branch + PR.
+```
+
+---
+
+### WS-P — Zillow sync research (roadmap #10) — **NO / not staffed**  
+Owner chose **not** to staff in Wave 3. Remains in `docs/deferred-work.md`.
+
+---
+
+### WS-Q — Website visual revisions (roadmap #11) — **NO / not staffed**  
+Owner chose **not** to staff in Wave 3. Remains in `docs/deferred-work.md`.
+
+---
+
+### WS-R — Login `?redirect=` (Phase 4b / hygiene #9)  
+**Goal:** Safe post-login redirect for website → portal CTAs.  
+**Size:** S · **Conflict risk:** Low (auth routing) · **Deps:** None (production portal URL is deferred)  
+**Agent role:** FE
+
+**Acceptance:** After login, honor `?redirect=` only for same-origin **path** values starting with `/` (no `//`, no `http:`, `https:`, `javascript:`, or other schemes). Prefer in-app navigation over raw `location.assign` to external URLs. Reject open redirects; add tests for malicious values; document behavior.
+
+**Kickoff prompt:**
+
+```text
+IMPLEMENT: WS-R from docs/wave3-plan.md (hygiene #9). Portal FE login ?redirect= only. Allow path-only same-origin redirects; reject //, absolute URLs, and non-http schemes. Prefer in-app nav. No RLS. Do not wire production hosting/URL (deferred). Branch + PR.
+```
+
+---
+
+### WS-S — Security and hygiene (owner items 1–13)  
+**Goal:** CI/repo hygiene first, then AuthZ/security migrations, then password policy. Ship as **lanes**, not one mega-PR.  
+**Size:** L program · **Conflict risk:** High among S2 migrations · **Deps:** None for S1  
+**Agent role:** Ops + BE + light FE  
+**Canonical detail:** Project store `docs/wave3-plan.md` § hygiene table.
+
+| Lane | Items | Effort | Parallel with I/K/N/O? |
+|------|-------|--------|------------------------|
+| **S1** Repo/CI | **#1** required CI checks; **#2** archive D1/Hono/Clawnify + refresh IMPLEMENTATION_PLAN + retire `main`/`sync-branches` (owner confirm) | S + M | **Yes** |
+| **S2** AuthZ mig (serialize; order **3→10→5→4→6**) | **#3** revoke anon (+ PUBLIC if needed) EXECUTE on payment RPCs; keep authenticated GRANT; verify privileges; **#10** Settings admin-only; **#5** `email_confirmed_at` on approve; **#4** last-admin guard; **#6** 5-photo DB cap | S–M each | **No** other migration/RLS PRs |
+| **S3** Auth policy | **#7** leaked-password + min length | S | **Yes** (Auth dashboard + auth forms) |
+| → **WS-I** | **#8** migration history + staging | — | See WS-I |
+| → **WS-R** | **#9** `?redirect=` | — | See WS-R |
+| Owner then FE | **#11** status labels | S after decision | Avoid during WS-K mega-edit |
+| → **WS-L** | **#12** web push | — | Hold |
+| → **deferred-work** | **#13** hosting/deploy + portal URL + website env | — | Out of Wave 3 until owner provides the link |
+
+**Acceptance (per item):** see Project store wave3-plan hygiene table. **Migrations only from repo files**; claim ≥ `20261114050000`.
+
+**Kickoff prompt (S1):**
+
+```text
+IMPLEMENT: WS-S S1 from docs/wave3-plan.md. Items 1–2 only: required GitHub CI checks; archive D1/Hono/Clawnify primary-path claims; refresh IMPLEMENTATION_PLAN; retire main sync only if owner confirmed. No Supabase migrations. No R6.
+```
+
+**Kickoff prompt (S2):**
+
+```text
+IMPLEMENT: WS-S S2 from docs/wave3-plan.md. One migration PR at a time (prefer 3→10→5→4→6). Never live-only DDL. Emulator tests. Do not rewrite work-order-dialog (WS-K). No R6 / landlord self-serve.
+```
+
+---
+
 ## Conflict matrix (quick)
 
 | | A | B | C | D | E | F | G | K |
@@ -467,7 +553,9 @@ Pick a small coherent subset of deferred perf/docs polish (not all at once). No 
 | **G** leases data | | | | data.ts | | | — | |
 | **K** WO dialog | | | | | | | | — |
 
-**Hard rule:** At most **one open PR** rewriting `set_account_status` / `handle_new_user` (WS-B). At most one PR rewriting `work-order-dialog.tsx` large structure (WS-K). `data.ts` lease helpers (G) vs document delete (D) can parallel if agents touch disjoint functions.
+**Wave 3 addendum:** At most one PR rewriting `work-order-dialog.tsx` large structure (**WS-K**). At most **one open WS-S S2 migration/RLS PR** at a time. **WS-I** owns migration-history cleanup (#8) — do not dual-staff with S. **WS-O** prefers after K.
+
+**Hard rule:** At most **one open PR** rewriting `set_account_status` / `handle_new_user` (WS-B — done). At most one PR rewriting `work-order-dialog.tsx` large structure (WS-K). `data.ts` lease helpers (G) vs document delete (D) can parallel if agents touch disjoint functions.
 
 ---
 
@@ -476,22 +564,24 @@ Pick a small coherent subset of deferred perf/docs polish (not all at once). No 
 | Req | Wave 1 bugs | Remaining gaps / deferred | Hold |
 |-----|-------------|---------------------------|------|
 | **R1** | B1 signup | Invite-only Auth; ambiguous email UX | — |
-| **R2** | B2 reject/suspend | Manual QA (H) | — |
-| **R3** | B3 grants, B4 enums | Lease sync (G); full landlord MVP (M) | M |
-| **R4** | B5 DELETE grant | Accept & schedule UX (K); photo helper drift; tests (J) | — |
-| **R5** | B6 storage delete | Landlord docs UI (F); MIME/path bind (E/N) | — |
-| **R6** | — | — | **WS-L entire** |
-| **R7** | grants part of A | WS-E leftovers; payment tests (J) | — |
-| **R8** | unblocked by A–D | Landlord docs (F); Phase 4 URL (I) | M |
+| **R2** | B2 reject/suspend | Manual QA (H) **done** | — |
+| **R3** | B3 grants, B4 enums | Lease sync (G) **done**; full landlord MVP (M) | M |
+| **R4** | B5 DELETE grant | Accept & schedule (K); thin calendar (O); 5-photo DB (S #6); tests (J done) | — |
+| **R5** | B6 storage delete | Landlord docs (F done); MIME (N) | — |
+| **R6** | — | — | **WS-L entire** (+ web push #12) |
+| **R7** | grants part of A | WS-E done; payment tests (J done); S hygiene (#3–5, #10) | — |
+| **R8** | unblocked by A–D | Login redirect (R); Phase 4 URL/hosting **deferred** until owner provides link | M |
 
 ---
 
 ## Out of scope for fix agents until owner asks
 
 - Implementing any Wave stream in the **planning** PR that only adds this doc.
-- Opening R6 / Phase 6 work.
-- Making `pnpm test` required CI while intentional reds remain.
+- Opening R6 / Phase 6 / web push work.
+- Staffing **WS-P** / **WS-Q** (owner NO).
+- Portal hosting/deploy, inventing a portal host, or wiring `NEXT_PUBLIC_PORTAL_URL` (deferred until owner provides the link).
 - Live-only DDL without a repo migration file (see `docs/ops/schema-migrations.md`).
+- Merging PRs (human only).
 
 ---
 
@@ -499,6 +589,8 @@ Pick a small coherent subset of deferred perf/docs polish (not all at once). No 
 
 | Doc | Path |
 |-----|------|
+| Wave 3 plan (pointer) | `docs/wave3-plan.md` |
+| Wave 3 plan (canonical) | Project store `docs/wave3-plan.md` |
 | Gap analysis | Project store `docs/gap-analysis-requirements.md` (and uploaded copy) |
 | Deferred | `docs/deferred-work.md` |
 | Plan / R1–R8 | `docs/IMPLEMENTATION_PLAN.md` |
