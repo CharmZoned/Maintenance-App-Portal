@@ -85,12 +85,4 @@ describe("formatScheduleWhen", () => {
     expect(label).not.toMatch(/^Today /);
     expect(label.length).toBeGreaterThan(0);
   });
-
-  it("treats noon-UTC date sentinel like date-only (no clock)", () => {
-    expect(formatActivityStamp("2026-11-14T12:00:00.000Z")).toBe("Today");
-    expect(formatActivityStamp("2026-11-13T12:00:00.000Z")).toBe("Yesterday");
-    expect(formatActivityStamp("2026-11-17T12:00:00Z")).toMatch(/17/);
-    // Real timed stamp still includes a clock on today.
-    expect(formatActivityStamp("2026-11-14T20:30:00.000Z")).toMatch(/^Today /);
-  });
 });

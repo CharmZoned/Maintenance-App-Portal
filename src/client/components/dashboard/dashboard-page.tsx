@@ -251,21 +251,16 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
             value={newToAssign}
             label="New requests to assign"
             muted={newToAssign === 0}
-            onClick={() => navigate("/maintenance")}
+            onClick={() => navigate("/maintenance?filter=unassigned")}
           />
           <Counter
             value={emergenciesOpen}
             label="Emergencies open"
             muted={emergenciesOpen === 0}
-            onClick={() => navigate("/maintenance")}
+            onClick={() => navigate("/maintenance?filter=urgent")}
           />
-          {/* Stub: unread messages — Messages group owns inbox counts. */}
-          <Counter
-            value={0}
-            label="Unread messages"
-            muted
-            onClick={() => navigate("/messages")}
-          />
+          {/* Stub: unread messages — /messages route not wired yet (Group C). */}
+          <Counter value={0} label="Unread messages" muted />
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

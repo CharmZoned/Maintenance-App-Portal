@@ -81,15 +81,19 @@ export function priorityLevel(priority: WorkOrderPriority): "Emergency" | "High"
   return null;
 }
 
-/** Date-only write path stores `YYYY-MM-DDT12:00:00.000Z` (see updateWorkOrder). */
-const NOON_UTC_DATE_SENTINEL = /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.000)?Z$/;
+/**
+ * Date-only write path stores noon-UTC (`…T12:00:00.000Z` via updateWorkOrder).
+ * Mappers often surface the same instant as `…T12:00:00+00:00` / fractional seconds.
+ */
+const NOON_UTC_DATE_SENTINEL =
+  /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.\d+)?(?:Z|[+]00:00)$/;
 
 /** Human "Today 9:12 am" / "Yesterday" / short date for activity stamps. */
 export function formatActivityStamp(iso: string | null | undefined): string {
   if (!iso) return "";
   const plainDate = /^\d{4}-\d{2}-\d{2}$/.test(iso);
   const noonUtcSentinel = NOON_UTC_DATE_SENTINEL.test(iso);
-  // Noon-UTC sentinel is date-only intent — show local calendar day, no clock.
+  // Noon-UTC sentinel is date-only intent — show calendar day from iso prefix, no clock.
   const dateOnly = plainDate || noonUtcSentinel;
   const dayKey = dateOnly ? iso.slice(0, 10) : null;
   const d = dayKey ? new Date(`${dayKey}T00:00:00`) : new Date(iso);

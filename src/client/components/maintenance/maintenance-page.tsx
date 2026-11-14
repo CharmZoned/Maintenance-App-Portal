@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
-import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import {
+  createSingleFlightLoader,
+  queryMaintenanceFocus,
+  type DeepLinkProps,
+} from "@/lib/deep-link";
 import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import type { StaffMember } from "@/lib/data";
 import { Button } from "@/components/ui/button";
@@ -210,6 +214,9 @@ export function MaintenancePage({
     return { needs, active, completed, all: orders.length, urgent };
   }, [orders]);
 
+  // Dashboard U5 tiles: ?filter=unassigned|urgent (minimal; Group A owns this page).
+  const focusFilter = useMemo(() => queryMaintenanceFocus(search), [search]);
+
   const filtered = useMemo(() => {
     let list = orders;
     if (useAudienceTabs) {
@@ -233,6 +240,12 @@ export function MaintenancePage({
         const sid = Number(assigneeFilter);
         list = list.filter((o) => o.assigned_staff_id === sid);
       }
+    }
+    // Dashboard U5 attention tiles: ?filter=unassigned|urgent
+    if (!useAudienceTabs && focusFilter === "unassigned") {
+      list = list.filter((o) => o.status === "open" && !o.assigned_staff_id);
+    } else if (!useAudienceTabs && focusFilter === "urgent") {
+      list = list.filter((o) => o.status !== "closed" && o.priority === "urgent");
     }
     const q = query.trim().toLowerCase();
     if (q) {
@@ -261,6 +274,7 @@ export function MaintenancePage({
     assigneeFilter,
     query,
     useAudienceTabs,
+    focusFilter,
   ]);
 
   const title = app.isTenant ? "My requests" : "Maintenance";

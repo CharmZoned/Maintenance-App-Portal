@@ -87,6 +87,21 @@ describe("request-status helpers", () => {
     expect(formatActivityStamp("2026-11-17")).toMatch(/17/);
   });
 
+  it("treats noon-UTC date sentinel like date-only (no clock)", () => {
+    expect(formatActivityStamp("2026-11-14T12:00:00.000Z")).toBe("Today");
+    expect(formatActivityStamp("2026-11-14T12:00:00+00:00")).toBe("Today");
+    expect(formatActivityStamp("2026-11-14T12:00:00.000000+00:00")).toBe("Today");
+    expect(formatActivityStamp("2026-11-13T12:00:00.000Z")).toBe("Yesterday");
+    const future = formatActivityStamp("2026-11-20T12:00:00+00:00");
+    expect(future).toMatch(/20/);
+    expect(future).toMatch(/Nov|11/);
+    expect(future).toMatch(/Mon|Tue|Wed|Thu|Fri|Sat|Sun/);
+    expect(future).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(future).not.toMatch(/AM|PM/i);
+    // Real timed stamp still includes a clock on today.
+    expect(formatActivityStamp("2026-11-14T20:30:00.000Z")).toMatch(/^Today /);
+  });
+
   it("sorts newest first and ties on id", () => {
     const a = { created_at: "2026-11-14T10:00:00Z", id: 1 };
     const b = { created_at: "2026-11-14T12:00:00Z", id: 2 };
