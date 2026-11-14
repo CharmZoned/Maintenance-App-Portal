@@ -39,6 +39,8 @@ export function MessageComposer({
     try {
       await onSend(body, showVisibility ? visibility : "tenant_visible");
       setValue("");
+    } catch {
+      // Keep draft; caller reports via setError banner.
     } finally {
       setBusy(false);
     }

@@ -11,7 +11,7 @@ const FRESH_MS = 30_000;
 
 /**
  * Loads stub notification rows from visible work orders and renders
- * desktop panel + mobile sheet when `open`.
+ * desktop panel or mobile sheet when `open` (one variant only).
  *
  * Mark-all-read is session-local: a set of read ids is re-applied after every
  * refresh so a rebuild from work orders does not undo it.
@@ -34,6 +34,21 @@ export function NotificationsHost({
   readIdsRef.current = readIds;
   const lastFetchedAt = useRef(0);
   const inFlight = useRef(false);
+  const [variant, setVariant] = useState<"panel" | "sheet">(() =>
+    typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches
+      ? "panel"
+      : "sheet",
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    function sync() {
+      setVariant(mq.matches ? "panel" : "sheet");
+    }
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (inFlight.current) return;
@@ -85,23 +100,13 @@ export function NotificationsHost({
   }
 
   return (
-    <>
-      <NotificationsPanel
-        open={open}
-        items={items}
-        variant="panel"
-        onClose={() => onOpenChange(false)}
-        onMarkAllRead={markAllRead}
-        onSelect={selectItem}
-      />
-      <NotificationsPanel
-        open={open}
-        items={items}
-        variant="sheet"
-        onClose={() => onOpenChange(false)}
-        onMarkAllRead={markAllRead}
-        onSelect={selectItem}
-      />
-    </>
+    <NotificationsPanel
+      open={open}
+      items={items}
+      variant={variant}
+      onClose={() => onOpenChange(false)}
+      onMarkAllRead={markAllRead}
+      onSelect={selectItem}
+    />
   );
 }

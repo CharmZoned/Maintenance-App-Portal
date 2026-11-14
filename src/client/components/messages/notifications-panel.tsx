@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { EmptyState } from "@/components/patterns";
 import { NotificationItem } from "./notification-item";
 import type { NotificationItemData } from "@/lib/messages";
@@ -24,6 +25,22 @@ export function NotificationsPanel({
   onSelect,
   variant = "panel",
 }: Props) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    closeRef.current?.focus();
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const unread = items.some((i) => i.unread);
@@ -58,9 +75,10 @@ export function NotificationsPanel({
   if (variant === "sheet") {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col bg-background md:hidden"
+        ref={panelRef}
+        className="fixed inset-0 z-50 flex flex-col bg-background"
         role="dialog"
-        aria-modal
+        aria-modal="true"
         aria-label="Notifications"
       >
         <div className="flex justify-center pt-2.5 pb-1">
@@ -68,6 +86,7 @@ export function NotificationsPanel({
         </div>
         <div className="flex h-14 shrink-0 items-center justify-between px-4">
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
             className="text-sm font-medium text-foreground hover:underline"
@@ -97,27 +116,38 @@ export function NotificationsPanel({
     <>
       <button
         type="button"
-        className="fixed inset-0 z-40 hidden bg-transparent md:block"
+        className="fixed inset-0 z-40 bg-transparent"
         aria-label="Dismiss notifications"
         onClick={onClose}
       />
       <div
-        className="absolute right-6 top-14 z-50 hidden h-[560px] w-[360px] flex-col overflow-hidden rounded-md border border-border bg-card shadow-raised md:flex"
+        ref={panelRef}
+        className="absolute right-6 top-14 z-50 flex h-[560px] w-[360px] flex-col overflow-hidden rounded-md border border-border bg-card shadow-raised"
         role="dialog"
         aria-modal="true"
         aria-label="Notifications"
       >
         <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
           <h2 className="text-[15px] font-medium">Notifications</h2>
-          {unread ? (
+          <div className="flex items-center gap-3">
+            {unread ? (
+              <button
+                type="button"
+                onClick={onMarkAllRead}
+                className="text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                Mark all read
+              </button>
+            ) : null}
             <button
+              ref={closeRef}
               type="button"
-              onClick={onMarkAllRead}
+              onClick={onClose}
               className="text-xs font-medium text-muted-foreground hover:text-foreground"
             >
-              Mark all read
+              Close
             </button>
-          ) : null}
+          </div>
         </div>
         {list}
         {stubNote}

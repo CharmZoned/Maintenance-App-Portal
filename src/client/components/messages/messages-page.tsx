@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
@@ -104,6 +104,8 @@ export function MessagesPage({
   const selected: MessageThread | undefined = threads.find((t) => t.id === selectedId);
   const selectedRequestId =
     selected?.kind === "request" ? selected.requestId ?? null : null;
+  const selectedRequestIdRef = useRef(selectedRequestId);
+  selectedRequestIdRef.current = selectedRequestId;
 
   useEffect(() => {
     setComments([]);
@@ -160,16 +162,10 @@ export function MessagesPage({
     try {
       const created = await addMaintenanceComment(requestId, body, visibility);
       // Drop if the user switched threads while the request was in flight.
-      if (selectedRequestId !== requestId) return;
+      if (selectedRequestIdRef.current !== requestId) return;
       setComments((prev) => [...prev, created]);
-      setWorkOrders((prev) =>
-        prev.map((wo) =>
-          wo.id === requestId ? { ...wo, description: body, created_at: wo.created_at } : wo,
-        ),
-      );
     } catch (err) {
       setError((err as Error).message);
-      throw err;
     }
   }
 
