@@ -68,7 +68,8 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
     await expect(dialog.getByLabel("Description")).toHaveValue(DESCRIPTION);
     await expect(dialog.getByRole("img", { name: "Maintenance photo" })).toBeVisible();
 
-    await dialog.getByRole("button", { name: "Accept & schedule", exact: true }).click();
+    // Accept & schedule is expanded by default for Open requests (WS-K).
+    await expect(dialog.getByRole("button", { name: "Hide", exact: true })).toBeVisible();
     await choose(page, selectUnder(dialog, "Staff"), "Fixit, Sam");
     await dialog.locator('label:text-is("Date") ~ input[type="date"]').fill(tomorrow());
     await shot(page, testInfo, "Admin assigns Sam and picks a date");
