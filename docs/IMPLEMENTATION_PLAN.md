@@ -10,6 +10,7 @@ This file used to hold the full phased plan. That snapshot is archived at
 | Doc | Role |
 |-----|------|
 | [`docs/LANDLORD_GOPHER_AUDIT_AND_PLAN.md`](LANDLORD_GOPHER_AUDIT_AND_PLAN.md) | **2026-11-14 product audit + proposed plan (awaiting approval)** — UX/UI, functional and code review against the maintenance-and-communication scope |
+| [`docs/UX_UI_DESIGN.md`](UX_UI_DESIGN.md) | **Screen-level design brief (awaiting approval)** — screens to add, update and delete, with layouts per role |
 | [`docs/parallel-work-plan.md`](parallel-work-plan.md) | Wave 1–2 stream definitions + historical kickoffs |
 | [`docs/wave3-plan.md`](wave3-plan.md) | Wave 3 streams (repo index; fuller copy may also live in the Cursor Project store under the same relative path) |
 | [`docs/deferred-work.md`](deferred-work.md) | Parked items (hosting/URL, R6, Stripe, hygiene backlog, etc.) |
