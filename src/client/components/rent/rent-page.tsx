@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Receipt, Sparkles } from "lucide-react";
 import { useApp } from "@/context";
+import { queryPeriod, type DeepLinkProps } from "@/lib/deep-link";
 import { addMonths, cn, currentPeriod, formatDate, formatMoney, formatPeriod } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,27 +19,54 @@ const STATUS_TONE: Record<ChargeStatus, string> = {
   waived: "bg-muted text-muted-foreground",
 };
 
-export function RentPage() {
+export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
   const app = useApp();
-  const [period, setPeriod] = useState<string>(currentPeriod());
+  const [period, setPeriod] = useState<string>(() => queryPeriod(search) ?? currentPeriod());
   const [charges, setCharges] = useState<RentCharge[]>([]);
   const [loading, setLoading] = useState(true);
   const [paymentTarget, setPaymentTarget] = useState<RentCharge | null>(null);
   const [generating, setGenerating] = useState(false);
 
+  useEffect(() => {
+    const fromQuery = queryPeriod(search);
+    if (!fromQuery) return;
+    setPeriod(fromQuery);
+    replace?.("/rent");
+  }, [search, replace]);
+
+  const listCharges = app.listCharges;
+  const setError = app.setError;
+
   async function load() {
     try {
       setLoading(true);
-      const list = await app.listCharges(period);
+      const list = await listCharges(period);
       setCharges(list);
     } catch (err) {
-      app.setError((err as Error).message);
+      setError((err as Error).message);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const list = await listCharges(period);
+        if (cancelled) return;
+        setCharges(list);
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [period, listCharges, setError]);
 
   async function generate() {
     setGenerating(true);

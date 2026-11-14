@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, Plus } from "lucide-react";
 import * as data from "@/lib/data";
 import { useApp } from "@/context";
+import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +22,7 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "withdrawn", label: "Withdrawn" },
 ];
 
-export function ApplicationsPage() {
+export function ApplicationsPage({ search = "", replace }: DeepLinkProps = {}) {
   const { setError, isAdmin } = useApp();
   const [rows, setRows] = useState<Application[]>([]);
   const [units, setUnits] = useState<Unit[]>([]);
@@ -29,27 +31,68 @@ export function ApplicationsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Application | undefined>(undefined);
 
-  const loadApps = useCallback(async () => {
+  const flight = useMemo(
+    () =>
+      createSingleFlightLoader(async () => {
+        try {
+          return await data.listApplications("all");
+        } catch (err) {
+          setError((err as Error).message);
+          return [] as Application[];
+        }
+      }),
+    [setError],
+  );
+
+  async function loadApps() {
     setLoading(true);
     try {
-      setRows(await data.listApplications("all"));
-    } catch (err) {
-      setError((err as Error).message);
+      const list = await flight.load();
+      setRows(list);
+      return list;
     } finally {
       setLoading(false);
     }
-  }, [setError]);
+  }
 
   useEffect(() => {
-    void loadApps();
-    void (async () => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
       try {
-        setUnits(await data.listUnits());
-      } catch (err) {
-        setError((err as Error).message);
+        const list = await flight.load();
+        if (cancelled) return;
+        setRows(list);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [loadApps, setError]);
+    void (async () => {
+      try {
+        const u = await data.listUnits();
+        if (!cancelled) setUnits(u);
+      } catch (err) {
+        if (!cancelled) setError((err as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flight, setError]);
+
+  useDeepLinkOpen({
+    search,
+    param: "app",
+    items: rows,
+    loadList: () => flight.load(),
+    onList: setRows,
+    onFound: (found) => {
+      setEditing(found);
+      setOpen(true);
+      replace?.("/applications");
+    },
+    onMiss: () => replace?.("/applications"),
+  });
 
   const visible = useMemo(
     () => (filter === "all" ? rows : rows.filter((r) => r.status === filter)),

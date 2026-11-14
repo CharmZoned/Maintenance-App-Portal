@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClipboardList, Plus, Search } from "lucide-react";
 import { useApp } from "@/context";
+import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import { cn, daysBetween, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +21,11 @@ const STATUS_TONE: Record<string, string> = {
   cancelled: "outline",
 };
 
-export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
+export function LeasesPage({
+  navigate,
+  search = "",
+  replace,
+}: { navigate: (to: string) => void } & DeepLinkProps) {
   const app = useApp();
   const [leases, setLeases] = useState<Lease[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,19 +34,75 @@ export function LeasesPage({ navigate }: { navigate: (to: string) => void }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Lease | undefined>(undefined);
 
+  const listLeases = app.listLeases;
+  const setError = app.setError;
+  const flight = useMemo(
+    () =>
+      createSingleFlightLoader(async () => {
+        try {
+          return await listLeases();
+        } catch (err) {
+          setError((err as Error).message);
+          return [] as Lease[];
+        }
+      }),
+    [listLeases, setError],
+  );
+
   async function load() {
+    setLoading(true);
     try {
-      setLoading(true);
-      const list = await app.listLeases();
+      const list = await flight.load();
       setLeases(list);
-    } catch (err) {
-      app.setError((err as Error).message);
+      return list;
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await flight.load();
+        if (cancelled) return;
+        setLeases(list);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flight]);
+
+  // Always replace so Back cannot re-enter ?lease= and re-fire this effect.
+  useDeepLinkOpen({
+    search,
+    param: "lease",
+    items: leases,
+    loadList: () => flight.load(),
+    onList: setLeases,
+    onFound: (found) => {
+      if (found.primary_tenant_id != null) {
+        replace?.(`/tenants/${found.primary_tenant_id}`);
+        return;
+      }
+      if (app.canMutatePortfolio) {
+        setEditing(found);
+        setDialogOpen(true);
+        replace?.("/leases");
+        return;
+      }
+      if (found.property_id != null) {
+        replace?.(`/properties/${found.property_id}`);
+        return;
+      }
+      replace?.("/leases");
+    },
+    onMiss: () => replace?.("/leases"),
+  });
 
   const filtered = useMemo(() => {
     let out = leases;

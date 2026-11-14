@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { CircleAlert, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
+import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
+import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
 import { cn, formatDate, formatMoney } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +48,7 @@ function tenantStatusLabel(status: WorkOrderStatus): string {
   }
 }
 
-export function MaintenancePage() {
+export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
   const app = useApp();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,22 +59,64 @@ export function MaintenancePage() {
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
   const [home, setHome] = useState<TenantHomeContext | null>(null);
 
+  const listWorkOrders = app.listWorkOrders;
+  const setError = app.setError;
+  const flight = useMemo(
+    () =>
+      createSingleFlightLoader(async () => {
+        try {
+          return await listWorkOrders();
+        } catch (err) {
+          setError((err as Error).message);
+          return [] as WorkOrder[];
+        }
+      }),
+    [listWorkOrders, setError],
+  );
+
   async function load() {
+    setLoading(true);
     try {
-      setLoading(true);
-      const list = await app.listWorkOrders();
+      const list = await flight.load();
       setOrders(list);
-    } catch (err) {
-      app.setError((err as Error).message);
+      return list;
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, []);
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await flight.load();
+        if (cancelled) return;
+        setOrders(list);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flight]);
+
+  // Calendar deep-links: open existing WO without touching work-order-dialog (WS-K).
+  useDeepLinkOpen({
+    search,
+    param: "wo",
+    items: orders,
+    loadList: () => flight.load(),
+    onList: setOrders,
+    onFound: (found) => {
+      setEditing(found);
+      setDialogOpen(true);
+      setStaffFilter((prev) => (prev !== "all" && found.status === "closed" ? "all" : prev));
+      replace?.("/maintenance");
+    },
+    onMiss: () => replace?.("/maintenance"),
+  });
 
   useEffect(() => {
     if (!app.isTenant) return;

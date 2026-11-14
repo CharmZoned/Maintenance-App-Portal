@@ -14,6 +14,7 @@ import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
+import { CalendarPage } from "./components/calendar/calendar-page";
 import { TenantDocumentsPage } from "./components/documents/tenant-documents-page";
 import { LandlordDocumentsPage } from "./components/documents/landlord-documents-page";
 import { SettingsPage } from "./components/settings/settings-page";
@@ -41,6 +42,7 @@ const PORTFOLIO: AppNavItem[] = [
 const OPERATIONS: AppNavItem[] = [
   { id: "rent", label: "Rent", href: "/rent", icon: "dollar-sign", color: "amber" },
   { id: "maintenance", label: "Maintenance", href: "/maintenance", icon: "list-checks", color: "orange" },
+  { id: "calendar", label: "Calendar", href: "/calendar", icon: "calendar-days", color: "blue" },
 ];
 /** Admin-only: Users queue + rental Applications (applicant income PII). */
 const ADMIN_ITEMS: AppNavItem[] = [
@@ -82,7 +84,7 @@ export function App() {
     auth.gate.role.role === "landlord" &&
     auth.gate.role.landlord_id != null;
   const state = useAppState(ready, { isAdmin, isTenant, isLandlord });
-  const { path, route, navigate } = useRouter();
+  const { path, search, route, navigate, replace } = useRouter();
 
   useEffect(() => {
     if (ready) reportLocation(path);
@@ -310,12 +312,17 @@ export function App() {
               {route.name === "landlords" && <LandlordsPage />}
               {route.name === "tenants" && <TenantsList navigate={navigate} />}
               {route.name === "tenant" && <TenantPage id={route.id} navigate={navigate} />}
-              {route.name === "leases" && <LeasesPage navigate={navigate} />}
-              {route.name === "rent" && <RentPage />}
-              {route.name === "maintenance" && <MaintenancePage />}
+              {route.name === "leases" && (
+                <LeasesPage navigate={navigate} search={search} replace={replace} />
+              )}
+              {route.name === "rent" && <RentPage search={search} replace={replace} />}
+              {route.name === "maintenance" && (
+                <MaintenancePage search={search} replace={replace} />
+              )}
+              {route.name === "calendar" && <CalendarPage navigate={navigate} />}
               {route.name === "applications" &&
                 (isAdmin ? (
-                  <ApplicationsPage />
+                  <ApplicationsPage search={search} replace={replace} />
                 ) : (
                   <Placeholder
                     title="Admins only"
