@@ -15,6 +15,7 @@ import {
   formatActivityStamp,
   isOpenRequest,
   requestContextLine,
+  requestNextStep,
   toRequestStatus,
   unitPropertyLabel,
 } from "@/lib/request-status";
@@ -46,18 +47,23 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
       setLoading(true);
       setLoadError(null);
       try {
-        const ctx = await getTenantHomeContext();
-        if (cancelled) return;
-        setHome(ctx);
-        const [woList, docList] = await Promise.all([
-          listWorkOrders(),
-          ctx?.property_id != null
-            ? listPropertyDocuments({ property_id: ctx.property_id })
-            : Promise.resolve([] as PropertyDocument[]),
+        // Context + open WOs in parallel; documents wait on property_id.
+        const [ctx, woList] = await Promise.all([
+          getTenantHomeContext(),
+          listWorkOrders({ open_only: true, skip_staff_notes: true }),
         ]);
         if (cancelled) return;
+        setHome(ctx);
         setOrders(woList);
-        setDocs(docList);
+        if (ctx?.property_id == null) {
+          setDocs([]);
+        } else {
+          const docList = await listPropertyDocuments({
+            property_id: ctx.property_id,
+            limit: 3,
+          });
+          if (!cancelled) setDocs(docList);
+        }
       } catch (err) {
         if (!cancelled) {
           const message = (err as Error).message;
@@ -78,16 +84,14 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
     [home],
   );
 
-  const openOrders = useMemo(
-    () => orders.filter(isOpenRequest).slice(0, 5),
-    [orders],
-  );
+  const openAll = useMemo(() => orders.filter(isOpenRequest), [orders]);
+  const openOrders = openAll.slice(0, 5);
 
   const lastActivity = useMemo(() => {
     const stamps = orders
       .map((o) => o.created_at)
       .filter(Boolean)
-      .sort((a, b) => (a < b ? 1 : -1));
+      .sort((a, b) => (a === b ? 0 : a < b ? 1 : -1));
     return stamps[0] ? formatActivityStamp(stamps[0]) : null;
   }, [orders]);
 
@@ -131,8 +135,8 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
           <div className="rounded-md bg-muted px-3 py-3">
             <p className="text-[15px] font-semibold leading-5 text-foreground">{placeLabel}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {openOrders.length} open{" "}
-              {openOrders.length === 1 ? "request" : "requests"}
+              {openAll.length} open{" "}
+              {openAll.length === 1 ? "request" : "requests"}
               {lastActivity ? ` · Last activity ${lastActivity}` : ""}
             </p>
           </div>
@@ -148,7 +152,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Open requests
             </h2>
-            {openOrders.length === 0 ? (
+            {openAll.length === 0 ? (
               <EmptyState
                 message="No open requests. Report a problem if something needs fixing."
                 icon={<Wrench className="size-5" aria-hidden />}
@@ -164,7 +168,12 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
                     context={requestContextLine(wo, {
                       includeProperty: false,
                     })}
-                    status={<StatusChip status={toRequestStatus(wo)} />}
+                    status={
+                      <StatusChip
+                        status={toRequestStatus(wo)}
+                        nextStep={requestNextStep(wo)}
+                      />
+                    }
                     onClick={() => navigate(`/maintenance?wo=${wo.id}`)}
                   />
                 ))}
@@ -176,7 +185,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
             <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Latest message
             </h2>
-            {/* Stub: messaging UI ships in Messages/People group. */}
+            {/* Messaging UI ships in Messages/People group. */}
             <button
               type="button"
               onClick={() => navigate("/messages")}
@@ -185,7 +194,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-semibold text-foreground">Messages</p>
                 <p className="text-xs text-muted-foreground">
-                  Inbox arrives in a follow-up PR — tap to open the stub.
+                  No new messages. Messages will show up here.
                 </p>
               </div>
             </button>

@@ -44,7 +44,8 @@ export function requestNextStep(
       return [when, assignee].filter(Boolean).join(" · ") || "Assigned";
     }
     case "In progress":
-      return wo.resolution_notes?.trim() || "Work in progress";
+      // Do not surface draft resolution_notes until Closed.
+      return "Work in progress";
     case "On hold": {
       const reason = wo.hold_reason?.trim();
       const follow = wo.next_follow_up_date
@@ -59,20 +60,18 @@ export function requestNextStep(
   }
 }
 
-/** List-row context line: property · status bits · assignee. */
+/**
+ * List-row context — place / property only (status + next-step live on StatusChip).
+ */
 export function requestContextLine(
   wo: WorkOrder,
-  opts?: { assigneeName?: string | null; includeProperty?: boolean },
+  opts?: { includeProperty?: boolean; titleIncludesUnit?: boolean },
 ): string {
-  const status = toRequestStatus(wo);
   const parts: string[] = [];
   if (opts?.includeProperty && wo.property_name) parts.push(wo.property_name);
-  if (wo.unit_name && opts?.includeProperty) {
-    // Title often already has unit; keep property only when includeProperty.
+  if (wo.unit_name && !opts?.titleIncludesUnit) {
+    parts.push(`Unit ${wo.unit_name}`);
   }
-  parts.push(status);
-  const next = requestNextStep(wo, opts);
-  if (next && next !== status) parts.push(next);
   return parts.join(" · ");
 }
 
@@ -104,4 +103,13 @@ export function unitPropertyLabel(unit?: string | null, property?: string | null
   if (u) return `Unit ${u}`;
   if (p) return p;
   return "Your home";
+}
+
+/** Newest first; stable on equal timestamps. */
+export function compareCreatedDesc(a: { created_at: string; id?: number }, b: { created_at: string; id?: number }): number {
+  if (a.created_at === b.created_at) {
+    if (a.id != null && b.id != null) return b.id - a.id;
+    return 0;
+  }
+  return a.created_at < b.created_at ? 1 : -1;
 }

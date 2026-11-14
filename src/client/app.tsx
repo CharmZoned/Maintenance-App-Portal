@@ -299,7 +299,9 @@ export function App() {
               {isTenant ? (
                 <>
                   {route.name === "home" && <TenantHomePage navigate={navigate} />}
-                  {route.name === "maintenance" && <MaintenancePage />}
+                  {route.name === "maintenance" && (
+                    <MaintenancePage search={search} replace={replace} />
+                  )}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
@@ -328,7 +330,9 @@ export function App() {
                   {route.name === "home" && <LandlordHomePage navigate={navigate} />}
                   {route.name === "properties" && <PropertiesList navigate={navigate} />}
                   {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
-                  {route.name === "maintenance" && <MaintenancePage />}
+                  {route.name === "maintenance" && (
+                    <MaintenancePage search={search} replace={replace} />
+                  )}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
