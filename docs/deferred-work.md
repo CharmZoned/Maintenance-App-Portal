@@ -12,8 +12,8 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 | Lazy-load `MaintenanceRequestStaffNotes` on WO dialog open (not every `listWorkOrders`) | Smaller list payloads for landlords/tenants/dashboard | WS-E ships batched notes enrich on list for staff UX parity; not AuthZ | Next maintenance UX / perf pass (WS-N) |
 | Dashboard / charges **N+1** query reduction | Faster dashboard + rent list under larger portfolios | Perf only; not blocking Phase 1.5 or Phase 2 DoD | When portfolio size or Lighthouse/load complaints make list latency visible |
 | Service-role / SQL Editor **trigger guard** on Payments (block DML unless via RPC or explicit bypass) | Closes ledger bypass for privileged DB roles | Authenticated path already RPC-only after dropping Payment write policies; service role is ops-only today | Before granting broad SQL access to non-ops, or if ops mistakes rewrite Payments outside RPCs |
-| **Set up live portal URL + hosting/deploy** (roadmap **#3** / **WS-I** / hygiene **#13**) — owner chooses host (**open — do not invent**); deploy portal; set `NEXT_PUBLIC_PORTAL_URL` on LandlordGopherWebsite (Preview + Production + `.env.local`) | Unlocks Phase 4 website Login / Staff / Tenant CTAs in production ([website PR #1](https://github.com/CharmZoned/landlordgopherwebsite_/pull/1)) | Portal host not finalized / env not wired in hosting yet | Wave 3 **WS-I** after owner names host; same Auth project `bgjkjtfgrfiszbzatriq` |
-| **Supabase staging + duplicate migration history cleanup** (**WS-I** / hygiene **#8**) | Apply DDL before production; stop live-only drift / duplicate version stamps (see `docs/ops/schema-migrations.md`) | Single shared project `bgjkjtfgrfiszbzatriq` today; MCP clock versions vs repo prefixes | Wave 3 **WS-I**; never live-only DDL |
+| **Portal hosting + URL: deferred until owner provides the link** (roadmap **#3** / hygiene **#13**) — deploy portal + set website `NEXT_PUBLIC_PORTAL_URL` / login-link wiring; launch new Next.js site; retire live WordPress | Unlocks real production CTAs and stops serving compromised WordPress | **Out of Wave 3** by owner decision (2026-11-14). Live [landlordgopher.com](https://landlordgopher.com) is still the **old WordPress** site (spam-compromised; `/login` redirects to casino). New Next.js marketing site (`landlordgopherwebsite_`) is **not deployed** to that domain yet. Same Auth project `bgjkjtfgrfiszbzatriq` when wired | When owner provides the portal/website link and go-ahead to cut over DNS / hosting |
+| **Supabase staging + duplicate migration history cleanup** (**WS-I** / hygiene **#8**) | Apply DDL before production; stop live-only drift / duplicate version stamps (see `docs/ops/schema-migrations.md`) | Single shared project `bgjkjtfgrfiszbzatriq` today; MCP clock versions vs repo prefixes | Wave 3 **WS-I** (staging + history only — no hosting/URL); never live-only DDL |
 | **Repair MCP migration version stamps** so live `schema_migrations.version` matches repo file prefixes (or document permanent exceptions) | Stops CLI/`db push` treating already-applied SQL as pending | MCP `apply_migration` used clock versions (e.g. live `20261113201805_phase2_authz…` vs repo `20261113203000_…`; same pattern for most Phase 1–5 files, and LGA-15 live `lga15_maintenance_status_category_checks_241000` vs repo `20261113242000_*`. LGA-18 `20261113241000` was applied with a matching version). See `docs/ops/schema-migrations.md` | Fold into Wave 3 **WS-I** hygiene #8 |
 | Phase 1.5 **Medium polish** from [#5](https://github.com/CharmZoned/Maintenance-App-Portal/pull/5): guard null `updated` after RPC; document that any payment clears `waived`; decide `amount = 0` never → `paid` rule | Belt-and-suspenders client safety + intentional product rules | Non-blocking after High ledger fixes on `70a9468`; merge already approved; live payment RPCs applied 2026-11-13 (LGA-16) | Next rent/ledger UX pass or before multi-staff |
 | Ambiguous signup emails (match >1 of Landlord/Tenant/Staff) leave Auth user with **no** `user_roles` row | Admin must assign role manually on Users (upsert via RPC) | Rare; trigger refuses to guess | If multi-entity emails become common, add admin “create role” affordance or pick priority |
@@ -49,11 +49,12 @@ Track items we consciously put off. Add a row when parking work; remove or mark 
 
 | Roadmap | Wave 3 | Stream |
 |---------|--------|--------|
-| Portal URL / hosting **#3** | **YES** (host still open) | **WS-I** (+ hygiene #13) |
+| Portal URL / hosting **#3** | **NO** — deferred until owner provides the link | deferred-work (hygiene #13); **not** WS-I |
 | Accept & schedule | **YES** | **WS-K** |
 | Thin calendar **#9** skinny | **YES** | **WS-O** |
 | Zillow research **#10** | **NO** | deferred (**WS-P** not staffed) |
 | Website visual **#11** | **NO** | deferred (**WS-Q** not staffed) |
+| Staging + migration history | **YES** | **WS-I** (hygiene #8 only) |
 
 **Not** eng backlog: Jayla GitHub invite (roadmap **#12**) — owner access action.
 
@@ -75,4 +76,4 @@ Parked for staffing under **WS-S** / **WS-R** / **WS-I** / **WS-L** after owner 
 | 10 | Settings **admin-only** (RLS SELECT today `is_staff_or_admin`; staff still see Settings nav) | **WS-S S2** | S | **No** mig overlap | Serialize migrations |
 | 11 | Status label product decision → shared UI maps | Owner decision → FE | S after decision | Prefer after/near K, not during K mega-edit | **Owner decision still open** |
 | 12 | Web push | **WS-L** hold | — | Do not staff | Phase 6 / R6 hold |
-| 13 | Explicit portal hosting/deploy deliverable | **WS-I** | (in I) | Part of I | **Portal host still open** |
+| 13 | Portal hosting/deploy + URL + website env (+ WordPress retirement / Next.js launch) | **deferred-work** (out of Wave 3) | — | Do not staff in Wave 3 | Wait until owner provides the link |

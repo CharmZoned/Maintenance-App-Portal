@@ -53,7 +53,7 @@ flowchart TB
   subgraph W3["Wave 3 — see docs/wave3-plan.md"]
     K[WS-K Maint UX]
     N[WS-N Perf + query slim]
-    I[WS-I Hosting URL staging history]
+    I[WS-I Staging + migration history]
     O[WS-O Thin calendar]
     S[WS-S Security hygiene]
     R[WS-R Login redirect]
@@ -63,6 +63,7 @@ flowchart TB
     M[WS-M Full landlord self-serve]
     P[WS-P Zillow NO]
     Q[WS-Q Website visual NO]
+    Host[Portal hosting URL deferred]
   end
   A --> H
   B --> H
@@ -84,7 +85,7 @@ flowchart TB
 |------|----------------------|------------|
 | **1** | A, B, C, D | **Done** — intentional `#18` reds for R1–R5 cleared (`pnpm test` emulator) |
 | **2** | E, F, G, H, J | **Done** — AuthZ leftovers + landlord docs + lease sync + signed-off manual QA; test coverage expanded |
-| **3** | I, K, N, O, S, R | See [`docs/wave3-plan.md`](./wave3-plan.md) — hosting/URL; Accept & schedule; perf; thin calendar; security hygiene; login redirect. **P/Q not staffed** |
+| **3** | I, K, N, O, S, R | See [`docs/wave3-plan.md`](./wave3-plan.md) — staging + migration history; Accept & schedule; perf; thin calendar; security hygiene; login redirect. **P/Q + portal hosting/URL not staffed** |
 | **Hold** | L (R6 + web push), M (landlord MVP), P, Q | Explicit product reopen only |
 
 **Suggested merge order inside Wave 1:** A → B → C/D (A/B are independent migrations; merge either first; C is FE-only; D is FE-only). If two BE agents run together, **pre-claim migration timestamps** below.
@@ -338,25 +339,25 @@ Run manual Phase 2 + LGA-18 approve/link matrix on live Landlord Gopher after Wa
 
 ---
 
-### WS-I — Hosting / deploy, portal URL, staging, migration history  
-**Goal:** Deploy a live portal origin (owner-chosen host — **do not invent**), wire Phase 4 CTAs, staging DB, migration-history cleanup.  
-**Size:** M · **Conflict risk:** Low–medium vs WS-S only on history/staging docs · **Deps:** Owner portal-host decision before Production env wire  
-**Agent role:** WEB / ops  
-**Hygiene:** owner items **#8**, **#13**
+### WS-I — Staging Supabase + migration version / history repair  
+**Goal:** Safer schema workflow only — staging DB + migration-history cleanup (hygiene **#8**).  
+**Size:** S–M · **Conflict risk:** Low–medium vs WS-S only on history/staging docs · **Deps:** None  
+**Agent role:** Ops / BE docs  
+**Hygiene:** owner item **#8** only. **#13** hosting/deploy + portal URL are **out of Wave 3** (deferred until owner provides the link).
 
 | Item | Source | Notes |
 |------|--------|-------|
-| Explicit hosting/deploy deliverable for portal | **hygiene #13** · roadmap **#3** | Owner names host; agent deploys/documents |
-| Set `NEXT_PUBLIC_PORTAL_URL` on LandlordGopherWebsite Preview + Production | **deferred** · Phase 4 | Website PR #1 |
-| Supabase staging + **duplicate migration history cleanup** | **hygiene #8** · **deferred** | `docs/ops/schema-migrations.md`; no live-only DDL |
+| Supabase staging + **duplicate migration history cleanup** / version repair | **hygiene #8** · **deferred** | `docs/ops/schema-migrations.md`; no live-only DDL |
 
-**Acceptance:** Owner-approved origin live; website CTAs work; staging and/or history repair done or explicitly re-parked in deferred-work.
+**Out of scope for WS-I:** portal hosting/deploy config; portal URL; website `NEXT_PUBLIC_PORTAL_URL` / login-link wiring; WordPress retirement / Next.js launch — see deferred-work **“Portal hosting + URL: deferred until owner provides the link”**.
+
+**Acceptance:** Staging created or explicitly re-parked; migration history repaired or documented; no hosting/URL claimed as WS-I deliverables.
 
 **Kickoff prompt:**
 
 ```text
-OPS: WS-I from docs/wave3-plan.md / parallel-work-plan. No portal feature UI.
-Owner must supply portal host — do not invent. Deploy/document URL; set NEXT_PUBLIC_PORTAL_URL; staging Supabase; migration history cleanup per schema-migrations.md. Never live-only DDL. Coordinate with WS-S if both touch history repair.
+OPS: WS-I from docs/wave3-plan.md / parallel-work-plan. Staging + migration history only.
+Propose/create staging Supabase; migration version/history cleanup per schema-migrations.md. Never live-only DDL. Do NOT deploy portal, invent a host, or set NEXT_PUBLIC_PORTAL_URL. Coordinate with WS-S if both touch history repair.
 ```
 
 ---
@@ -494,7 +495,7 @@ Owner chose **not** to staff in Wave 3. Remains in `docs/deferred-work.md`.
 
 ### WS-R — Login `?redirect=` (Phase 4b / hygiene #9)  
 **Goal:** Safe post-login redirect for website → portal CTAs.  
-**Size:** S · **Conflict risk:** Low (auth routing) · **Deps:** None (nicer after WS-I URL exists)  
+**Size:** S · **Conflict risk:** Low (auth routing) · **Deps:** None (production portal URL is deferred)  
 **Agent role:** FE
 
 **Acceptance:** Honors safe internal/`allowlisted` `?redirect=`; rejects open redirects; documented behavior.
@@ -502,7 +503,7 @@ Owner chose **not** to staff in Wave 3. Remains in `docs/deferred-work.md`.
 **Kickoff prompt:**
 
 ```text
-IMPLEMENT: WS-R from docs/wave3-plan.md (hygiene #9). Portal FE login ?redirect= only. Prevent open redirects. No RLS. Branch + PR.
+IMPLEMENT: WS-R from docs/wave3-plan.md (hygiene #9). Portal FE login ?redirect= only. Prevent open redirects. No RLS. Do not wire production hosting/URL (deferred). Branch + PR.
 ```
 
 ---
@@ -518,10 +519,11 @@ IMPLEMENT: WS-R from docs/wave3-plan.md (hygiene #9). Portal FE login ?redirect=
 | **S1** Repo/CI | **#1** required CI checks; **#2** archive D1/Hono/Clawnify + refresh IMPLEMENTATION_PLAN + retire `main`/`sync-branches` (owner confirm) | S + M | **Yes** |
 | **S2** AuthZ mig (serialize; order **3→10→5→4→6**) | **#3** revoke anon EXECUTE on payment RPCs; **#10** Settings admin-only; **#5** `email_confirmed_at` on approve; **#4** last-admin guard; **#6** 5-photo DB cap | S–M each | **No** other migration/RLS PRs |
 | **S3** Auth policy | **#7** leaked-password + min length | S | **Yes** (Auth dashboard + auth forms) |
-| → **WS-I** | **#8** migration history + staging; **#13** hosting/deploy | — | See WS-I |
+| → **WS-I** | **#8** migration history + staging | — | See WS-I |
 | → **WS-R** | **#9** `?redirect=` | — | See WS-R |
 | Owner then FE | **#11** status labels | S after decision | Avoid during WS-K mega-edit |
 | → **WS-L** | **#12** web push | — | Hold |
+| → **deferred-work** | **#13** hosting/deploy + portal URL + website env | — | Out of Wave 3 until owner provides the link |
 
 **Acceptance (per item):** see Project store wave3-plan hygiene table. **Migrations only from repo files**; claim ≥ `20261114050000`.
 
@@ -569,7 +571,7 @@ IMPLEMENT: WS-S S2 from docs/wave3-plan.md. One migration PR at a time (prefer 3
 | **R5** | B6 storage delete | Landlord docs (F done); MIME (N) | — |
 | **R6** | — | — | **WS-L entire** (+ web push #12) |
 | **R7** | grants part of A | WS-E done; payment tests (J done); S hygiene (#3–5, #10) | — |
-| **R8** | unblocked by A–D | Phase 4 URL/hosting (I); login redirect (R) | M |
+| **R8** | unblocked by A–D | Login redirect (R); Phase 4 URL/hosting **deferred** until owner provides link | M |
 
 ---
 
@@ -578,7 +580,7 @@ IMPLEMENT: WS-S S2 from docs/wave3-plan.md. One migration PR at a time (prefer 3
 - Implementing any Wave stream in the **planning** PR that only adds this doc.
 - Opening R6 / Phase 6 / web push work.
 - Staffing **WS-P** / **WS-Q** (owner NO).
-- Inventing a portal host before owner decides.
+- Portal hosting/deploy, inventing a portal host, or wiring `NEXT_PUBLIC_PORTAL_URL` (deferred until owner provides the link).
 - Live-only DDL without a repo migration file (see `docs/ops/schema-migrations.md`).
 - Merging PRs (human only).
 

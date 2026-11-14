@@ -12,14 +12,14 @@
 | **WS-O** thin calendar | **YES** — staff after approval |
 | **WS-P** Zillow research | **NO** — leave deferred |
 | **WS-Q** website visual | **NO** — leave deferred |
-| Portal host (WS-I) | **Open** — do not invent |
+| **Portal hosting + URL** | **Out of Wave 3** — deferred until owner provides the link (live landlordgopher.com still old WordPress; Next.js not launched) |
 | Status labels (hygiene #11) | **Open** |
 
 ## Streams to staff after approval
 
 | Stream | Size | Conflict | Start |
 |--------|------|----------|-------|
-| **WS-I** Hosting/deploy + portal URL + staging + migration history (#8, #13) | M | Low–med vs S history | Docs/staging now; **Production waits on host** |
+| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Immediately after approval — **no** hosting/URL |
 | **WS-K** Accept & schedule | M | **High** on `work-order-dialog.tsx` | Immediately |
 | **WS-N** Perf/docs (one lane) | S–M | Low–med | Immediately |
 | **WS-O** Thin read-only calendar | M | Med; prefer after K | After K |
@@ -31,14 +31,15 @@
 1–2 → **WS-S S1** (CI required; archive D1/Hono/Clawnify + plan refresh + `main` sync) — parallel with I/K/N/O  
 3–6, 10 → **WS-S S2** (anon payment EXECUTE; last-admin; email_confirmed approve; 5-photo DB; Settings admin-only) — **no migration overlap**  
 7 → **WS-S S3** (leaked-password + min length) — parallel OK  
-8, 13 → **WS-I**  
+8 → **WS-I** (staging + history only)  
 9 → **WS-R**  
 11 → owner decision, then small FE  
-12 web push → **WS-L hold**
+12 web push → **WS-L hold**  
+13 hosting/deploy + portal URL + website env → **deferred-work** (not Wave 3)
 
 ## Hold / not staffed
 
-**WS-L** (R6 + web push) · **WS-M** · **WS-P** · **WS-Q** · Stripe · Jayla #4/#12 · full calendar / inspections / permits
+**WS-L** (R6 + web push) · **WS-M** · **WS-P** · **WS-Q** · **Portal hosting + URL** · Stripe · Jayla #4/#12 · full calendar / inspections / permits
 
 ## Migrations
 
