@@ -46,21 +46,38 @@ export function intentLoginLabel(intent: string | null | undefined): string {
 }
 
 export function isTenantAllowedRoute(route: Route): boolean {
-  return route.name === "maintenance" || route.name === "documents";
+  return (
+    route.name === "home" ||
+    route.name === "maintenance" ||
+    route.name === "messages" ||
+    route.name === "documents" ||
+    route.name === "account"
+  );
 }
 
 export function isLandlordAllowedRoute(route: Route): boolean {
   return (
+    route.name === "home" ||
     route.name === "properties" ||
     route.name === "property" ||
     route.name === "maintenance" ||
-    route.name === "documents"
+    route.name === "messages" ||
+    route.name === "documents" ||
+    route.name === "account"
   );
 }
 
-/** Maintenance staff: assigned jobs + calendar only (no empty admin portfolio shell). */
+/**
+ * Maintenance staff: my jobs + messages (+ calendar kept reachable for bookmarks;
+ * calendar is retired from primary nav per Figma Phase 0).
+ */
 export function isMaintenanceAllowedRoute(route: Route): boolean {
-  return route.name === "maintenance" || route.name === "calendar";
+  return (
+    route.name === "maintenance" ||
+    route.name === "messages" ||
+    route.name === "calendar" ||
+    route.name === "account"
+  );
 }
 
 /** Clamp a pathname to the audience shell (admin staff: no clamp). */

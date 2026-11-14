@@ -56,11 +56,13 @@ export async function signIn(page: Page, who: PersonaKey | { email: string; pass
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  // Phase 0 chrome: signed-in shell shows Primary nav (Sign out lives in Account menu).
+  await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 }
 
 export async function signOut(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: /Account menu/i }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 }
 

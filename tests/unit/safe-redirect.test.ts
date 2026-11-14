@@ -123,13 +123,18 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
     expect(clampPathForAudience("/dashboard", "tenant")).toBe(ROLE_HOME.tenant);
     expect(clampPathForAudience("/documents", "tenant")).toBe("/documents");
     expect(clampPathForAudience("/maintenance", "tenant")).toBe("/maintenance");
+    expect(clampPathForAudience("/home", "tenant")).toBe("/home");
+    expect(clampPathForAudience("/messages", "tenant")).toBe("/messages");
     expect(clampPathForAudience("/rent", "landlord")).toBe(ROLE_HOME.landlord);
     expect(clampPathForAudience("/properties/3", "landlord")).toBe("/properties/3");
     expect(clampPathForAudience("/documents", "landlord")).toBe("/documents");
+    expect(clampPathForAudience("/home", "landlord")).toBe("/home");
+    expect(clampPathForAudience("/messages", "landlord")).toBe("/messages");
     expect(clampPathForAudience("/rent", "staff")).toBe("/rent");
     expect(clampPathForAudience("/dashboard", "maintenance")).toBe(ROLE_HOME.maintenance);
     expect(clampPathForAudience("/rent", "maintenance")).toBe(ROLE_HOME.maintenance);
     expect(clampPathForAudience("/maintenance", "maintenance")).toBe("/maintenance");
+    expect(clampPathForAudience("/messages", "maintenance")).toBe("/messages");
     expect(clampPathForAudience("/calendar", "maintenance")).toBe("/calendar");
   });
 

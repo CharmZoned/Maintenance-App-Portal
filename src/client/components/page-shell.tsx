@@ -1,16 +1,14 @@
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "@/components/chrome/notification-bell";
+import { AccountMenu } from "@/components/chrome/account-menu";
+import { useShellChrome } from "@/components/chrome/shell-chrome-context";
 
 /**
- * The page toolbar and the pane under it.
+ * Page toolbar + scroll pane (Figma Page header / PageShell).
  *
- * The band is 56px with a rule beneath it — the same height as the sidebar's
- * brand row, so the two bottoms form one continuous line across the shell.
- * It sits OUTSIDE the scroll container: the title and the page's one action
- * stay put while the content moves, which is what makes a long table readable
- * (DESIGN.md → Layout, "The shell").
- *
- * Row one is identity: the title, then the count or period as quiet meta.
- * The right side is for the page's actions, and only the last of them is ink.
+ * 56px band aligned with the nav brand row. Title stacks above meta; chrome
+ * actions (primary CTA, bell, account) sit on the right. The band stays outside
+ * the scroll container.
  */
 export function PageShell({
   title,
@@ -20,24 +18,38 @@ export function PageShell({
   children,
 }: {
   title: React.ReactNode;
-  /** The count or period this page is showing — `3 properties · 5 units`. */
+  /** Context line under the title — `Needs attention · portfolio overview`. */
   meta?: React.ReactNode;
+  /** Page-specific actions (primary CTA belongs last / use brand variant). */
   actions?: React.ReactNode;
   width?: string;
   children: React.ReactNode;
 }) {
+  const chrome = useShellChrome();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-6">
-        <h1 className="shrink-0 truncate text-[1.375rem] font-semibold leading-tight tracking-[-0.01em]">
-          {title}
-        </h1>
-        {meta ? (
-          <div className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{meta}</div>
-        ) : (
-          <div className="flex-1" />
-        )}
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border px-6">
+        <div className="min-w-0 flex-1 leading-none">
+          <h1 className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
+          {meta ? (
+            <div className="mt-0.5 truncate text-sm leading-snug text-muted-foreground">{meta}</div>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {actions}
+          {chrome ? (
+            <>
+              <NotificationBell unread={chrome.unread} onClick={chrome.onNotifications} />
+              <AccountMenu
+                email={chrome.email}
+                role={chrome.role}
+                onAccount={chrome.onAccount}
+                onSignOut={chrome.onSignOut}
+              />
+            </>
+          ) : null}
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
         <div className={cn("mx-auto w-full space-y-6 p-6", width)}>{children}</div>

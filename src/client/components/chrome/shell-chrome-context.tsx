@@ -1,0 +1,26 @@
+import { createContext, useContext, type ReactNode } from "react";
+
+export type ShellChromeValue = {
+  email: string;
+  role: string;
+  unread?: boolean;
+  onNotifications?: () => void;
+  onAccount?: () => void;
+  onSignOut: () => void;
+};
+
+const ShellChromeContext = createContext<ShellChromeValue | null>(null);
+
+export function ShellChromeProvider({
+  value,
+  children,
+}: {
+  value: ShellChromeValue;
+  children: ReactNode;
+}) {
+  return <ShellChromeContext.Provider value={value}>{children}</ShellChromeContext.Provider>;
+}
+
+export function useShellChrome(): ShellChromeValue | null {
+  return useContext(ShellChromeContext);
+}
