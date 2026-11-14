@@ -16,6 +16,9 @@ import {
   unitStatusToDb,
   workOrderStatusToDb,
   workOrderPriorityToDb,
+  workOrderStatusFromDb,
+  workOrderPriorityFromDb,
+  WORK_ORDER_OPEN_STATUSES_DB,
   maintenanceCategoryToDb,
 } from "./mappers";
 import type {
@@ -957,22 +960,6 @@ export async function deleteLease(id: number): Promise<void> {
 
 // ── Rent ──────────────────────────────────────────────────────────
 
-function chargeExtrasFromLease(l: Lease | undefined): Partial<RentCharge> {
-  if (!l) return {};
-  return {
-    unit_id: l.unit_id,
-    lease_rent: l.monthly_rent,
-    rent_due_day: l.rent_due_day,
-    unit_name: l.unit_name,
-    property_id: l.property_id,
-    property_name: l.property_name,
-    property_color: l.property_color,
-    tenant_id: l.primary_tenant_id,
-    tenant_first_name: l.tenant_first_name,
-    tenant_last_name: l.tenant_last_name,
-  };
-}
-
 /** Enrich one charge row with lease/unit/tenant display fields (no full charges refetch). */
 async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   const { data: leaseRow, error } = await supabase
@@ -1011,58 +998,111 @@ async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   });
 }
 
-/** Enrich only the leases referenced by charge rows (avoid full listLeases on every period). */
-async function leasesByIds(leaseIds: number[]): Promise<Map<number, Lease>> {
-  if (!leaseIds.length) return new Map();
-  const { data: leases, error } = await supabase.from("Leases").select("*").in("id", leaseIds);
-  if (error) throwSb(error);
-  const rows = leases ?? [];
-  const unitIds = [...new Set(rows.map((l) => l.unit_id))];
-  const tenantIds = [...new Set(rows.map((l) => l.primary_tenant_id).filter(Boolean))] as number[];
-  const [{ data: units }, { data: tenants }] = await Promise.all([
+/** Chunk size for PostgREST `.in()` filters (URL length / practical batching). */
+const IN_FILTER_CHUNK = 200;
+
+/** Slim lease→unit→property→tenant enrich for charges (no full listLeases graph). */
+async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Partial<RentCharge>>> {
+  const extras = new Map<number, Partial<RentCharge>>();
+  if (!leaseIds.length) return extras;
+
+  type SlimLease = {
+    id: number;
+    unit_id: number;
+    monthly_rent: number;
+    rent_due_day: number;
+    primary_tenant_id: number | null;
+  };
+  const leaseRows: SlimLease[] = [];
+  for (let i = 0; i < leaseIds.length; i += IN_FILTER_CHUNK) {
+    const chunk = leaseIds.slice(i, i + IN_FILTER_CHUNK);
+    const { data, error } = await supabase
+      .from("Leases")
+      .select("id, unit_id, monthly_rent, rent_due_day, primary_tenant_id")
+      .in("id", chunk);
+    if (error) throwSb(error);
+    leaseRows.push(...((data ?? []) as SlimLease[]));
+  }
+
+  const unitIds = [...new Set(leaseRows.map((l) => l.unit_id))];
+  const tenantIds = [
+    ...new Set(leaseRows.map((l) => l.primary_tenant_id).filter((id): id is number => id != null)),
+  ];
+
+  const [{ data: units, error: unitErr }, { data: tenants, error: tenantErr }] = await Promise.all([
     unitIds.length
-      ? supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
-      : Promise.resolve({ data: [] as { id: number; unit_label: string; property_id: number }[] }),
-    tenantIds.length
-      ? supabase.from("Tenants").select("id, first_name, last_name, email, mobile_phone").in("id", tenantIds)
+      ? (async () => {
+          const rows: { id: number; unit_label: string; property_id: number }[] = [];
+          for (let i = 0; i < unitIds.length; i += IN_FILTER_CHUNK) {
+            const chunk = unitIds.slice(i, i + IN_FILTER_CHUNK);
+            const { data, error } = await supabase
+              .from("Units")
+              .select("id, unit_label, property_id")
+              .in("id", chunk);
+            if (error) return { data: null, error };
+            rows.push(...(data ?? []));
+          }
+          return { data: rows, error: null };
+        })()
       : Promise.resolve({
-          data: [] as {
-            id: number;
-            first_name: string;
-            last_name: string;
-            email: string | null;
-            mobile_phone: string | null;
-          }[],
+          data: [] as { id: number; unit_label: string; property_id: number }[],
+          error: null,
+        }),
+    tenantIds.length
+      ? (async () => {
+          const rows: { id: number; first_name: string; last_name: string }[] = [];
+          for (let i = 0; i < tenantIds.length; i += IN_FILTER_CHUNK) {
+            const chunk = tenantIds.slice(i, i + IN_FILTER_CHUNK);
+            const { data, error } = await supabase
+              .from("Tenants")
+              .select("id, first_name, last_name")
+              .in("id", chunk);
+            if (error) return { data: null, error };
+            rows.push(...(data ?? []));
+          }
+          return { data: rows, error: null };
+        })()
+      : Promise.resolve({
+          data: [] as { id: number; first_name: string; last_name: string }[],
+          error: null,
         }),
   ]);
-  const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
-  const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
-  const propIds = [...new Set((units ?? []).map((u) => u.property_id))];
-  const { data: props } = propIds.length
-    ? await supabase.from("Properties").select("id, property_name, color").in("id", propIds)
-    : { data: [] as { id: number; property_name: string | null; color: string }[] };
-  const propMap = new Map((props ?? []).map((p) => [p.id, p]));
+  if (unitErr) throwSb(unitErr);
+  if (tenantErr) throwSb(tenantErr);
 
-  const out = new Map<number, Lease>();
-  for (const row of rows) {
-    const unit = unitMap.get(row.unit_id);
-    const prop = unit ? propMap.get(unit.property_id) : undefined;
-    const tenant = row.primary_tenant_id != null ? tenantMap.get(row.primary_tenant_id) : undefined;
-    out.set(
-      row.id,
-      mapLease(row, {
-        unit_name: unit?.unit_label ?? null,
-        property_id: unit?.property_id ?? null,
-        property_name: prop?.property_name ?? null,
-        property_color: prop?.color ?? null,
-        tenant_first_name: tenant?.first_name ?? null,
-        tenant_last_name: tenant?.last_name ?? null,
-        tenant_email: tenant?.email ?? null,
-        tenant_phone: tenant?.mobile_phone ?? null,
-      }),
-    );
+  const unitMap = new Map((units ?? []).map((u) => [u.id, u]));
+  const propIds = [...new Set((units ?? []).map((u) => u.property_id))];
+  const props: { id: number; property_name: string | null; color: string }[] = [];
+  for (let i = 0; i < propIds.length; i += IN_FILTER_CHUNK) {
+    const chunk = propIds.slice(i, i + IN_FILTER_CHUNK);
+    const { data, error } = await supabase
+      .from("Properties")
+      .select("id, property_name, color")
+      .in("id", chunk);
+    if (error) throwSb(error);
+    props.push(...(data ?? []));
   }
-  return out;
+  const propMap = new Map(props.map((p) => [p.id, p]));
+  const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
+
+  for (const lease of leaseRows) {
+    const unit = unitMap.get(lease.unit_id);
+    const prop = unit ? propMap.get(unit.property_id) : undefined;
+    const tenant = lease.primary_tenant_id ? tenantMap.get(lease.primary_tenant_id) : undefined;
+    extras.set(lease.id, {
+      unit_id: lease.unit_id,
+      lease_rent: Number(lease.monthly_rent),
+      rent_due_day: lease.rent_due_day,
+      unit_name: unit?.unit_label,
+      property_id: unit?.property_id,
+      property_name: prop?.property_name,
+      property_color: prop?.color,
+      tenant_id: lease.primary_tenant_id,
+      tenant_first_name: tenant?.first_name,
+      tenant_last_name: tenant?.last_name,
+    });
+  }
+  return extras;
 }
 
 export async function listCharges(period?: string): Promise<RentCharge[]> {
@@ -1073,9 +1113,9 @@ export async function listCharges(period?: string): Promise<RentCharge[]> {
   });
 
   const leaseIds = [...new Set(charges.map((c) => c.lease_id))];
-  const leaseMap = await leasesByIds(leaseIds);
+  const leaseExtras = await loadChargeLeaseExtras(leaseIds);
 
-  return charges.map((c) => mapCharge(c, chargeExtrasFromLease(leaseMap.get(c.lease_id))));
+  return charges.map((c) => mapCharge(c, leaseExtras.get(c.lease_id)));
 }
 
 export async function generateCharges(period: string): Promise<{ created: number; period: string }> {
@@ -1114,8 +1154,8 @@ export async function generateCharges(period: string): Promise<{ created: number
 
   if (!toInsert.length) return { created: 0, period };
 
-  // Batch upsert: UNIQUE(lease_id, period) + ignoreDuplicates keeps races soft (no all-or-nothing fail).
-  // RETURNING only includes inserted rows when conflicts are ignored — use that for `created`.
+  // Batch upsert: UNIQUE(lease_id, period). ignoreDuplicates is load-bearing — never switch to
+  // merge-duplicates (would overwrite amount_paid / status on races). RETURNING = inserted only.
   const { data: inserted, error: insertErr } = await supabase
     .from("RentCharges")
     .upsert(toInsert, {
@@ -1742,36 +1782,6 @@ function chargeBalance(c: DashboardChargeRow): number {
   return Number(c.amount) - Number(c.amount_paid);
 }
 
-function isOpenDashboardWo(status: string): boolean {
-  const s = lower(status);
-  return s !== "closed" && s !== "completed" && s !== "cancelled" && s !== "canceled";
-}
-
-function dashboardWoPriority(priority: string): WorkOrderPriority {
-  const s = lower(priority);
-  if (s === "low" || s === "normal" || s === "high" || s === "urgent") return s;
-  return "normal";
-}
-
-function dashboardWoStatus(status: string): WorkOrderStatus {
-  const s = lower(status).replace(/\s+/g, "_");
-  if (s === "assigned") return "open";
-  if (s === "completed" || s === "cancelled" || s === "canceled") return "closed";
-  if (
-    s === "open" ||
-    s === "scheduled" ||
-    s === "in_progress" ||
-    s === "on_hold" ||
-    s === "closed"
-  ) {
-    return s;
-  }
-  return "open";
-}
-
-/** Live WO CHECK open set (Closed excluded). Matches dashboard open filter. */
-const DASHBOARD_OPEN_WO_STATUSES = ["Open", "Scheduled", "In Progress", "On Hold"] as const;
-
 async function loadDashboardAggregateRows(period: string): Promise<{
   propertyCount: number;
   units: { id: number; status: string }[];
@@ -1806,7 +1816,7 @@ async function loadDashboardAggregateRows(period: string): Promise<{
       supabase
         .from("MaintenanceRequests")
         .select("id, title, priority, status, property_id, unit_id, created_at")
-        .in("status", [...DASHBOARD_OPEN_WO_STATUSES])
+        .in("status", [...WORK_ORDER_OPEN_STATUSES_DB])
         .order("created_at", { ascending: false })
         .range(from, to),
     ),
@@ -1839,10 +1849,15 @@ async function enrichDashboardSlices(
   const tenantIds = [
     ...new Set(upcomingTop.map((l) => l.primary_tenant_id).filter((id): id is number => id != null)),
   ];
+  const knownPropIds = [
+    ...new Set(recentTop.map((w) => w.property_id).filter((id): id is number => id != null)),
+  ];
 
+  // Units + tenants + WO property ids in parallel; fill any unit-only property ids after.
   const [
     { data: sliceUnits, error: unitErr },
     { data: tenants, error: tenantErr },
+    { data: knownProps, error: knownPropErr },
   ] = await Promise.all([
     unitIds.length
       ? supabase.from("Units").select("id, unit_label, property_id").in("id", unitIds)
@@ -1856,27 +1871,38 @@ async function enrichDashboardSlices(
           data: [] as { id: number; first_name: string; last_name: string }[],
           error: null,
         }),
+    knownPropIds.length
+      ? supabase.from("Properties").select("id, property_name").in("id", knownPropIds)
+      : Promise.resolve({
+          data: [] as { id: number; property_name: string | null }[],
+          error: null,
+        }),
   ]);
   if (unitErr) throwSb(unitErr);
   if (tenantErr) throwSb(tenantErr);
+  if (knownPropErr) throwSb(knownPropErr);
 
   const unitMap = new Map((sliceUnits ?? []).map((u) => [u.id, u]));
-  const propIds = [
+  const propMap = new Map((knownProps ?? []).map((p) => [p.id, p]));
+  const missingPropIds = [
     ...new Set(
-      [
-        ...recentTop.map((w) => w.property_id),
-        ...(sliceUnits ?? []).map((u) => u.property_id),
-      ].filter((id): id is number => id != null),
+      (sliceUnits ?? [])
+        .map((u) => u.property_id)
+        .filter((id) => !propMap.has(id)),
     ),
   ];
-  const { data: props, error: propErr } = propIds.length
-    ? await supabase.from("Properties").select("id, property_name").in("id", propIds)
-    : { data: [] as { id: number; property_name: string | null }[], error: null };
-  if (propErr) throwSb(propErr);
+  if (missingPropIds.length) {
+    const { data: moreProps, error: propErr } = await supabase
+      .from("Properties")
+      .select("id, property_name")
+      .in("id", missingPropIds);
+    if (propErr) throwSb(propErr);
+    for (const p of moreProps ?? []) propMap.set(p.id, p);
+  }
 
   return {
     unitMap,
-    propMap: new Map((props ?? []).map((p) => [p.id, p])),
+    propMap,
     tenantMap: new Map((tenants ?? []).map((t) => [t.id, t])),
   };
 }
@@ -1894,6 +1920,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 
   const occupied = units.filter((u) => lower(u.status) === "occupied").length;
   const vacant = units.filter((u) => lower(u.status) === "vacant").length;
+  // Sort by end_date (soonest first) — intentional vs old listLeases start_date order for top-5 membership.
   const upcoming = activeLeases
     .filter((l) => l.end_date <= in30Iso && l.end_date >= todayIso)
     .sort((a, b) => a.end_date.localeCompare(b.end_date));
@@ -1909,8 +1936,9 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       (c.due_date < todayIso && c.status !== "paid" && c.status !== "waived"),
   );
 
-  const openWo = workOrders.filter((w) => isOpenDashboardWo(w.status));
-  const urgentWo = openWo.filter((w) => dashboardWoPriority(w.priority) === "urgent");
+  // Query already filters open statuses; normalize via shared mappers for display + urgent count.
+  const openWo = workOrders.filter((w) => workOrderStatusFromDb(w.status) !== "closed");
+  const urgentWo = openWo.filter((w) => workOrderPriorityFromDb(w.priority) === "urgent");
   const recentTop = openWo.slice(0, 5);
 
   const { unitMap, propMap, tenantMap } = await enrichDashboardSlices(recentTop, upcomingTop);
@@ -1937,8 +1965,8 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       return {
         id: w.id,
         title: w.title,
-        priority: dashboardWoPriority(w.priority),
-        status: dashboardWoStatus(w.status),
+        priority: workOrderPriorityFromDb(w.priority),
+        status: workOrderStatusFromDb(w.status),
         property_name: p?.property_name ?? null,
         unit_name: u?.unit_label ?? null,
         created_at: w.created_at,

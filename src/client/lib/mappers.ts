@@ -359,6 +359,40 @@ export function mapVendor(row: SbVendor): Vendor {
  * MaintenanceRequestStaffNotes (or null for landlord/tenant). Omitting extras.notes
  * yields `notes: null` (safe default; never invent notes from the request row).
  */
+/** Map live/legacy WO status labels to UI enum (shared by mapWorkOrder + dashboard). */
+export function workOrderStatusFromDb(status: string | null | undefined): WorkOrderStatus {
+  const statusRaw = lowerStatus(status ?? "");
+  // Display-only aliases for retired D1 labels — live CHECK forbids writing these.
+  // Map Assigned → open (not scheduled) so a staff save does not trip Accept & schedule.
+  const legacyStatusAlias: Record<string, WorkOrderStatus> = {
+    assigned: "open",
+    completed: "closed",
+    cancelled: "closed",
+    canceled: "closed",
+  };
+  return isWorkOrderStatus(statusRaw) ? statusRaw : (legacyStatusAlias[statusRaw] ?? "open");
+}
+
+/** Map live WO priority labels to UI enum. */
+export function workOrderPriorityFromDb(priority: string | null | undefined): WorkOrderPriority {
+  const priorityRaw = lowerStatus(priority ?? "");
+  const priorityMap: Record<string, WorkOrderPriority> = {
+    low: "low",
+    normal: "normal",
+    high: "high",
+    urgent: "urgent",
+  };
+  return priorityMap[priorityRaw] ?? "normal";
+}
+
+/** Live Title Case open statuses (Closed excluded) — dashboard KPI filter. */
+export const WORK_ORDER_OPEN_STATUSES_DB = [
+  WO_STATUS_TO_DB.open,
+  WO_STATUS_TO_DB.scheduled,
+  WO_STATUS_TO_DB.in_progress,
+  WO_STATUS_TO_DB.on_hold,
+] as const;
+
 export function mapWorkOrder(
   row: SbMr,
   extras?: {
@@ -373,25 +407,6 @@ export function mapWorkOrder(
     notes?: string | null;
   },
 ): WorkOrder {
-  const statusRaw = lowerStatus(row.status);
-  const priorityRaw = lowerStatus(row.priority);
-  // Display-only aliases for retired D1 labels — live CHECK forbids writing these.
-  // Map Assigned → open (not scheduled) so a staff save does not trip Accept & schedule.
-  const legacyStatusAlias: Record<string, WorkOrderStatus> = {
-    assigned: "open",
-    completed: "closed",
-    cancelled: "closed",
-    canceled: "closed",
-  };
-  const status: WorkOrderStatus = isWorkOrderStatus(statusRaw)
-    ? statusRaw
-    : (legacyStatusAlias[statusRaw] ?? "open");
-  const priorityMap: Record<string, WorkOrderPriority> = {
-    low: "low",
-    normal: "normal",
-    high: "high",
-    urgent: "urgent",
-  };
   return {
     id: row.id,
     request_number: row.request_number,
@@ -402,8 +417,8 @@ export function mapWorkOrder(
     title: row.title,
     description: row.description,
     category: row.category || "General repair",
-    priority: priorityMap[priorityRaw] ?? "normal",
-    status,
+    priority: workOrderPriorityFromDb(row.priority),
+    status: workOrderStatusFromDb(row.status),
     permission_to_enter: Boolean(row.permission_to_enter),
     assigned_staff_id: row.assigned_staff_id,
     scheduled_at: row.scheduled_for,
