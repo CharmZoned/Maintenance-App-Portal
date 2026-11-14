@@ -73,5 +73,11 @@ export function AuthNotice({
     success: "bg-success-tint text-success",
     warning: "bg-warning-tint text-warning",
   };
-  return <div className={cn("rounded-sm px-3.5 py-3.5 text-sm", tones[tone])}>{children}</div>;
+  const role =
+    tone === "danger" || tone === "warning" ? "alert" : tone === "success" ? "status" : undefined;
+  return (
+    <div role={role} className={cn("rounded-sm px-3.5 py-3.5 text-sm", tones[tone])}>
+      {children}
+    </div>
+  );
 }

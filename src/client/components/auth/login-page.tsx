@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SIGNUP_ADDRESS_MAX, SIGNUP_NAME_MAX } from "@/hooks/use-auth";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { intentLoginLabel } from "@/lib/safe-redirect";
 import { AuthCard, AuthField, AuthNotice, AuthShell } from "./auth-card";
@@ -30,7 +31,10 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [intentRole, setIntentRole] = useState<"tenant" | "landlord">("tenant");
+  const [intentRole, setIntentRole] = useState<"tenant" | "landlord">(() => {
+    const key = new URLSearchParams(window.location.search).get("intent")?.trim().toLowerCase();
+    return key === "landlord" ? "landlord" : "tenant";
+  });
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -100,6 +104,7 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
                 autoComplete="name"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
+                maxLength={SIGNUP_NAME_MAX}
                 required
               />
             </AuthField>
@@ -148,6 +153,7 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
                       key={value}
                       type="button"
                       onClick={() => setIntentRole(value)}
+                      aria-pressed={intentRole === value}
                       className={cn(
                         "flex-1 rounded-sm border px-3 py-2.5 text-[13px] font-medium",
                         intentRole === value
@@ -170,6 +176,7 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
                   className="h-11"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
+                  maxLength={SIGNUP_ADDRESS_MAX}
                   autoComplete="street-address"
                 />
               </AuthField>

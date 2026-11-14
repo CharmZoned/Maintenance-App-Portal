@@ -45,7 +45,9 @@ export function PasswordInput({
         type="button"
         className="shrink-0 text-xs font-medium text-brand-text hover:underline"
         onClick={() => setShow((s) => !s)}
-        tabIndex={-1}
+        aria-pressed={show}
+        aria-controls={id}
+        aria-label={show ? "Hide password" : "Show password"}
       >
         {show ? "Hide" : "Show"}
       </button>

@@ -170,13 +170,20 @@ export function App() {
 
   if (auth.gate.state === "unapproved") {
     const status = auth.gate.role.account_status;
+    const emailConfirmed = Boolean(auth.gate.user.email_confirmed_at);
     const blocked =
       status === "pending"
-        ? {
-            title: "Thanks — we’re reviewing your account",
-            message:
-              "You’ve confirmed your email. We’ll be in touch within one business day once your account is approved. An admin must approve your account before you can use the portal.",
-          }
+        ? emailConfirmed
+          ? {
+              title: "Thanks — we’re reviewing your account",
+              message:
+                "You’ve confirmed your email. We’ll be in touch within one business day once your account is approved. An admin must approve your account before you can use the portal.",
+            }
+          : {
+              title: "Confirm your email",
+              message:
+                "Check your email for a confirmation link. After you verify, we’ll review your account within one business day. An admin must approve your account before you can use the portal.",
+            }
         : status === "suspended"
           ? {
               title: "Your access is paused",
