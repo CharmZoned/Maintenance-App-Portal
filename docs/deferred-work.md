@@ -77,12 +77,12 @@ Backlog for **WS-S** / **WS-R** / **WS-I** (see Project store `docs/wave3-plan.m
 | 2 | Archive D1/Hono/Clawnify primary path; refresh stale IMPLEMENTATION_PLAN; retire `main`↔`master` `sync-branches.yml` (owner confirm) | **WS-S S1** | M | Yes | **Done in PR #33** (master-only) |
 | 3 | Revoke `anon` (+ `PUBLIC` if needed) EXECUTE on payment RPCs (`record_payment` / `delete_payment`); keep `GRANT` to `authenticated`; verify privileges (mirror Phase 2) | **WS-S S2** | S | **No** other mig/RLS | **Done in PR #37** — `20261114050000_*` (apply live still pending ops; never live-only) |
 | 4 | Last-admin guard on `admin_set_user_role` | **WS-S S2** | S–M | **No** mig overlap | Queued (serialize) |
-| 5 | Require `email_confirmed_at` before Approve (+ Users badge) | **WS-S S2** | S–M | **No** mig overlap | Queued (serialize) |
+| 5 | Require `email_confirmed_at` before Approve (+ Users badge) | **WS-S S2** | S–M | **No** mig overlap | **In PR** — `20261114070000_require_email_confirmed_before_approve.sql` + Users badge/disable (apply live after merge; never live-only) |
 | 6 | Enforce 5-photo **DB** cap per maintenance request (FE already slices to 5) | **WS-S S2** | S | **No** mig; avoid K dialog thrash | Queued (serialize) |
 | 7 | Leaked-password protection + min length (Auth + UI) | **WS-S S3** | S | Yes | Queued |
 | 8 | Staging + migration version / history repair | **WS-I** | M | I owns (not dual with S) | **Staffed** — status SoT: `docs/ops/schema-migrations.md` § Staging / §E |
 | 9 | Login `?redirect=` (Phase 4b) — path-only; reject open redirects | **WS-R** | S | Yes | **Staffed** |
-| 10 | Settings **admin-only** (RLS + staff nav/route) | **WS-S S2** | S | **No** mig overlap | **In PR** — `20261114060000_settings_admin_only_rls.sql` + staff nav/route gate (apply live after merge; never live-only) |
+| 10 | Settings **admin-only** (RLS + staff nav/route) | **WS-S S2** | S | **No** mig overlap | **Done in PR #38** — `20261114060000_*` (apply live still pending ops; never live-only) |
 | 11 | Status label product decision → shared UI maps | Owner decision → FE | S after decision | Prefer after/near K, not during K mega-edit | **Owner decision still open** |
 | 12 | Web push | **WS-L** hold | — | Do not staff | Phase 6 / R6 hold |
 | 13 | Portal hosting/deploy + URL + website env (+ WordPress retirement / Next.js launch) | **deferred-work** (out of Wave 3) | — | Do not staff in Wave 3 | Wait until owner provides the link (**roadmap #3** = this item; ≠ hygiene #3) |
