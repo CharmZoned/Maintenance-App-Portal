@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
@@ -19,10 +19,14 @@ import {
 } from "@/types";
 import { WorkOrderAcceptSchedule } from "./work-order-accept-schedule";
 import { WorkOrderMediaPanel } from "./work-order-media-panel";
-import { WorkOrderStaffFields } from "./work-order-staff-fields";
+import {
+  WorkOrderStaffFields,
+  type WorkOrderStaffFormValues,
+} from "./work-order-staff-fields";
 import { WorkOrderTenantDetail } from "./work-order-tenant-detail";
+import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
 
-interface Props {
+interface WorkOrderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workOrder?: WorkOrder;
@@ -30,7 +34,15 @@ interface Props {
   onSaved?: () => void;
 }
 
-export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSaved }: Props) {
+/**
+ * Role → panels / editability:
+ * - Tenant / landlord (viewer): tenant detail + media (comments/photos per role); no Save.
+ * - Maintenance staff: staff fields with readOnlyCore (title/location locked); can edit status/cost/notes/comments.
+ * - Admin: full staff fields + Accept & schedule on Open; create/delete.
+ *
+ * Open→Scheduled writers: Accept Confirm (preferred intake) or Save with status Scheduled.
+ */
+export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSaved }: WorkOrderDialogProps) {
   const app = useApp();
   const [units, setUnits] = useState<Unit[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -43,7 +55,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const [category, setCategory] = useState<string>("General repair");
   const [priority, setPriority] = useState<WorkOrderPriority>("normal");
   const [status, setStatus] = useState<WorkOrderStatus>("open");
-  const [permission, setPermission] = useState(false);
+  const [permissionToEnter, setPermissionToEnter] = useState(false);
   const [scheduledAt, setScheduledAt] = useState("");
   const [assignedStaffId, setAssignedStaffId] = useState<number | "">("");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -52,6 +64,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const [cost, setCost] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [photos, setPhotos] = useState<MaintenancePhoto[]>([]);
   const [comments, setComments] = useState<MaintenanceComment[]>([]);
   const [history, setHistory] = useState<MaintenanceStatusEvent[]>([]);
@@ -65,6 +78,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const listUnits = app.listUnits;
   const setError = app.setError;
   const hasAssignee = Boolean(assignedStaffId || workOrder?.assigned_staff_id);
+  const canStartWork = hasAssignee || status === "in_progress" || status === "scheduled";
   const isCreate = !workOrder;
   const readOnlyCore =
     app.isLandlord || app.isTenant || (Boolean(workOrder) && !app.isAdmin);
@@ -111,7 +125,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     setCategory(workOrder?.category ?? "General repair");
     setPriority(workOrder?.priority ?? "normal");
     setStatus(workOrder?.status ?? "open");
-    setPermission(workOrder?.permission_to_enter ?? false);
+    setPermissionToEnter(workOrder?.permission_to_enter ?? false);
     setScheduledAt(workOrder?.scheduled_at?.slice(0, 10) ?? "");
     setAssignedStaffId(workOrder?.assigned_staff_id ?? "");
     setResolutionNotes(workOrder?.resolution_notes ?? "");
@@ -204,12 +218,61 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     };
   }, [photoPreviews]);
 
-  function companionError(): string | null {
-    const prev = workOrder?.status;
-    const enteringScheduled = status === "scheduled" && prev !== "scheduled";
+  const staffFormValues: WorkOrderStaffFormValues = {
+    propertyId,
+    unitId,
+    title,
+    description,
+    category,
+    priority,
+    status,
+    vendorId,
+    assignedStaffId,
+    scheduledAt,
+    holdReason,
+    followUpDate,
+    resolutionNotes,
+    permissionToEnter,
+    cost,
+    notes,
+  };
+
+  function onStaffFormChange(patch: Partial<WorkOrderStaffFormValues>) {
+    if (patch.propertyId !== undefined) setPropertyId(patch.propertyId);
+    if (patch.unitId !== undefined) setUnitId(patch.unitId);
+    if (patch.title !== undefined) setTitle(patch.title);
+    if (patch.description !== undefined) setDescription(patch.description);
+    if (patch.category !== undefined) setCategory(patch.category);
+    if (patch.priority !== undefined) setPriority(patch.priority);
+    if (patch.status !== undefined) setStatus(patch.status);
+    if (patch.vendorId !== undefined) setVendorId(patch.vendorId);
+    if (patch.assignedStaffId !== undefined) setAssignedStaffId(patch.assignedStaffId);
+    if (patch.scheduledAt !== undefined) setScheduledAt(patch.scheduledAt);
+    if (patch.holdReason !== undefined) setHoldReason(patch.holdReason);
+    if (patch.followUpDate !== undefined) setFollowUpDate(patch.followUpDate);
+    if (patch.resolutionNotes !== undefined) setResolutionNotes(patch.resolutionNotes);
+    if (patch.permissionToEnter !== undefined) setPermissionToEnter(patch.permissionToEnter);
+    if (patch.cost !== undefined) setCost(patch.cost);
+    if (patch.notes !== undefined) setNotes(patch.notes);
+  }
+
+  /** Non-admin schedule policy for Save (Accept Confirm uses acceptAndSchedule only). */
+  function scheduleWriteError(prevStatus: WorkOrderStatus | undefined): string | null {
+    const enteringScheduled = status === "scheduled" && prevStatus !== "scheduled";
     if (enteringScheduled && !app.isAdmin) {
       return "Only admins can Accept & schedule.";
     }
+    const prevSched = workOrder?.scheduled_at?.slice(0, 10) ?? "";
+    if (!app.isAdmin && scheduledAt !== prevSched) {
+      return "Only admins can set the scheduled date.";
+    }
+    return null;
+  }
+
+  function companionError(): string | null {
+    const prev = workOrder?.status;
+    const scheduleErr = scheduleWriteError(prev);
+    if (scheduleErr) return scheduleErr;
     if (status === "scheduled" && app.isAdmin) {
       if (!assignedStaffId) return "Scheduled requests need an assigned staff member.";
       if (!scheduledAt) return "Scheduled requests need a date.";
@@ -228,22 +291,28 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     return null;
   }
 
+  function beginSave(): boolean {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaving(true);
+    return true;
+  }
+
+  function endSave() {
+    savingRef.current = false;
+    setSaving(false);
+  }
+
   async function save() {
     if (!title.trim()) return;
+    // Prefer Accept Confirm for Open + staff+date so Save does not assign without Scheduling.
+    if (showAccept && assignedStaffId && scheduledAt) {
+      app.setError("Use Confirm Accept & schedule to assign and set the date in one step.");
+      return;
+    }
     const err = companionError();
     if (err) {
       app.setError(err);
-      return;
-    }
-    const prevStatus = workOrder?.status;
-    const prevSched = workOrder?.scheduled_at?.slice(0, 10) ?? "";
-    const schedChanged = scheduledAt !== prevSched;
-    if (!app.isAdmin && status === "scheduled" && prevStatus !== "scheduled") {
-      app.setError("Only admins can Accept & schedule.");
-      return;
-    }
-    if (!app.isAdmin && schedChanged) {
-      app.setError("Only admins can set the scheduled date.");
       return;
     }
     if (
@@ -253,7 +322,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       app.setError("Pick a current maintenance category before saving (legacy value is not allowed).");
       return;
     }
-    setSaving(true);
+    if (!beginSave()) return;
+    const prevStatus = workOrder?.status;
     try {
       const payload: Parameters<typeof app.updateWorkOrder>[1] & { title: string } = {
         property_id: propertyId ? Number(propertyId) : null,
@@ -265,7 +335,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         ...(app.isAdmin || !workOrder ? { category } : {}),
         priority,
         status,
-        permission_to_enter: permission,
+        permission_to_enter: permissionToEnter,
         cost: cost ? parseFloat(cost) : null,
         notes: notes.trim() || null,
         resolution_notes: status === "closed" ? resolutionNotes.trim() : resolutionNotes.trim() || null,
@@ -290,7 +360,9 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       if (id != null && photoFiles.length) {
         try {
           await Promise.all(
-            photoFiles.slice(0, 5).map((file) => app.uploadMaintenancePhoto(id!, file)),
+            photoFiles
+              .slice(0, MAX_MAINTENANCE_PHOTOS)
+              .map((file) => app.uploadMaintenancePhoto(id!, file)),
           );
         } catch (photoErr) {
           photoFail = true;
@@ -309,7 +381,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     } catch (err) {
       app.setError((err as Error).message);
     } finally {
-      setSaving(false);
+      endSave();
     }
   }
 
@@ -329,7 +401,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
       app.setError("Pick a current maintenance category before accepting.");
       return;
     }
-    setSaving(true);
+    if (!beginSave()) return;
     try {
       // One intake confirm: schedule + keep in-dialog edits (title/notes/etc.) so Confirm
       // is not a silent discard when the Accept panel is default-open.
@@ -346,7 +418,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
           description: description.trim() || null,
           category,
           priority,
-          permission_to_enter: permission,
+          permission_to_enter: permissionToEnter,
           cost: cost ? parseFloat(cost) : null,
           notes: notes.trim() || null,
         },
@@ -358,7 +430,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     } catch (err) {
       app.setError((err as Error).message);
     } finally {
-      setSaving(false);
+      endSave();
     }
   }
 
@@ -394,7 +466,9 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     const id = workOrder.id;
     try {
       await Promise.all(
-        photoFiles.slice(0, 5).map((file) => app.uploadMaintenancePhoto(id, file)),
+        photoFiles
+          .slice(0, MAX_MAINTENANCE_PHOTOS)
+          .map((file) => app.uploadMaintenancePhoto(id, file)),
       );
       if (workOrderId !== id) return;
       setPhotoFiles([]);
@@ -447,50 +521,20 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 category={category}
                 priority={priority}
                 status={status}
-                permission={permission}
+                permissionToEnter={permissionToEnter}
               />
             ) : (
               <WorkOrderStaffFields
                 isCreate={isCreate}
                 isAdmin={app.isAdmin}
                 readOnlyCore={readOnlyCore}
-                hasAssignee={hasAssignee}
-                status={status}
-                onStatusChange={setStatus}
-                propertyId={propertyId}
-                onPropertyIdChange={setPropertyId}
-                unitId={unitId}
-                onUnitIdChange={setUnitId}
+                canStartWork={canStartWork}
                 properties={app.properties}
                 filteredUnits={filteredUnits}
-                title={title}
-                onTitleChange={setTitle}
-                description={description}
-                onDescriptionChange={setDescription}
-                category={category}
-                onCategoryChange={setCategory}
-                priority={priority}
-                onPriorityChange={setPriority}
-                vendorId={vendorId}
-                onVendorIdChange={setVendorId}
                 vendors={app.vendors}
                 staff={staff}
-                assignedStaffId={assignedStaffId}
-                onAssignedStaffIdChange={setAssignedStaffId}
-                scheduledAt={scheduledAt}
-                onScheduledAtChange={setScheduledAt}
-                holdReason={holdReason}
-                onHoldReasonChange={setHoldReason}
-                followUpDate={followUpDate}
-                onFollowUpDateChange={setFollowUpDate}
-                resolutionNotes={resolutionNotes}
-                onResolutionNotesChange={setResolutionNotes}
-                permission={permission}
-                onPermissionChange={setPermission}
-                cost={cost}
-                onCostChange={setCost}
-                notes={notes}
-                onNotesChange={setNotes}
+                values={staffFormValues}
+                onChange={onStaffFormChange}
               />
             )}
 
@@ -522,7 +566,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                   type="file"
                   accept="image/*"
                   multiple
-                  onChange={(e) => setPhotoFiles(Array.from(e.target.files ?? []).slice(0, 5))}
+                  onChange={(e) => setPhotoFiles(takePhotoFiles(e.target.files))}
                 />
               </div>
             )}

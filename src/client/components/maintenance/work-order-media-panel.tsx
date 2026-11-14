@@ -11,13 +11,14 @@ import type {
   MaintenancePhoto,
   MaintenanceStatusEvent,
 } from "@/types";
+import { takePhotoFiles } from "./work-order-status";
 
 interface PhotoPreview {
   file: File;
   url: string;
 }
 
-interface Props {
+export interface WorkOrderMediaPanelProps {
   detailLoading: boolean;
   photos: MaintenancePhoto[];
   history: MaintenanceStatusEvent[];
@@ -52,7 +53,7 @@ export function WorkOrderMediaPanel({
   onPostComment,
   isTenant,
   isLandlord,
-}: Props) {
+}: WorkOrderMediaPanelProps) {
   return (
     <>
       <div className="border-t pt-3">
@@ -95,7 +96,7 @@ export function WorkOrderMediaPanel({
               type="file"
               accept="image/*"
               multiple
-              onChange={(e) => onPhotoFilesChange(Array.from(e.target.files ?? []).slice(0, 5))}
+              onChange={(e) => onPhotoFilesChange(takePhotoFiles(e.target.files))}
             />
             {photoPreviews.length > 0 && (
               <div className="grid grid-cols-3 gap-2">

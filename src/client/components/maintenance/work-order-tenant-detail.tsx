@@ -4,13 +4,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { WorkOrderPriority, WorkOrderStatus } from "@/types";
 
-interface Props {
+export interface WorkOrderTenantDetailProps {
   title: string;
   description: string;
   category: string;
   priority: WorkOrderPriority;
   status: WorkOrderStatus;
-  permission: boolean;
+  permissionToEnter: boolean;
 }
 
 /** Tenant / landlord read-only request summary (title, description, badges). */
@@ -20,8 +20,8 @@ export function WorkOrderTenantDetail({
   category,
   priority,
   status,
-  permission,
-}: Props) {
+  permissionToEnter,
+}: WorkOrderTenantDetailProps) {
   return (
     <>
       <div>
@@ -40,7 +40,7 @@ export function WorkOrderTenantDetail({
         {priority === "urgent" && <Badge variant="destructive">Emergency</Badge>}
       </div>
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={permission} className="size-4" disabled />
+        <input type="checkbox" checked={permissionToEnter} className="size-4" disabled />
         Permission to enter
       </label>
     </>

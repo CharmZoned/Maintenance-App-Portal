@@ -12,49 +12,40 @@ import {
   type WorkOrderPriority,
   type WorkOrderStatus,
 } from "@/types";
+import { WorkOrderAssigneeDateFields } from "./work-order-assignee-date-fields";
 import { ADMIN_STATUSES, PRIORITIES, staffStatusOptions } from "./work-order-status";
 
-interface Props {
+/** Form values lifted from the dialog — one bag instead of ~40 value/onChange props. */
+export type WorkOrderStaffFormValues = {
+  propertyId: number | "";
+  unitId: number | "";
+  title: string;
+  description: string;
+  category: MaintenanceCategory | string;
+  priority: WorkOrderPriority;
+  status: WorkOrderStatus;
+  vendorId: number | "";
+  assignedStaffId: number | "";
+  scheduledAt: string;
+  holdReason: string;
+  followUpDate: string;
+  resolutionNotes: string;
+  permissionToEnter: boolean;
+  cost: string;
+  notes: string;
+};
+
+export interface WorkOrderStaffFieldsProps {
   isCreate: boolean;
   isAdmin: boolean;
   readOnlyCore: boolean;
-  hasAssignee: boolean;
-  status: WorkOrderStatus;
-  onStatusChange: (s: WorkOrderStatus) => void;
-  propertyId: number | "";
-  onPropertyIdChange: (id: number | "") => void;
-  unitId: number | "";
-  onUnitIdChange: (id: number | "") => void;
+  canStartWork: boolean;
   properties: Property[];
   filteredUnits: Unit[];
-  title: string;
-  onTitleChange: (v: string) => void;
-  description: string;
-  onDescriptionChange: (v: string) => void;
-  category: string;
-  onCategoryChange: (v: string) => void;
-  priority: WorkOrderPriority;
-  onPriorityChange: (v: WorkOrderPriority) => void;
-  vendorId: number | "";
-  onVendorIdChange: (id: number | "") => void;
   vendors: Vendor[];
   staff: StaffMember[];
-  assignedStaffId: number | "";
-  onAssignedStaffIdChange: (id: number | "") => void;
-  scheduledAt: string;
-  onScheduledAtChange: (v: string) => void;
-  holdReason: string;
-  onHoldReasonChange: (v: string) => void;
-  followUpDate: string;
-  onFollowUpDateChange: (v: string) => void;
-  resolutionNotes: string;
-  onResolutionNotesChange: (v: string) => void;
-  permission: boolean;
-  onPermissionChange: (v: boolean) => void;
-  cost: string;
-  onCostChange: (v: string) => void;
-  notes: string;
-  onNotesChange: (v: string) => void;
+  values: WorkOrderStaffFormValues;
+  onChange: (patch: Partial<WorkOrderStaffFormValues>) => void;
 }
 
 /** Staff/admin editable core + status companion fields. */
@@ -62,47 +53,33 @@ export function WorkOrderStaffFields({
   isCreate,
   isAdmin,
   readOnlyCore,
-  hasAssignee,
-  status,
-  onStatusChange,
-  propertyId,
-  onPropertyIdChange,
-  unitId,
-  onUnitIdChange,
+  canStartWork,
   properties,
   filteredUnits,
-  title,
-  onTitleChange,
-  description,
-  onDescriptionChange,
-  category,
-  onCategoryChange,
-  priority,
-  onPriorityChange,
-  vendorId,
-  onVendorIdChange,
   vendors,
   staff,
-  assignedStaffId,
-  onAssignedStaffIdChange,
-  scheduledAt,
-  onScheduledAtChange,
-  holdReason,
-  onHoldReasonChange,
-  followUpDate,
-  onFollowUpDateChange,
-  resolutionNotes,
-  onResolutionNotesChange,
-  permission,
-  onPermissionChange,
-  cost,
-  onCostChange,
-  notes,
-  onNotesChange,
-}: Props) {
-  const statusOptions = isAdmin
-    ? ADMIN_STATUSES
-    : staffStatusOptions(hasAssignee || status === "in_progress" || status === "scheduled");
+  values,
+  onChange,
+}: WorkOrderStaffFieldsProps) {
+  const statusOptions = isAdmin ? ADMIN_STATUSES : staffStatusOptions(canStartWork);
+  const {
+    propertyId,
+    unitId,
+    title,
+    description,
+    category,
+    priority,
+    status,
+    vendorId,
+    assignedStaffId,
+    scheduledAt,
+    holdReason,
+    followUpDate,
+    resolutionNotes,
+    permissionToEnter,
+    cost,
+    notes,
+  } = values;
 
   return (
     <>
@@ -111,7 +88,7 @@ export function WorkOrderStaffFields({
         <Input
           id="wo-title"
           value={title}
-          onChange={(e) => onTitleChange(e.target.value)}
+          onChange={(e) => onChange({ title: e.target.value })}
           placeholder="Leaking kitchen faucet"
           disabled={readOnlyCore}
         />
@@ -122,10 +99,9 @@ export function WorkOrderStaffFields({
           <Label>Property</Label>
           <Select
             value={String(propertyId || "")}
-            onValueChange={(v) => {
-              onPropertyIdChange(v ? Number(v) : "");
-              onUnitIdChange("");
-            }}
+            onValueChange={(v) =>
+              onChange({ propertyId: v ? Number(v) : "", unitId: "" })
+            }
             disabled={readOnlyCore}
           >
             <SelectTrigger>
@@ -144,7 +120,7 @@ export function WorkOrderStaffFields({
           <Label>Unit</Label>
           <Select
             value={String(unitId || "")}
-            onValueChange={(v) => onUnitIdChange(v ? Number(v) : "")}
+            onValueChange={(v) => onChange({ unitId: v ? Number(v) : "" })}
             disabled={readOnlyCore}
           >
             <SelectTrigger>
@@ -166,7 +142,7 @@ export function WorkOrderStaffFields({
         <Textarea
           id="wo-desc"
           value={description}
-          onChange={(e) => onDescriptionChange(e.target.value)}
+          onChange={(e) => onChange({ description: e.target.value })}
           rows={3}
           disabled={readOnlyCore}
         />
@@ -175,7 +151,11 @@ export function WorkOrderStaffFields({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label>Category</Label>
-          <Select value={category} onValueChange={onCategoryChange} disabled={readOnlyCore}>
+          <Select
+            value={category}
+            onValueChange={(v) => onChange({ category: v })}
+            disabled={readOnlyCore}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -193,7 +173,10 @@ export function WorkOrderStaffFields({
         </div>
         <div>
           <Label>Priority</Label>
-          <Select value={priority} onValueChange={(v) => onPriorityChange(v as WorkOrderPriority)}>
+          <Select
+            value={priority}
+            onValueChange={(v) => onChange({ priority: v as WorkOrderPriority })}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -213,7 +196,7 @@ export function WorkOrderStaffFields({
           <Label>Status</Label>
           <Select
             value={isCreate ? "open" : status}
-            onValueChange={(v) => onStatusChange(v as WorkOrderStatus)}
+            onValueChange={(v) => onChange({ status: v as WorkOrderStatus })}
             disabled={isCreate}
           >
             <SelectTrigger>
@@ -235,7 +218,7 @@ export function WorkOrderStaffFields({
               New requests start Open — use Accept &amp; schedule after create.
             </p>
           )}
-          {!isAdmin && !hasAssignee && !isCreate && (
+          {!isAdmin && !canStartWork && !isCreate && (
             <p className="mt-1 text-[11px] text-muted-foreground">
               In progress unlocks after an admin assigns staff.
             </p>
@@ -245,7 +228,7 @@ export function WorkOrderStaffFields({
           <Label>Vendor</Label>
           <Select
             value={String(vendorId || "")}
-            onValueChange={(v) => onVendorIdChange(v ? Number(v) : "")}
+            onValueChange={(v) => onChange({ vendorId: v ? Number(v) : "" })}
           >
             <SelectTrigger>
               <SelectValue placeholder="—" />
@@ -262,38 +245,21 @@ export function WorkOrderStaffFields({
       </div>
 
       {(status === "scheduled" || status === "in_progress") && isAdmin && (
-        <div className="grid grid-cols-2 gap-3 rounded border p-3">
-          <div className="sm:col-span-2 text-xs font-medium text-muted-foreground">
+        <div className="grid gap-3 rounded border p-3">
+          <div className="text-xs font-medium text-muted-foreground">
             Required for {status === "scheduled" ? "Scheduled" : "In progress"}
           </div>
-          <div>
-            <Label>Assigned staff</Label>
-            <Select
-              value={String(assignedStaffId || "")}
-              onValueChange={(v) => onAssignedStaffIdChange(v ? Number(v) : "")}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Staff" />
-              </SelectTrigger>
-              <SelectContent>
-                {staff.map((s) => (
-                  <SelectItem key={s.id} value={String(s.id)}>
-                    {s.last_name}, {s.first_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {status === "scheduled" && (
-            <div>
-              <Label>Scheduled date</Label>
-              <Input
-                type="date"
-                value={scheduledAt}
-                onChange={(e) => onScheduledAtChange(e.target.value)}
-              />
-            </div>
-          )}
+          <WorkOrderAssigneeDateFields
+            staff={staff}
+            assignedStaffId={assignedStaffId}
+            onAssignedStaffIdChange={(id) => onChange({ assignedStaffId: id })}
+            scheduledAt={scheduledAt}
+            onScheduledAtChange={(d) => onChange({ scheduledAt: d })}
+            staffFieldLabel="Assigned staff"
+            dateFieldLabel="Scheduled date"
+            showDate={status === "scheduled"}
+            staffPlaceholder="Staff"
+          />
         </div>
       )}
 
@@ -304,7 +270,7 @@ export function WorkOrderStaffFields({
             <Label>Hold reason</Label>
             <Input
               value={holdReason}
-              onChange={(e) => onHoldReasonChange(e.target.value)}
+              onChange={(e) => onChange({ holdReason: e.target.value })}
               placeholder="Waiting on parts…"
             />
           </div>
@@ -313,7 +279,7 @@ export function WorkOrderStaffFields({
             <Input
               type="date"
               value={followUpDate}
-              onChange={(e) => onFollowUpDateChange(e.target.value)}
+              onChange={(e) => onChange({ followUpDate: e.target.value })}
             />
           </div>
         </div>
@@ -326,7 +292,7 @@ export function WorkOrderStaffFields({
             <Label>Resolution notes</Label>
             <Textarea
               value={resolutionNotes}
-              onChange={(e) => onResolutionNotesChange(e.target.value)}
+              onChange={(e) => onChange({ resolutionNotes: e.target.value })}
               rows={2}
               placeholder="What fixed it?"
             />
@@ -337,8 +303,8 @@ export function WorkOrderStaffFields({
       <label className="flex items-center gap-2 text-sm">
         <input
           type="checkbox"
-          checked={permission}
-          onChange={(e) => onPermissionChange(e.target.checked)}
+          checked={permissionToEnter}
+          onChange={(e) => onChange({ permissionToEnter: e.target.checked })}
           className="size-4"
           disabled={readOnlyCore}
         />
@@ -354,13 +320,23 @@ export function WorkOrderStaffFields({
         )}
         <div className={isAdmin ? "col-span-2 sm:col-span-1" : ""}>
           <Label htmlFor="wo-cost">Cost</Label>
-          <Input id="wo-cost" type="number" value={cost} onChange={(e) => onCostChange(e.target.value)} />
+          <Input
+            id="wo-cost"
+            type="number"
+            value={cost}
+            onChange={(e) => onChange({ cost: e.target.value })}
+          />
         </div>
       </div>
 
       <div>
         <Label htmlFor="wo-notes">Internal notes</Label>
-        <Textarea id="wo-notes" value={notes} onChange={(e) => onNotesChange(e.target.value)} rows={2} />
+        <Textarea
+          id="wo-notes"
+          value={notes}
+          onChange={(e) => onChange({ notes: e.target.value })}
+          rows={2}
+        />
       </div>
     </>
   );

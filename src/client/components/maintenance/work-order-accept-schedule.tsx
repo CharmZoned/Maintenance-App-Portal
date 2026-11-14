@@ -1,12 +1,13 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
 import type { StaffMember } from "@/lib/data";
 import type { WorkOrder } from "@/types";
+import {
+  WorkOrderAssigneeDateFields,
+  staffMemberLabel,
+} from "./work-order-assignee-date-fields";
 
-interface Props {
+export interface WorkOrderAcceptScheduleProps {
   workOrder: WorkOrder;
   expanded: boolean;
   onExpandedChange: (open: boolean) => void;
@@ -17,13 +18,6 @@ interface Props {
   onScheduledAtChange: (isoDate: string) => void;
   saving: boolean;
   onConfirm: () => void;
-}
-
-function staffLabel(staff: StaffMember[], id: number | ""): string | null {
-  if (!id) return null;
-  const row = staff.find((s) => s.id === Number(id));
-  if (!row) return null;
-  return `${row.last_name}, ${row.first_name}`;
 }
 
 /**
@@ -41,8 +35,8 @@ export function WorkOrderAcceptSchedule({
   onScheduledAtChange,
   saving,
   onConfirm,
-}: Props) {
-  const assignee = staffLabel(staff, assignedStaffId);
+}: WorkOrderAcceptScheduleProps) {
+  const assignee = staffMemberLabel(staff, assignedStaffId);
   const when = scheduledAt ? formatDate(scheduledAt) : null;
   const canConfirm = Boolean(assignedStaffId && scheduledAt) && !saving;
   const location = [workOrder.property_name, workOrder.unit_name].filter(Boolean).join(" · ");
@@ -72,39 +66,21 @@ export function WorkOrderAcceptSchedule({
           <div className="rounded border border-orange-200/80 bg-background/70 px-3 py-2 text-xs dark:border-orange-900/60">
             <p className="font-medium text-foreground">{workOrder.title}</p>
             <p className="mt-0.5 text-muted-foreground">
-              {[workOrder.category, tenant || null, location || null].filter(Boolean).join(" · ") || "Open request"}
+              {[workOrder.category, tenant || null, location || null].filter(Boolean).join(" · ") ||
+                "Open request"}
             </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div>
-              <Label>Staff</Label>
-              <Select
-                value={String(assignedStaffId || "")}
-                onValueChange={(v) => onAssignedStaffIdChange(v ? Number(v) : "")}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Assign staff" />
-                </SelectTrigger>
-                <SelectContent>
-                  {staff.map((s) => (
-                    <SelectItem key={s.id} value={String(s.id)}>
-                      {s.last_name}, {s.first_name}
-                      {s.job_title ? ` · ${s.job_title}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Date</Label>
-              <Input
-                type="date"
-                value={scheduledAt}
-                onChange={(e) => onScheduledAtChange(e.target.value)}
-              />
-            </div>
-          </div>
+          <WorkOrderAssigneeDateFields
+            staff={staff}
+            assignedStaffId={assignedStaffId}
+            onAssignedStaffIdChange={onAssignedStaffIdChange}
+            scheduledAt={scheduledAt}
+            onScheduledAtChange={onScheduledAtChange}
+            staffFieldLabel="Staff"
+            dateFieldLabel="Date"
+            showJobTitle
+          />
 
           <p className="text-xs text-muted-foreground">
             {assignee && when
@@ -112,11 +88,7 @@ export function WorkOrderAcceptSchedule({
               : "Pick a staff member and date, then confirm."}
           </p>
 
-          <Button
-            type="button"
-            disabled={!canConfirm}
-            onClick={() => onConfirm()}
-          >
+          <Button type="button" disabled={!canConfirm} onClick={() => onConfirm()}>
             Confirm Accept &amp; schedule
           </Button>
         </div>
