@@ -1,35 +1,34 @@
 # Wave 3 plan (pointer)
 
-**Canonical plan:** Cursor Project store `docs/wave3-plan.md` — **approve there before staffing implementers**.
-
+**Canonical plan:** Cursor Project store `docs/wave3-plan.md`.  
 **Base:** `master` @ Wave 1–2 complete (PRs #19–#29).  
-**Mode:** Planning only until owner approval. **Do not** implement from this pointer alone.
+**Mode:** **Staffing approved** — implementers launched for **I / K / N / O / R / S1**. This pointer indexes streams; do not re-plan scope here.
 
 ## Owner choices (2026-11-14)
 
 | Item | Choice |
 |------|--------|
-| **WS-O** thin calendar | **YES** — staff after approval |
+| **WS-O** thin calendar | **YES** — staffed |
 | **WS-P** Zillow research | **NO** — leave deferred |
 | **WS-Q** website visual | **NO** — leave deferred |
 | **Portal hosting + URL** | **Out of Wave 3** — deferred until owner provides the link (live landlordgopher.com still old WordPress; Next.js not launched) |
 | Status labels (hygiene #11) | **Open** |
 
-## Streams to staff after approval
+## Streams (staffed)
 
 | Stream | Size | Conflict | Start |
 |--------|------|----------|-------|
-| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Immediately after approval — **no** hosting/URL |
-| **WS-K** Accept & schedule | M | **High** on `work-order-dialog.tsx` | Immediately |
-| **WS-N** Perf/docs (one lane) | S–M | Low–med | Immediately |
-| **WS-O** Thin read-only calendar | M | Med; prefer after K | After K |
-| **WS-S** Security & hygiene (items 1–7, 10; lanes S1→S2→S3) | L program | **Serialize migrations (S2)** | **S1 (#1–2) first** |
-| **WS-R** Login `?redirect=` (#9) | S | Low | Parallel OK |
+| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL |
+| **WS-K** Accept & schedule | M | **High** on `work-order-dialog.tsx` | Now |
+| **WS-N** Perf/docs (one lane) | S–M | Low–med | Now |
+| **WS-O** Thin read-only calendar | M | Med; prefer after K | After K (or coordinated) |
+| **WS-S** Security & hygiene (items 1–7, 10; lanes S1→S2→S3) | L program | **Serialize migrations (S2)** | **S1 (#1–2) first** (launched) |
+| **WS-R** Login `?redirect=` (#9) | S | Low | Now |
 
 ## Hygiene map (owner order)
 
 1–2 → **WS-S S1** (CI required; archive D1/Hono/Clawnify + plan refresh + `main` sync) — parallel with I/K/N/O  
-3–6, 10 → **WS-S S2** (anon payment EXECUTE; last-admin; email_confirmed approve; 5-photo DB; Settings admin-only) — **no migration overlap**  
+**S2 order 3→10→5→4→6** → anon payment EXECUTE; Settings admin-only; `email_confirmed_at` approve; last-admin; 5-photo DB — **no migration overlap**  
 7 → **WS-S S3** (leaked-password + min length) — parallel OK  
 8 → **WS-I** (staging + history only)  
 9 → **WS-R**  
@@ -43,6 +42,6 @@
 
 ## Migrations
 
-Never live-only DDL — file under `supabase/migrations/` on a PR first (`docs/ops/schema-migrations.md`). S2 claims ≥ `20261114050000`; reserve `20261114100000+` for WS-L.
+Never live-only DDL — file under `supabase/migrations/` on a PR first (`docs/ops/schema-migrations.md`). Latest on `master`: `20261114030000_*`, `20261114040000_*`. S2 claims ≥ `20261114050000`; reserve `20261114100000+` for WS-L.
 
 Full kickoffs, acceptance, and conflict matrix: Project store plan + [parallel-work-plan.md](./parallel-work-plan.md).
