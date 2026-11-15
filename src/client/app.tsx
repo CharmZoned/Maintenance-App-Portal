@@ -32,6 +32,8 @@ import { PageShell } from "./components/page-shell";
 import { PortalNav, MobileTabBar, ShellChromeProvider } from "./components/chrome";
 import { FoundationGalleryPage } from "./components/foundation/foundation-gallery-page";
 import { PeoplePage } from "./components/people/people-page";
+import { MessagesPage } from "./components/messages/messages-page";
+import { NotificationsHost } from "./components/messages/notifications-host";
 import { navItemsForAudience } from "./lib/portal-nav";
 import {
   isLandlordAllowedRoute,
@@ -72,6 +74,8 @@ export function App() {
     auth.gate.role.staff_id != null;
   const state = useAppState(ready, { isAdmin, isTenant, isLandlord, isMaintenance });
   const { path, search, route, navigate, replace } = useRouter();
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifUnread, setNotifUnread] = useState(false);
 
   useEffect(() => {
     if (ready) reportLocation(path);
@@ -269,7 +273,8 @@ export function App() {
     role: auth.gate.role.role,
     displayName:
       typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null,
-    onNotifications: () => navigate("/messages"),
+    unread: notifUnread,
+    onNotifications: () => setNotificationsOpen((v) => !v),
     onAccount: () => navigate("/account"),
     onSignOut: () => void auth.logout(),
   };
@@ -286,7 +291,7 @@ export function App() {
               onNavigate={(href) => navigate(href)}
             />
           </div>
-          <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
             {/* Pages keep their own list loaders — do not blank the shell while lookups finish. */}
             <PortalErrorBoundary>
               {isTenant ? (
@@ -300,11 +305,7 @@ export function App() {
                   )}
                   {route.name === "maintenance" && <MaintenancePage />}
                   {route.name === "messages" && (
-                    <StubPage
-                      title="Messages"
-                      meta="Inbox"
-                      message="Messages UI lands in the Messages/People screen PR."
-                    />
+                    <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "documents" && <TenantDocumentsPage />}
                   {route.name === "account" && (
@@ -339,11 +340,7 @@ export function App() {
                   {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
                   {route.name === "maintenance" && <MaintenancePage />}
                   {route.name === "messages" && (
-                    <StubPage
-                      title="Messages"
-                      meta="Inbox"
-                      message="Messages UI lands in the Messages/People screen PR."
-                    />
+                    <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "documents" && <LandlordDocumentsPage />}
                   {route.name === "account" && (
@@ -367,11 +364,7 @@ export function App() {
                     <MyJobsPage search={search} replace={replace} />
                   )}
                   {route.name === "messages" && (
-                    <StubPage
-                      title="Messages"
-                      meta="Inbox"
-                      message="Messages UI lands in the Messages/People screen PR."
-                    />
+                    <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "calendar" && <CalendarPage navigate={navigate} />}
                   {route.name === "account" && (
@@ -398,11 +391,7 @@ export function App() {
                     <PeoplePage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "messages" && (
-                    <StubPage
-                      title="Messages"
-                      meta="Inbox"
-                      message="Messages UI lands in the Messages/People screen PR."
-                    />
+                    <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "documents" && (
                     <StubPage
@@ -464,6 +453,15 @@ export function App() {
                 </>
               )}
             </PortalErrorBoundary>
+            <NotificationsHost
+              open={notificationsOpen}
+              onOpenChange={setNotificationsOpen}
+              onUnreadChange={setNotifUnread}
+              onNavigate={(to) => {
+                setNotificationsOpen(false);
+                navigate(to);
+              }}
+            />
             {useMobileTabs ? (
               <MobileTabBar
                 items={navItems}
