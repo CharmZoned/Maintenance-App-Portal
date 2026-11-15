@@ -1,0 +1,82 @@
+import { describe, expect, it } from "vitest";
+import {
+  compareCreatedDesc,
+  isOpenRequest,
+  priorityLevel,
+  requestNextStep,
+  toRequestStatus,
+  unitPropertyLabel,
+} from "@/lib/request-status";
+import type { WorkOrder } from "@/types";
+
+function wo(partial: Partial<WorkOrder>): WorkOrder {
+  return {
+    id: 1,
+    property_id: 1,
+    unit_id: 1,
+    tenant_id: 1,
+    vendor_id: null,
+    title: "Leak",
+    description: null,
+    category: "Plumbing",
+    priority: "normal",
+    status: "open",
+    permission_to_enter: false,
+    assigned_staff_id: null,
+    scheduled_at: null,
+    completed_at: null,
+    cost: null,
+    notes: null,
+    created_at: "2026-11-14T12:00:00Z",
+    ...partial,
+  };
+}
+
+describe("request-status helpers", () => {
+  it("maps DB status + assignee to Figma RequestStatus", () => {
+    expect(toRequestStatus(wo({ status: "open", assigned_staff_id: null }))).toBe("New");
+    expect(toRequestStatus(wo({ status: "open", assigned_staff_id: 3 }))).toBe("Assigned");
+    expect(toRequestStatus(wo({ status: "scheduled", assigned_staff_id: 3 }))).toBe("Assigned");
+    expect(toRequestStatus(wo({ status: "in_progress" }))).toBe("In progress");
+    expect(toRequestStatus(wo({ status: "on_hold" }))).toBe("On hold");
+    expect(toRequestStatus(wo({ status: "closed" }))).toBe("Completed");
+  });
+
+  it("treats non-closed as open", () => {
+    expect(isOpenRequest(wo({ status: "open" }))).toBe(true);
+    expect(isOpenRequest(wo({ status: "closed" }))).toBe(false);
+  });
+
+  it("maps priority chips", () => {
+    expect(priorityLevel("urgent")).toBe("Emergency");
+    expect(priorityLevel("high")).toBe("High");
+    expect(priorityLevel("normal")).toBe(null);
+  });
+
+  it("formats unit · property labels", () => {
+    expect(unitPropertyLabel("4B", "Oak Street")).toBe("Unit 4B · Oak Street");
+    expect(unitPropertyLabel(null, "Oak Street")).toBe("Oak Street");
+    expect(unitPropertyLabel(null, null)).toBe("Your home");
+  });
+
+  it("does not surface draft resolution notes while in progress", () => {
+    expect(
+      requestNextStep(
+        wo({ status: "in_progress", resolution_notes: "Will seal tomorrow" }),
+      ),
+    ).toBe("Work in progress");
+    expect(
+      requestNextStep(
+        wo({ status: "closed", resolution_notes: "Sealed and tested" }),
+      ),
+    ).toBe("Sealed and tested");
+  });
+
+  it("sorts newest first and ties on id", () => {
+    const a = { created_at: "2026-11-14T10:00:00Z", id: 1 };
+    const b = { created_at: "2026-11-14T12:00:00Z", id: 2 };
+    expect(compareCreatedDesc(a, b)).toBe(1);
+    expect(compareCreatedDesc(b, a)).toBe(-1);
+    expect(compareCreatedDesc({ created_at: "x", id: 2 }, { created_at: "x", id: 1 })).toBe(-1);
+  });
+});

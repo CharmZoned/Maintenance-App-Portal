@@ -34,6 +34,8 @@ import { FoundationGalleryPage } from "./components/foundation/foundation-galler
 import { PeoplePage } from "./components/people/people-page";
 import { MessagesPage } from "./components/messages/messages-page";
 import { NotificationsHost } from "./components/messages/notifications-host";
+import { TenantHomePage } from "./components/home/tenant-home-page";
+import { LandlordHomePage } from "./components/home/landlord-home-page";
 import { navItemsForAudience } from "./lib/portal-nav";
 import {
   isLandlordAllowedRoute,
@@ -296,14 +298,10 @@ export function App() {
             <PortalErrorBoundary>
               {isTenant ? (
                 <>
-                  {route.name === "home" && (
-                    <StubPage
-                      title="Home"
-                      meta="Your place"
-                      message="Tenant home arrives in the Homes/Request screen PR. Use Requests for open work."
-                    />
+                  {route.name === "home" && <TenantHomePage navigate={navigate} />}
+                  {route.name === "maintenance" && (
+                    <MaintenancePage search={search} replace={replace} />
                   )}
-                  {route.name === "maintenance" && <MaintenancePage />}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
@@ -329,16 +327,12 @@ export function App() {
                 </>
               ) : isLandlord ? (
                 <>
-                  {route.name === "home" && (
-                    <StubPage
-                      title="Home"
-                      meta="Your portfolio"
-                      message="Landlord home arrives in the Homes/Request screen PR."
-                    />
-                  )}
+                  {route.name === "home" && <LandlordHomePage navigate={navigate} />}
                   {route.name === "properties" && <PropertiesList navigate={navigate} />}
                   {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
-                  {route.name === "maintenance" && <MaintenancePage />}
+                  {route.name === "maintenance" && (
+                    <MaintenancePage search={search} replace={replace} />
+                  )}
                   {route.name === "messages" && (
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}

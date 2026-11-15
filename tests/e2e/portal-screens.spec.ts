@@ -65,12 +65,12 @@ test.describe("[R8] Admin web portal — who sees what", () => {
   test("a tenant gets Home · Requests · Messages · Documents", async ({ page }, testInfo) => {
     await signIn(page, "tenant");
     expect(await navLinks(page)).toEqual(["Home", "Requests", "Messages", "Documents"]);
-    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/maintenance");
-    await expect(page.getByRole("heading", { name: "My requests" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/home");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
     await page.goto("/properties");
-    await expect(page, "staff pages bounce a tenant back to their requests").toHaveURL(/\/maintenance$/);
+    await expect(page, "staff pages bounce a tenant back to home").toHaveURL(/\/home$/);
     await page.goto("/users");
-    await expect(page).toHaveURL(/\/maintenance$/);
+    await expect(page).toHaveURL(/\/home$/);
     await shot(page, testInfo, "Tenant portal");
   });
 
@@ -83,7 +83,8 @@ test.describe("[R8] Admin web portal — who sees what", () => {
       "Messages",
       "Documents",
     ]);
-    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/properties");
+    await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/home");
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
     await expect(page.getByText("Read-only")).toHaveCount(0);
     await expect(page.getByText("Maple Court")).toBeVisible();
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);

@@ -83,13 +83,13 @@ describe("resolvePostLoginPath", () => {
   test("falls back to intent defaults when redirect missing or unsafe", () => {
     expect(
       resolvePostLoginPath({ redirect: null, intent: "tenant", origin: ORIGIN }),
-    ).toBe("/maintenance");
+    ).toBe("/home");
     expect(
       resolvePostLoginPath({ redirect: null, intent: "staff", origin: ORIGIN }),
     ).toBe("/dashboard");
     expect(
       resolvePostLoginPath({ redirect: null, intent: "landlord", origin: ORIGIN }),
-    ).toBe("/properties");
+    ).toBe("/home");
     expect(
       resolvePostLoginPath({
         redirect: "https://evil.com",
@@ -114,7 +114,7 @@ describe("login redirect query helpers", () => {
       hadParams: true,
     });
     expect(readLoginRedirectParams("?intent=tenant", ORIGIN)).toEqual({
-      target: "/maintenance",
+      target: "/home",
       hadParams: true,
     });
     expect(readLoginRedirectParams("", ORIGIN)).toEqual({ target: null, hadParams: false });

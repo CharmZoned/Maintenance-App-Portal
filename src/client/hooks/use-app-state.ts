@@ -268,6 +268,9 @@ export function useAppState(
   const listWorkOrders = useCallback(async (params?: {
     status?: string;
     property_id?: number;
+    open_only?: boolean;
+    limit?: number;
+    skip_staff_notes?: boolean;
   }): Promise<WorkOrder[]> => {
     return data.listWorkOrders(params);
   }, []);

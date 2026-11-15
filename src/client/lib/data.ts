@@ -1308,10 +1308,17 @@ async function upsertStaffNotes(requestId: number, notes: string | null): Promis
 export async function listWorkOrders(params?: {
   status?: string;
   property_id?: number;
+  /** Home widgets: non-closed statuses only (accurate open counts without Closed rows). */
+  open_only?: boolean;
+  limit?: number;
+  /** Skip MaintenanceRequestStaffNotes batch (unused on tenant/landlord Home). */
+  skip_staff_notes?: boolean;
 }): Promise<WorkOrder[]> {
   let q = supabase.from("MaintenanceRequests").select("*").order("created_at", { ascending: false });
   if (params?.property_id) q = q.eq("property_id", params.property_id);
   if (params?.status) q = q.eq("status", workOrderStatusToDb(params.status as WorkOrderStatus));
+  else if (params?.open_only) q = q.in("status", [...WORK_ORDER_OPEN_STATUSES_DB]);
+  if (params?.limit != null && params.limit > 0) q = q.limit(params.limit);
   const { data: rows, error } = await q;
   if (error) throwSb(error);
 
@@ -1322,6 +1329,7 @@ export async function listWorkOrders(params?: {
   ] as number[];
   const vendorIds = [...new Set((rows ?? []).map((r) => r.vendor_id).filter(Boolean))] as number[];
   const requestIds = (rows ?? []).map((r) => r.id);
+  const skipNotes = Boolean(params?.skip_staff_notes);
 
   const [{ data: props }, { data: units }, { data: tenants }, { data: vendors }, notesMap] =
     await Promise.all([
@@ -1337,7 +1345,9 @@ export async function listWorkOrders(params?: {
       vendorIds.length
         ? supabase.from("Vendors").select("id, name, color").in("id", vendorIds)
         : Promise.resolve({ data: [] as { id: number; name: string; color: string }[] }),
-      loadStaffNotesByRequestIds(requestIds),
+      skipNotes
+        ? Promise.resolve(new Map<number, string | null>())
+        : loadStaffNotesByRequestIds(requestIds),
     ]);
 
   const propMap = new Map((props ?? []).map((p) => [p.id, p]));
@@ -2216,12 +2226,18 @@ function mapPropertyDocument(
 
 export async function listPropertyDocuments(params?: {
   property_id?: number;
+  /** Cap rows (Home uses 3; default DOC_LIST_LIMIT). */
+  limit?: number;
 }): Promise<PropertyDocument[]> {
+  const limit =
+    params?.limit != null && params.limit > 0
+      ? Math.min(params.limit, DOC_LIST_LIMIT)
+      : DOC_LIST_LIMIT;
   let q = supabase
     .from("PropertyDocuments")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(DOC_LIST_LIMIT);
+    .limit(limit);
   if (params?.property_id != null) q = q.eq("property_id", params.property_id);
   const { data, error } = await q;
   if (error) throwSb(error);
