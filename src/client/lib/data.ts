@@ -79,6 +79,7 @@ export interface StaffMember {
   last_name: string;
   email: string;
   job_title: string | null;
+  gets_request_alerts: boolean;
 }
 
 function throwSb(error: { message: string } | null): never {
@@ -2024,7 +2025,7 @@ void assertOk;
 export async function listStaff(): Promise<StaffMember[]> {
   const { data, error } = await supabase
     .from("Staff")
-    .select("id, first_name, last_name, email, job_title")
+    .select("id, first_name, last_name, email, job_title, gets_request_alerts")
     .order("last_name");
   if (error) throwSb(error);
   return (data ?? []).map((s) => ({
@@ -2033,6 +2034,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     last_name: s.last_name,
     email: s.email,
     job_title: s.job_title,
+    gets_request_alerts: Boolean(s.gets_request_alerts),
   }));
 }
 
