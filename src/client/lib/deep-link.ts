@@ -14,6 +14,17 @@ export function queryPeriod(search: string, param = "period"): string | null {
   return null;
 }
 
+/** Dashboard attention tiles → queue focus (`unassigned` | `urgent`). */
+export type MaintenanceFocusFilter = "unassigned" | "urgent";
+
+export function queryMaintenanceFocus(search: string): MaintenanceFocusFilter | null {
+  const raw = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get(
+    "filter",
+  );
+  if (raw === "unassigned" || raw === "urgent") return raw;
+  return null;
+}
+
 export type DeepLinkProps = {
   search?: string;
   replace?: (to: string) => void;
