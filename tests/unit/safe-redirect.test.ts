@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   clampPathForAudience,
+  intentLoginLabel,
   readLoginRedirectParams,
   resolvePostLoginPath,
   resolveReadyLanding,
@@ -53,6 +54,18 @@ describe("safeInternalPath", () => {
     expect(safeInternalPath("/properties/1/edit", ORIGIN)).toBeNull();
     expect(safeInternalPath("/users/1", ORIGIN)).toBeNull();
     expect(safeInternalPath("/settings/%3Cscript%3E", ORIGIN)).toBeNull();
+  });
+});
+
+describe("intentLoginLabel", () => {
+  test("maps known intents and falls back for empty/unknown", () => {
+    expect(intentLoginLabel(null)).toBe("Sign in to your portal");
+    expect(intentLoginLabel("")).toBe("Sign in to your portal");
+    expect(intentLoginLabel("   ")).toBe("Sign in to your portal");
+    expect(intentLoginLabel("tenant")).toBe("Tenant sign-in");
+    expect(intentLoginLabel("Landlord")).toBe("Landlord sign-in");
+    expect(intentLoginLabel("staff")).toBe("Staff and admin sign-in");
+    expect(intentLoginLabel("unknown")).toBe("Sign in to your portal");
   });
 });
 

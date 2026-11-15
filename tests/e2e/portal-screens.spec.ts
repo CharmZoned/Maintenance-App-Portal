@@ -130,17 +130,20 @@ test.describe("[R1] Accounts and login — screens", () => {
       [world.units.b.id],
     );
     await page.goto("/");
-    await page.getByRole("button", { name: "Need an account? Sign up" }).click();
+    await page.getByRole("button", { name: "New here? Create an account" }).click();
+    await page.getByLabel("Full name").fill("Nina Newcomer");
     await page.getByLabel("Email").fill("nina@signup.test");
     await page.getByLabel("Password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Sign up", exact: true }).click();
+    await page.getByRole("button", { name: "Create account", exact: true }).click();
     await expect(page.getByText("Check your email to verify your account")).toBeVisible();
     await shot(page, testInfo, "Sign-up confirmation message");
 
     const mail = (await outbox()).find((m) => m.to === "nina@signup.test" && m.type === "signup");
     expect(mail, "a verification email was sent").toBeTruthy();
     await page.goto(mail!.link);
-    await expect(page.getByRole("heading", { name: "Account not approved" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
+    ).toBeVisible();
     await expect(page.getByText("An admin must approve your account")).toBeVisible();
     await shot(page, testInfo, "Verified but waiting for approval");
   });
@@ -159,7 +162,9 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.goto(mail.link);
     await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
     await page.getByLabel("New password").fill("BrandNew456!");
+    await page.getByLabel("Confirm password").fill("BrandNew456!");
     await page.getByRole("button", { name: "Update password" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
     await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
 
     await signOut(page);
@@ -172,12 +177,14 @@ test.describe("[R2] Account approval — screens", () => {
     await resetWorld();
   });
 
-  test("a pending user sees 'Account not approved' instead of the portal", async ({ page }, testInfo) => {
+  test("a pending user sees a review notice instead of the portal", async ({ page }, testInfo) => {
     await page.goto("/");
     await page.getByLabel("Email").fill("pending@test.local");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Account not approved" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
+    ).toBeVisible();
     await expect(nav(page)).toHaveCount(0);
     await shot(page, testInfo, "Pending user is blocked");
   });
@@ -190,7 +197,9 @@ test.describe("[R2] Account approval — screens", () => {
     await theirPage.getByLabel("Email").fill("pending@test.local");
     await theirPage.getByLabel("Password").fill(PASSWORD);
     await theirPage.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(theirPage.getByRole("heading", { name: "Account not approved" })).toBeVisible();
+    await expect(
+      theirPage.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
+    ).toBeVisible();
 
     await signIn(page, "admin");
     await page.goto("/users");
@@ -229,7 +238,7 @@ test.describe("[R2] Account approval — screens", () => {
     await page.getByLabel("Email").fill("worker2@test.local");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Account not approved" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your access is paused" })).toBeVisible();
   });
 });
 

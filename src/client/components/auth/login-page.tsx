@@ -1,13 +1,26 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { SIGNUP_ADDRESS_MAX, SIGNUP_NAME_MAX } from "@/hooks/use-auth";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { intentLoginLabel } from "@/lib/safe-redirect";
+import { AuthCard, AuthField, AuthNotice, AuthShell } from "./auth-card";
+import { PasswordInput } from "./password-input";
+import { cn } from "@/lib/utils";
+
+export type SignupExtras = {
+  fullName: string;
+  intentRole: "tenant" | "landlord";
+  address: string;
+};
 
 interface Props {
   onLogin: (email: string, password: string) => Promise<void>;
-  onSignup: (email: string, password: string) => Promise<"session" | "confirm">;
+  onSignup: (
+    email: string,
+    password: string,
+    extras: SignupExtras,
+  ) => Promise<"session" | "confirm">;
   onForgot: () => void;
   error: string | null;
   configured: boolean;
@@ -17,22 +30,33 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [intentRole, setIntentRole] = useState<"tenant" | "landlord">(() => {
+    const key = new URLSearchParams(window.location.search).get("intent")?.trim().toLowerCase();
+    return key === "landlord" ? "landlord" : "tenant";
+  });
+  const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   // Capture once — login URL intent does not change while this screen is mounted.
   const [intent] = useState(() => new URLSearchParams(window.location.search).get("intent"));
-  const subtitle =
-    mode === "signup" ? "Create an account (pending approval)" : intentLoginLabel(intent);
+  const subtitle = mode === "signup" ? "Create an account" : intentLoginLabel(intent);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim() || !password) return;
-    // Creation only — login must accept Auth-valid shorter passwords (emulator/Auth floor may be 6).
-    if (mode === "signup" && password.length < PASSWORD_MIN_LENGTH) {
-      setLocalError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
-      setInfo(null);
-      return;
+    if (mode === "signup") {
+      if (!fullName.trim()) {
+        setLocalError("Enter your full name.");
+        setInfo(null);
+        return;
+      }
+      if (password.length < PASSWORD_MIN_LENGTH) {
+        setLocalError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+        setInfo(null);
+        return;
+      }
     }
     setBusy(true);
     setInfo(null);
@@ -41,13 +65,16 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
       if (mode === "login") {
         await onLogin(email.trim(), password);
       } else {
-        const result = await onSignup(email.trim(), password);
+        const result = await onSignup(email.trim(), password, {
+          fullName: fullName.trim(),
+          intentRole,
+          address: address.trim(),
+        });
         if (result === "confirm") {
           setInfo(
             "Check your email to verify your account. After verification your status is pending until an admin approves you.",
           );
         }
-        // session path: auth gate will show unapproved / pending
       }
     } catch {
       /* surfaced via error prop */
@@ -57,46 +84,50 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-white to-emerald-50 p-6">
-      <div className="w-full max-w-md space-y-6">
-        <div className="space-y-1 text-center">
-          <p className="text-sm font-medium tracking-wide text-emerald-800">Landlord Gopher</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">LG Maintenance Portal</h1>
-          <p className="text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-
-        <form onSubmit={submit} className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <AuthShell>
+      <form onSubmit={submit}>
+        <AuthCard title={subtitle} wide={mode === "signup"}>
           {!configured && (
-            <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <AuthNotice tone="warning">
               Missing <code>VITE_SUPABASE_URL</code> / <code>VITE_SUPABASE_ANON_KEY</code>. Copy{" "}
               <code>.env.example</code> to <code>.env</code>.
-            </p>
+            </AuthNotice>
           )}
-          {(localError || error) && (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">{localError ?? error}</p>
+          {(localError || error) && <AuthNotice tone="danger">{localError ?? error}</AuthNotice>}
+          {info && <AuthNotice tone="success">{info}</AuthNotice>}
+
+          {mode === "signup" && (
+            <AuthField label="Full name" htmlFor="full-name">
+              <Input
+                id="full-name"
+                className="h-11"
+                autoComplete="name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                maxLength={SIGNUP_NAME_MAX}
+                required
+              />
+            </AuthField>
           )}
-          {info && (
-            <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{info}</p>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+
+          <AuthField label="Email" htmlFor="email">
             <Input
               id="email"
+              className="h-11"
               type="email"
               autoComplete="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
+          </AuthField>
+
+          <AuthField label="Password" htmlFor="password">
+            <PasswordInput
               id="password"
-              type="password"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               required
               minLength={mode === "signup" ? PASSWORD_MIN_LENGTH : undefined}
             />
@@ -105,43 +136,98 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
                 At least {PASSWORD_MIN_LENGTH} characters.
               </p>
             )}
-          </div>
-          <Button type="submit" className="w-full" disabled={busy || !configured}>
+          </AuthField>
+
+          {mode === "signup" && (
+            <>
+              <div className="flex w-full flex-col gap-1.5">
+                <p className="text-xs font-medium text-muted-foreground">I am a…</p>
+                <div className="flex gap-2" role="group" aria-label="Account type">
+                  {(
+                    [
+                      ["tenant", "Tenant"],
+                      ["landlord", "Property owner"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setIntentRole(value)}
+                      aria-pressed={intentRole === value}
+                      className={cn(
+                        "flex-1 rounded-sm border px-3 py-2.5 text-[13px] font-medium",
+                        intentRole === value
+                          ? "border-brand bg-brand-tint text-brand-text"
+                          : "border-border bg-card text-foreground",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {/* Stub: intent is stored on signup metadata; admin still assigns the real role. */}
+                  Preference only — an admin assigns your portal role after review.
+                </p>
+              </div>
+              <AuthField label="Your address or unit (optional)" htmlFor="address">
+                <Input
+                  id="address"
+                  className="h-11"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  maxLength={SIGNUP_ADDRESS_MAX}
+                  autoComplete="street-address"
+                />
+              </AuthField>
+            </>
+          )}
+
+          {mode === "login" && (
+            <button
+              type="button"
+              className="text-left text-[13px] font-medium text-brand-text hover:underline"
+              onClick={onForgot}
+            >
+              Forgot password?
+            </button>
+          )}
+
+          <Button
+            type="submit"
+            variant="brand"
+            className="h-12 w-full rounded-md text-[15px]"
+            disabled={busy || !configured}
+          >
             {busy
               ? mode === "login"
                 ? "Signing in…"
                 : "Creating account…"
               : mode === "login"
                 ? "Sign in"
-                : "Sign up"}
+                : "Create account"}
           </Button>
-          {mode === "login" ? (
-            <button
-              type="button"
-              className="w-full text-center text-sm text-emerald-800 underline-offset-2 hover:underline"
-              onClick={onForgot}
-            >
-              Forgot password?
-            </button>
-          ) : (
-            <p className="text-center text-xs text-muted-foreground">
-              After email verification an admin must approve your account before you can use the
-              portal.
+
+          {mode === "signup" ? (
+            <p className="text-xs text-muted-foreground">
+              We’ll email a confirmation link. After you confirm, we review new accounts within one
+              business day.
             </p>
-          )}
+          ) : null}
+
           <button
             type="button"
-            className="w-full text-center text-sm text-slate-600 underline-offset-2 hover:underline"
+            className="text-left text-[13px] text-muted-foreground hover:text-foreground hover:underline"
             onClick={() => {
               setMode(mode === "login" ? "signup" : "login");
               setInfo(null);
               setLocalError(null);
             }}
           >
-            {mode === "login" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+            {mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
           </button>
-        </form>
-      </div>
-    </div>
+        </AuthCard>
+      </form>
+    </AuthShell>
   );
 }

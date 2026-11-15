@@ -30,6 +30,10 @@ function canAccessPortfolio(role: UserRoleRow): boolean {
   return false;
 }
 
+/** Signup user_metadata caps (admin review UI + JWT payload hygiene). */
+export const SIGNUP_NAME_MAX = 200;
+export const SIGNUP_ADDRESS_MAX = 500;
+
 export function useAuth() {
   const [gate, setGate] = useState<AuthGate>({ state: "loading" });
   const [authError, setAuthError] = useState<string | null>(null);
@@ -108,21 +112,53 @@ export function useAuth() {
    * open redirects via signup email links. Post-login `?redirect=` is handled
    * in the app shell only after the auth gate is `ready`.
    */
-  const signup = useCallback(async (email: string, password: string): Promise<"session" | "confirm"> => {
-    setAuthError(null);
-    const emailRedirectTo = `${window.location.origin}/dashboard`;
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo },
-    });
-    if (error) {
-      setAuthError(error.message);
-      throw error;
-    }
-    if (data.session) return "session";
-    return "confirm";
-  }, []);
+  const signup = useCallback(
+    async (
+      email: string,
+      password: string,
+      extras?: {
+        fullName?: string;
+        intentRole?: "tenant" | "landlord";
+        address?: string;
+      },
+    ): Promise<"session" | "confirm"> => {
+      setAuthError(null);
+      const emailRedirectTo = `${window.location.origin}/dashboard`;
+      // Clamp client-writable metadata — gate still authorizes from user_roles only.
+      const fullName =
+        typeof extras?.fullName === "string"
+          ? extras.fullName.trim().slice(0, SIGNUP_NAME_MAX)
+          : "";
+      const address =
+        typeof extras?.address === "string"
+          ? extras.address.trim().slice(0, SIGNUP_ADDRESS_MAX)
+          : "";
+      const intentRole =
+        extras?.intentRole === "landlord" || extras?.intentRole === "tenant"
+          ? extras.intentRole
+          : null;
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo,
+          // Stub: intent metadata for admin review — no schema/API for profile yet.
+          data: {
+            full_name: fullName || null,
+            intent_role: intentRole,
+            signup_address: address || null,
+          },
+        },
+      });
+      if (error) {
+        setAuthError(error.message);
+        throw error;
+      }
+      if (data.session) return "session";
+      return "confirm";
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     setAuthError(null);

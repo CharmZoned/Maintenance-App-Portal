@@ -39,10 +39,11 @@ const INTENT_LABELS: Record<string, string> = {
   staff: "Staff and admin sign-in",
 };
 
-/** Login page subtitle for website `?intent=` branding. */
+/** Login page subtitle for website `?intent=` branding (Figma Auth default otherwise). */
 export function intentLoginLabel(intent: string | null | undefined): string {
   const key = intent?.trim().toLowerCase() ?? "";
-  return INTENT_LABELS[key] ?? INTENT_LABELS.staff;
+  if (!key) return "Sign in to your portal";
+  return INTENT_LABELS[key] ?? "Sign in to your portal";
 }
 
 export function isTenantAllowedRoute(route: Route): boolean {
