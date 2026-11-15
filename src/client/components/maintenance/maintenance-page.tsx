@@ -62,7 +62,11 @@ function QueueTab({
   );
 }
 
-export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
+export function MaintenancePage({
+  search = "",
+  replace,
+  navigate,
+}: DeepLinkProps & { navigate?: (to: string) => void } = {}) {
   const app = useApp();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,6 +137,7 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     };
   }, [flight]);
 
+  // Calendar / legacy `?wo=` deep-links → N3 request detail when navigate is available.
   useDeepLinkOpen({
     search,
     param: "wo",
@@ -140,6 +145,10 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     loadList: () => flight.load(),
     onList: setOrders,
     onFound: (found) => {
+      if (navigate) {
+        navigate(`/maintenance/${found.id}`);
+        return;
+      }
       setEditing(found);
       setDialogOpen(true);
       setStaffTab("all");
@@ -267,6 +276,10 @@ export function MaintenancePage({ search = "", replace }: DeepLinkProps = {}) {
     propertyFilter !== "all" || assigneeFilter !== "all" || query.trim().length > 0;
 
   function openOrder(w: WorkOrder) {
+    if (navigate) {
+      navigate(`/maintenance/${w.id}`);
+      return;
+    }
     setEditing(w);
     setDialogOpen(true);
   }
