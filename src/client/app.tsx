@@ -15,6 +15,7 @@ import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
 import { RentPage } from "./components/rent/rent-page";
 import { MaintenancePage } from "./components/maintenance/maintenance-page";
+import { MyJobsPage } from "./components/maintenance/my-jobs-page";
 import { CalendarPage } from "./components/calendar/calendar-page";
 import { TenantDocumentsPage } from "./components/documents/tenant-documents-page";
 import { LandlordDocumentsPage } from "./components/documents/landlord-documents-page";
@@ -362,7 +363,7 @@ export function App() {
               ) : isMaintenance ? (
                 <>
                   {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} />
+                    <MyJobsPage search={search} replace={replace} />
                   )}
                   {route.name === "messages" && (
                     <StubPage
