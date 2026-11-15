@@ -23,6 +23,19 @@ Agents **cannot** flip Supabase Auth settings. A project owner/admin must enable
 Until that toggle is on, the portal UI still enforces length ≥8, but Auth will not
 reject passwords that appear in breach corpora.
 
+## Account password change stub
+
+`/account` asks for the current password, then calls `signInWithPassword` before
+`updateUser({ password })`. That is a **client stub**, not Auth
+`reauthenticate()` / AAL2 nonce enforcement:
+
+- Only `invalid_credentials` is mapped to “Current password is incorrect.”; other
+  Auth errors surface their real message (rate limit, captcha, etc.).
+- A live session can still call `updateUser({ password })` without proving the
+  old password. Secure change with a nonce when the session is older than 24h
+  needs `supabase.auth.reauthenticate()` plus the dashboard secure-password-
+  change setting — not implemented here.
+
 ## Related owner clicks
 
 - Mark CI check required: [`docs/ops/ci-required-checks.md`](./ci-required-checks.md)
