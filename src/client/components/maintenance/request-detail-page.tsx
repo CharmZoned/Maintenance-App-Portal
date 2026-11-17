@@ -35,6 +35,7 @@ import type {
   WorkOrder,
 } from "@/types";
 import { WorkOrderDialog } from "./work-order-dialog";
+import { TenantRequestDetailPanel } from "./tenant-request-detail-panel";
 import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
 
 type CompanionKind = "complete" | "hold" | null;
@@ -330,6 +331,41 @@ export function RequestDetailPage({
             Back to list
           </Button>
         </div>
+      </PageShell>
+    );
+  }
+
+  // Tenant full-page detail — text + chips panel (Figma Requests detail).
+  if (app.isTenant) {
+    return (
+      <PageShell
+        title={requestLabel}
+        meta={[order.title, order.unit_name ? `Unit ${order.unit_name}` : null, order.property_name]
+          .filter(Boolean)
+          .join(" · ")}
+        width="max-w-3xl"
+      >
+        <button
+          type="button"
+          onClick={() => navigate("/maintenance")}
+          className="text-[13px] font-medium text-brand-text hover:underline"
+        >
+          ← Requests
+        </button>
+        <div className="mt-4">
+          <TenantRequestDetailPanel
+            order={order}
+            navigate={navigate}
+            extras={{ photos, comments, history }}
+          />
+        </div>
+        <aside
+          className="mt-6 rounded-sm bg-warning-tint px-5 py-4 text-sm text-warning"
+          role="note"
+        >
+          Immediate danger? Contact local emergency services. Do not wait for a portal
+          response.
+        </aside>
       </PageShell>
     );
   }

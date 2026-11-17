@@ -281,9 +281,12 @@ export function useAppState(
   }, [isAdmin]);
 
   const submitTenantRequest = useCallback(
-    async (input: Parameters<typeof data.submitTenantMaintenanceRequest>[0]) => {
+    async (
+      input: Parameters<typeof data.submitTenantMaintenanceRequest>[0],
+      opts?: { signal?: AbortSignal },
+    ) => {
       if (!isTenant) throw new Error("Only tenants can use tenant submit.");
-      return data.submitTenantMaintenanceRequest(input);
+      return data.submitTenantMaintenanceRequest(input, opts);
     },
     [isTenant],
   );
@@ -395,9 +398,14 @@ export function useAppState(
     getDashboardSummary: data.getDashboardSummary,
     listPayments: data.listPayments,
     listMaintenancePhotos: data.listMaintenancePhotos,
-    uploadMaintenancePhoto: async (...args: Parameters<typeof data.uploadMaintenancePhoto>) => {
+    uploadMaintenancePhoto: async (
+      requestId: number,
+      file: File,
+      caption?: string,
+      opts?: { signal?: AbortSignal },
+    ) => {
       if (isLandlord) throw new Error("Landlord portal is read-only.");
-      return data.uploadMaintenancePhoto(...args);
+      return data.uploadMaintenancePhoto(requestId, file, caption, opts);
     },
     listMaintenanceComments: data.listMaintenanceComments,
     addMaintenanceComment: async (...args: Parameters<typeof data.addMaintenanceComment>) => {

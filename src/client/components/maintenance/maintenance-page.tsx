@@ -18,9 +18,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { WorkOrderDialog } from "./work-order-dialog";
-import { TenantSubmitDialog } from "./tenant-submit-dialog";
+import { TenantRequestsPage } from "./tenant-requests-page";
 import { formatStaffMember } from "./work-order-assignee-date-fields";
-import type { TenantHomeContext, WorkOrder } from "@/types";
+import type { WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
 import {
   EmptyState,
@@ -38,7 +38,7 @@ import {
 } from "./request-status";
 
 type StaffTab = "needs" | "active" | "completed" | "all";
-type TenantFilter = "active" | "closed";
+type AudienceFilter = "active" | "closed";
 
 function QueueTab({
   label,
@@ -66,7 +66,18 @@ function QueueTab({
   );
 }
 
-export function MaintenancePage({
+export function MaintenancePage(
+  props: DeepLinkProps & { navigate?: (to: string) => void } = {},
+) {
+  const app = useApp();
+  if (app.isTenant) {
+    return <TenantRequestsPage {...props} />;
+  }
+  return <StaffLandlordMaintenancePage {...props} />;
+}
+
+/** Staff / landlord maintenance queue (unchanged tabs + filters). */
+function StaffLandlordMaintenancePage({
   search = "",
   replace,
   navigate,
@@ -76,15 +87,13 @@ export function MaintenancePage({
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [staffTab, setStaffTab] = useState<StaffTab>("needs");
-  const [tenantFilter, setTenantFilter] = useState<TenantFilter>("active");
+  const [tenantFilter, setTenantFilter] = useState<AudienceFilter>("active");
   const [propertyFilter, setPropertyFilter] = useState<string>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [tenantOpen, setTenantOpen] = useState(false);
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
-  const [home, setHome] = useState<TenantHomeContext | null>(null);
 
   const listWorkOrders = app.listWorkOrders;
   const setError = app.setError;
@@ -105,8 +114,8 @@ export function MaintenancePage({
     [listWorkOrders, setError],
   );
 
-  /** Tenant + landlord share Active/Closed; Needs action is admin-only. */
-  const useAudienceTabs = app.isTenant || app.isLandlord;
+  /** Landlord shares Active/Closed; Needs action is admin-only. */
+  const useAudienceTabs = app.isLandlord;
 
   async function load() {
     setLoading(true);
@@ -141,7 +150,6 @@ export function MaintenancePage({
     };
   }, [flight]);
 
-  // Calendar / legacy `?wo=` deep-links → N3 request detail when navigate is available.
   useDeepLinkOpen({
     search,
     param: "wo",
@@ -162,23 +170,7 @@ export function MaintenancePage({
   });
 
   useEffect(() => {
-    if (!app.isTenant) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const ctx = await app.getTenantHomeContext();
-        if (!cancelled) setHome(ctx);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [app.isTenant, app]);
-
-  useEffect(() => {
-    if (app.isTenant || app.isLandlord) return;
+    if (app.isLandlord) return;
     let cancelled = false;
     (async () => {
       try {
@@ -214,7 +206,6 @@ export function MaintenancePage({
     return { needs, active, completed, all: orders.length, urgent };
   }, [orders]);
 
-  // Dashboard U5 tiles: ?filter=unassigned|urgent (minimal; Group A owns this page).
   const focusFilter = useMemo(() => queryMaintenanceFocus(search), [search]);
 
   const filtered = useMemo(() => {
@@ -241,7 +232,6 @@ export function MaintenancePage({
         list = list.filter((o) => o.assigned_staff_id === sid);
       }
     }
-    // Dashboard U5 attention tiles: ?filter=unassigned|urgent
     if (!useAudienceTabs && focusFilter === "unassigned") {
       list = list.filter((o) => o.status === "open" && !o.assigned_staff_id);
     } else if (!useAudienceTabs && focusFilter === "urgent") {
@@ -277,15 +267,10 @@ export function MaintenancePage({
     focusFilter,
   ]);
 
-  const title = app.isTenant ? "My requests" : "Maintenance";
   const activeCount = orders.filter((o) => o.status !== "closed").length;
   const meta = useAudienceTabs
     ? `${activeCount} active`
     : `${counts.needs} need action`;
-  const homeLabel =
-    home &&
-    [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name].filter(Boolean).join(" · ");
-  const noUnit = app.isTenant && home != null && home.unit_id == null;
   const filtersActive =
     propertyFilter !== "all" || assigneeFilter !== "all" || query.trim().length > 0;
 
@@ -306,27 +291,10 @@ export function MaintenancePage({
 
   return (
     <PageShell
-      title={title}
-      meta={
-        <>
-          {meta}
-          {homeLabel && app.isTenant ? (
-            <span className="ml-2 text-muted-foreground">· {homeLabel}</span>
-          ) : null}
-        </>
-      }
+      title="Maintenance"
+      meta={meta}
       actions={
-        app.isTenant ? (
-          <Button
-            variant="brand"
-            size="header"
-            onClick={() => setTenantOpen(true)}
-            disabled={noUnit}
-            title={noUnit ? "Ask staff to assign a unit first" : undefined}
-          >
-            <Plus className="h-4 w-4" /> New request
-          </Button>
-        ) : app.canCreateWorkOrders ? (
+        app.canCreateWorkOrders ? (
           <Button
             variant="brand"
             size="header"
@@ -340,13 +308,6 @@ export function MaintenancePage({
         ) : null
       }
     >
-      {noUnit && (
-        <p className="rounded-sm border border-warning bg-warning-tint px-3 py-2 text-sm text-warning">
-          Your account isn’t linked to a unit yet. Ask staff to assign a unit before submitting
-          requests.
-        </p>
-      )}
-
       {useAudienceTabs ? (
         <div className="flex flex-wrap gap-2">
           <QueueTab
@@ -367,8 +328,6 @@ export function MaintenancePage({
             active={staffTab === "needs"}
             onClick={() => {
               setStaffTab("needs");
-              // Dashboard ?filter= intersects status tabs; clear on first tab change
-              // so tabs behave as normal status filters afterward.
               if (focusFilter) replace?.("/maintenance");
             }}
           />
@@ -399,7 +358,6 @@ export function MaintenancePage({
         </div>
       )}
 
-      {/* Landlords keep property + search; assignee filter stays admin-only. */}
       {(app.isLandlord || !useAudienceTabs) && (
         <div className="flex flex-wrap items-center gap-2">
           <Select value={propertyFilter} onValueChange={setPropertyFilter}>
@@ -455,31 +413,23 @@ export function MaintenancePage({
             icon={<Wrench className="size-5" aria-hidden />}
             message={
               orders.length === 0
-                ? app.isTenant
-                  ? "Submit a request when something needs fixing in your unit."
-                  : app.isLandlord
-                    ? "Maintenance on your properties will show up here (read-only)."
-                    : "Nothing needs action right now."
+                ? app.isLandlord
+                  ? "Maintenance on your properties will show up here (read-only)."
+                  : "Nothing needs action right now."
                 : "No requests match this filter."
             }
             filtered={orders.length > 0 && filtersActive}
             onClear={clearFilters}
             actionLabel={
-              orders.length === 0 && app.isTenant && !noUnit
-                ? "New request"
-                : orders.length === 0 && app.canCreateWorkOrders
-                  ? "New request"
-                  : undefined
+              orders.length === 0 && app.canCreateWorkOrders ? "New request" : undefined
             }
             onAction={
-              app.isTenant
-                ? () => setTenantOpen(true)
-                : app.canCreateWorkOrders
-                  ? () => {
-                      setEditing(undefined);
-                      setDialogOpen(true);
-                    }
-                  : undefined
+              app.canCreateWorkOrders
+                ? () => {
+                    setEditing(undefined);
+                    setDialogOpen(true);
+                  }
+                : undefined
             }
           />
         </div>
@@ -501,7 +451,7 @@ export function MaintenancePage({
                 key={w.id}
                 title={w.title}
                 context={workOrderContextLine(w, {
-                  isTenant: app.isTenant,
+                  isTenant: false,
                   assigneeLabel,
                 })}
                 priority={
@@ -527,16 +477,6 @@ export function MaintenancePage({
         }}
         workOrder={editing}
       />
-      {app.isTenant && (
-        <TenantSubmitDialog
-          open={tenantOpen}
-          onOpenChange={(o) => {
-            setTenantOpen(o);
-            if (!o) void load();
-          }}
-          onSaved={load}
-        />
-      )}
     </PageShell>
   );
 }

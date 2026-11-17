@@ -1409,41 +1409,53 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
 }
 
 /** Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment. */
-export async function submitTenantMaintenanceRequest(input: {
-  title: string;
-  description: string;
-  category: MaintenanceCategory | string;
-  permission_to_enter: boolean;
-  priority?: WorkOrderPriority;
-}): Promise<WorkOrder> {
-  const { data: role, error: roleErr } = await supabase
+export async function submitTenantMaintenanceRequest(
+  input: {
+    title: string;
+    description: string;
+    category: MaintenanceCategory | string;
+    permission_to_enter: boolean;
+    priority?: WorkOrderPriority;
+  },
+  opts?: { signal?: AbortSignal },
+): Promise<WorkOrder> {
+  const signal = opts?.signal;
+  signal?.throwIfAborted();
+
+  let roleQuery = supabase
     .from("user_roles")
     .select("tenant_id, role, account_status")
-    .eq("user_id", (await supabase.auth.getUser()).data.user?.id ?? "")
-    .maybeSingle();
+    .eq("user_id", (await supabase.auth.getUser()).data.user?.id ?? "");
+  if (signal) roleQuery = roleQuery.abortSignal(signal);
+  const { data: role, error: roleErr } = await roleQuery.maybeSingle();
   if (roleErr) throwSb(roleErr);
   if (!role || role.role !== "tenant" || role.account_status !== "approved" || role.tenant_id == null) {
     throw new Error("Only approved tenants can submit maintenance requests.");
   }
 
-  const { data: tenant, error: tenantErr } = await supabase
+  signal?.throwIfAborted();
+  let tenantQuery = supabase
     .from("Tenants")
     .select("id, unit_id")
-    .eq("id", role.tenant_id)
-    .single();
+    .eq("id", role.tenant_id);
+  if (signal) tenantQuery = tenantQuery.abortSignal(signal);
+  const { data: tenant, error: tenantErr } = await tenantQuery.single();
   if (tenantErr) throwSb(tenantErr);
   if (!tenant.unit_id) {
     throw new Error("Your tenant profile has no unit assigned. Ask staff to link a unit before submitting.");
   }
 
-  const { data: unit, error: unitErr } = await supabase
+  signal?.throwIfAborted();
+  let unitQuery = supabase
     .from("Units")
     .select("id, property_id")
-    .eq("id", tenant.unit_id)
-    .single();
+    .eq("id", tenant.unit_id);
+  if (signal) unitQuery = unitQuery.abortSignal(signal);
+  const { data: unit, error: unitErr } = await unitQuery.single();
   if (unitErr) throwSb(unitErr);
 
-  const { data, error } = await supabase
+  signal?.throwIfAborted();
+  let insertQuery = supabase
     .from("MaintenanceRequests")
     .insert({
       title: input.title.trim(),
@@ -1464,9 +1476,11 @@ export async function submitTenantMaintenanceRequest(input: {
       resolution_notes: null,
       is_test_data: false,
     })
-    .select("*")
-    .single();
+    .select("*");
+  if (signal) insertQuery = insertQuery.abortSignal(signal);
+  const { data, error } = await insertQuery.single();
   if (error) throwSb(error);
+  signal?.throwIfAborted();
   return mapWorkOrder(data!);
 }
 
@@ -1653,17 +1667,23 @@ export async function uploadMaintenancePhoto(
   requestId: number,
   file: File,
   caption?: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<MaintenancePhoto> {
+  const signal = opts?.signal;
+  signal?.throwIfAborted();
+
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in.");
 
-  const { data: roleRow } = await supabase
+  signal?.throwIfAborted();
+  let roleQuery = supabase
     .from("user_roles")
     .select("role")
-    .eq("user_id", user.id)
-    .maybeSingle();
+    .eq("user_id", user.id);
+  if (signal) roleQuery = roleQuery.abortSignal(signal);
+  const { data: roleRow } = await roleQuery.maybeSingle();
 
   const rawExt = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
   const ext = (rawExt ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
@@ -1671,7 +1691,8 @@ export async function uploadMaintenancePhoto(
 
   // Insert metadata first so storage path-bind (EXISTS on storage_path) allows upload;
   // roll back the row if storage fails (mirrors uploadPropertyDocument).
-  const { data, error } = await supabase
+  signal?.throwIfAborted();
+  let photoInsert = supabase
     .from("MaintenanceRequestPhotos")
     .insert({
       maintenance_request_id: requestId,
@@ -1680,15 +1701,18 @@ export async function uploadMaintenancePhoto(
       uploaded_by_user_id: user.id,
       uploaded_by_role: roleRow?.role ?? null,
     })
-    .select("*")
-    .single();
+    .select("*");
+  if (signal) photoInsert = photoInsert.abortSignal(signal);
+  const { data, error } = await photoInsert.single();
   if (error) throwSb(error);
 
-  const { error: upErr } = await supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
+  signal?.throwIfAborted();
+  const uploadPromise = supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
     cacheControl: "3600",
     upsert: false,
     contentType: file.type || undefined,
   });
+  const { error: upErr } = await raceAbort(uploadPromise, signal);
   if (upErr) {
     const { error: delErr } = await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
     if (delErr) {
@@ -1697,6 +1721,7 @@ export async function uploadMaintenancePhoto(
     throw new Error(upErr.message);
   }
 
+  signal?.throwIfAborted();
   const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);
   return {
     id: data!.id,
@@ -1707,6 +1732,28 @@ export async function uploadMaintenancePhoto(
     uploaded_by_role: data!.uploaded_by_role,
     url: signed?.signedUrl ?? null,
   };
+}
+
+/** Reject with AbortError when `signal` aborts before `promise` settles. */
+function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 export async function listMaintenanceComments(requestId: number): Promise<MaintenanceComment[]> {
