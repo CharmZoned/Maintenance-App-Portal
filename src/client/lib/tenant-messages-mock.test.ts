@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   loadTenantMessagesMock,
   MOCK_THREAD_IDS,
+  resolveMessagesDeepLink,
   TENANT_MESSAGES_MOCK,
   unreadCount,
 } from "./tenant-messages-mock";
@@ -30,5 +31,34 @@ describe("tenant-messages-mock", () => {
     await expect(
       loadTenantMessagesMock({ scenario: "error", delayMs: 0 }),
     ).rejects.toThrow(/Messages aren.t connected/i);
+  });
+
+  it("resolveMessagesDeepLink maps ?request= to WO-linked mocks", () => {
+    const convos = TENANT_MESSAGES_MOCK.conversations;
+    expect(resolveMessagesDeepLink("?request=1842", convos)).toEqual({
+      kind: "request",
+      requestId: "1842",
+      threadId: MOCK_THREAD_IDS.leakingTap,
+    });
+    expect(resolveMessagesDeepLink("?request=WO-1799", convos)).toEqual({
+      kind: "request",
+      requestId: "WO-1799",
+      threadId: MOCK_THREAD_IDS.brokenHeater,
+    });
+    expect(resolveMessagesDeepLink("?request=9999", convos)).toEqual({
+      kind: "request-missing",
+      requestId: "9999",
+    });
+    expect(resolveMessagesDeepLink(`?thread=${MOCK_THREAD_IDS.parking}`, convos)).toEqual({
+      kind: "thread",
+      threadId: MOCK_THREAD_IDS.parking,
+    });
+    // thread wins when both present
+    expect(
+      resolveMessagesDeepLink(
+        `?request=1842&thread=${MOCK_THREAD_IDS.parking}`,
+        convos,
+      ),
+    ).toEqual({ kind: "thread", threadId: MOCK_THREAD_IDS.parking });
   });
 });

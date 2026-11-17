@@ -35,7 +35,64 @@ export type MockConversation = {
    * Not a real messages↔WO join.
    */
   openRequestPath?: string;
+  /**
+   * Demo WO number / id keys matched by `/messages?request=`.
+   * // TODO(data-gap): messages backend not available
+   */
+  linkedRequestIds?: string[];
 };
+
+/**
+ * Deep-link contract with Requests (“Open request conversation”):
+ * - `/messages?request=<workOrderId>` — preferred inbound from Requests.
+ *   Resolves to a mock request thread when `linkedRequestIds` includes the
+ *   param (demo keys: `1842`, `1799`, optionally `WO-1842`). Unknown ids do
+ *   not invent a thread — callers soft-open the inbox with a not-found state.
+ * - `/messages?thread=<mockThreadId>` — internal inbox selection / phone thread
+ *   (e.g. `mock:wo-1842`). Takes precedence when both params are present.
+ */
+export type MessagesDeepLink =
+  | { kind: "thread"; threadId: string }
+  | { kind: "request"; requestId: string; threadId: string }
+  | { kind: "request-missing"; requestId: string }
+  | { kind: "none" };
+
+export function normalizeRequestKey(raw: string): string {
+  return raw.trim().replace(/^wo[-_]?/i, "").toLowerCase();
+}
+
+export function findMockThreadForRequest(
+  conversations: MockConversation[],
+  requestId: string,
+): MockConversation | undefined {
+  const key = normalizeRequestKey(requestId);
+  if (!key) return undefined;
+  return conversations.find((c) =>
+    (c.linkedRequestIds ?? []).some((id) => normalizeRequestKey(id) === key),
+  );
+}
+
+export function resolveMessagesDeepLink(
+  search: string,
+  conversations: MockConversation[],
+): MessagesDeepLink {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const thread = params.get("thread");
+  if (thread) {
+    if (conversations.some((c) => c.id === thread)) {
+      return { kind: "thread", threadId: thread };
+    }
+    // Unknown thread id — treat like a missing request deep-link.
+    return { kind: "request-missing", requestId: thread };
+  }
+  const request = params.get("request");
+  if (request) {
+    const match = findMockThreadForRequest(conversations, request);
+    if (match) return { kind: "request", requestId: request, threadId: match.id };
+    return { kind: "request-missing", requestId: request };
+  }
+  return { kind: "none" };
+}
 
 export type TenantMessagesMockBundle = {
   conversations: MockConversation[];
@@ -94,6 +151,7 @@ export const TENANT_MESSAGES_MOCK: TenantMessagesMockBundle = {
       unread: true,
       // Affordance only — opens Requests list; no messages table join.
       openRequestPath: "/maintenance",
+      linkedRequestIds: ["1842", "WO-1842"],
       participants: [
         "You · Ada Admin (Landlord Gopher)",
         "Sam Fixit (Maintenance) · assigned request members only",
@@ -148,6 +206,7 @@ export const TENANT_MESSAGES_MOCK: TenantMessagesMockBundle = {
       timeLabel: "Mon 10 Nov",
       unread: false,
       openRequestPath: "/maintenance",
+      linkedRequestIds: ["1799", "WO-1799"],
       participants: [
         "You · Ada Admin (Landlord Gopher)",
         "Sam Fixit (Maintenance) · assigned request members only",
