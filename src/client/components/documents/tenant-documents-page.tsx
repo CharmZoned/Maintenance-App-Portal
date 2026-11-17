@@ -354,11 +354,9 @@ export function TenantDocumentsPage() {
                 </div>
               )}
 
-              <p className="mt-5 text-xs leading-[18px] text-muted-foreground md:hidden">
-                Only documents shared with your assigned unit appear here.
-              </p>
-              <p className="mt-5 hidden text-xs leading-[18px] text-muted-foreground md:block">
-                Building documents are included only when shared with your unit.
+              <p className="mt-5 text-xs leading-[18px] text-muted-foreground">
+                Includes documents shared with your unit and whole-property documents
+                marked visible to tenants.
               </p>
             </section>
 
@@ -389,14 +387,10 @@ export function TenantDocumentsPage() {
           </div>
         )}
 
-        <p className="text-xs leading-[18px] text-muted-foreground md:hidden">
+        <p className="text-xs leading-[18px] text-muted-foreground">
           {/* TODO(data-gap): in-app preview / e-sign not wired */}
           Download uses a short-lived authorized link. In-browser preview is not available
-          yet.
-        </p>
-        <p className="hidden text-xs leading-[18px] text-muted-foreground md:block">
-          Access follows your tenant and unit assignments. Maintenance workers cannot
-          access lease documents.
+          yet. Access follows your tenant and property assignments.
         </p>
       </div>
     </PageShell>
