@@ -299,12 +299,16 @@ export function TenantMessagesPage({
     </section>
   );
 
+  // Cap pane to viewport so Send stays above the fold on laptop (messages scroll).
+  const conversationPaneClass =
+    "flex h-[min(32rem,calc(100dvh-12rem))] max-h-[calc(100dvh-12rem)] flex-col overflow-hidden rounded-lg border border-border bg-card";
+
   const conversationCard = selected ? (
     <section
       aria-label={`Conversation ${selected.title}`}
-      className="flex min-h-[28rem] flex-col overflow-hidden rounded-lg border border-border bg-card md:min-h-[42rem]"
+      className={conversationPaneClass}
     >
-      <div className="space-y-3 border-b border-border px-5 py-5">
+      <div className="shrink-0 space-y-3 border-b border-border px-5 py-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
             {selected.title}
@@ -358,17 +362,19 @@ export function TenantMessagesPage({
           Only members of this conversation can view or reply.
         </p>
       </div>
-      <MessageComposer
-        // TODO(data-gap): messages backend not available — send stays local
-        resetKey={selected.id}
-        placeholder="Write a message…"
-        onSend={async (body) => {
-          await sendMockMessage(body);
-        }}
-      />
+      <div className="shrink-0">
+        <MessageComposer
+          // TODO(data-gap): messages backend not available — send stays local
+          resetKey={selected.id}
+          placeholder="Write a message…"
+          onSend={async (body) => {
+            await sendMockMessage(body);
+          }}
+        />
+      </div>
     </section>
   ) : (
-    <section className="flex min-h-[28rem] items-center justify-center rounded-lg border border-border bg-card md:min-h-[42rem]">
+    <section className={cn(conversationPaneClass, "items-center justify-center")}>
       {notFoundEmpty}
     </section>
   );
