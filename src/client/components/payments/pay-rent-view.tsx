@@ -10,11 +10,14 @@ import {
   demoPaymentReference,
   formatPayDate,
   formatUsd,
+  parseCustomAmount,
   payMethodLabel,
   type BalanceSummary,
   type TenantPayMethod,
   type TenantPaymentsProfile,
 } from "./payments-model";
+
+const METHOD_PREVIEW = "Not connected — no debit will be sent.";
 
 export function PayRentView({
   profile,
@@ -30,19 +33,39 @@ export function PayRentView({
   const [method, setMethod] = useState<TenantPayMethod>("ach");
   const [overlay, setOverlay] = useState<TenantPayMethod | null>(null);
 
+  const customParsed = useMemo(
+    () => parseCustomAmount(customAmount, summary.outstanding),
+    [customAmount, summary.outstanding],
+  );
+
   const selectedAmount = useMemo(() => {
     if (amountMode === "full") return summary.outstanding;
-    const n = Number.parseFloat(customAmount.replace(/[^0-9.]/g, ""));
-    return Number.isFinite(n) ? Math.max(0, n) : 0;
-  }, [amountMode, customAmount, summary.outstanding]);
+    return customParsed.value ?? 0;
+  }, [amountMode, customParsed.value, summary.outstanding]);
+
+  const customError =
+    amountMode === "custom" ? customParsed.error : null;
 
   const initiationDate = summary.asOf;
   const fee = 0;
   const total = selectedAmount + fee;
   const paymentReference = demoPaymentReference(profile);
-  const homeLabel = [profile?.property_name, profile?.unit_label]
-    .filter(Boolean)
-    .join(" · ") || "—";
+  const homeLabel =
+    [profile?.property_name, profile?.unit_label].filter(Boolean).join(" · ") || "—";
+
+  function onCustomChange(raw: string) {
+    setAmountMode("custom");
+    // Reject a second decimal point while typing.
+    if ((raw.match(/\./g) ?? []).length > 1) return;
+    // Allow intermediate "12." while typing; strip illegal chars.
+    const cleaned = raw.replace(/[^\d.]/g, "");
+    const parts = cleaned.split(".");
+    const next =
+      parts.length <= 1
+        ? cleaned
+        : `${parts[0]}.${parts.slice(1).join("").slice(0, 2)}`;
+    setCustomAmount(next);
+  }
 
   return (
     <div className="space-y-6">
@@ -52,44 +75,63 @@ export function PayRentView({
         <div className="space-y-6">
           <section className="rounded-lg border border-border bg-card p-5">
             <h2 className="text-lg font-semibold leading-7 text-foreground">1. Choose an amount</h2>
-            <button
-              type="button"
-              onClick={() => setAmountMode("full")}
-              className={cn(
-                "mt-4 flex min-h-14 w-full items-center justify-between rounded-sm px-4 py-3 text-left text-sm font-medium",
-                amountMode === "full"
-                  ? "bg-brand-tint text-brand-text"
-                  : "bg-muted text-brand-text",
-              )}
-            >
-              <span>Full outstanding balance</span>
-              <span className="tabular-nums">{formatUsd(summary.outstanding)}</span>
-            </button>
-
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div role="radiogroup" aria-label="Payment amount" className="mt-4 space-y-3">
               <button
                 type="button"
-                className="text-left text-sm font-medium text-foreground"
-                onClick={() => setAmountMode("custom")}
+                role="radio"
+                aria-checked={amountMode === "full"}
+                aria-pressed={amountMode === "full"}
+                onClick={() => setAmountMode("full")}
+                className={cn(
+                  "flex min-h-14 w-full items-center justify-between rounded-sm px-4 py-3 text-left text-sm font-medium",
+                  amountMode === "full"
+                    ? "bg-brand-tint text-brand-text"
+                    : "bg-muted text-brand-text",
+                )}
               >
-                Custom amount
-              </button>
-              <div className="relative w-full sm:max-w-[300px]">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                  $
+                <span>
+                  {amountMode === "full" ? "Selected · full outstanding balance" : "Full outstanding balance"}
                 </span>
-                <Input
-                  className="h-11 pl-7"
-                  inputMode="decimal"
-                  placeholder="Enter amount"
-                  value={customAmount}
-                  onFocus={() => setAmountMode("custom")}
-                  onChange={(e) => {
-                    setAmountMode("custom");
-                    setCustomAmount(e.target.value);
-                  }}
-                  aria-label="Custom payment amount"
-                />
+                <span className="tabular-nums">{formatUsd(summary.outstanding)}</span>
+              </button>
+
+              <div
+                className={cn(
+                  "rounded-sm px-4 py-3",
+                  amountMode === "custom" ? "bg-brand-tint" : "bg-muted",
+                )}
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={amountMode === "custom"}
+                  aria-pressed={amountMode === "custom"}
+                  className="text-left text-sm font-medium text-foreground"
+                  onClick={() => setAmountMode("custom")}
+                >
+                  {amountMode === "custom" ? "Selected · custom amount" : "Custom amount"}
+                </button>
+                <div className="relative mt-2 w-full sm:max-w-[300px]">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                    $
+                  </span>
+                  <Input
+                    className="h-11 pl-7"
+                    inputMode="decimal"
+                    placeholder="Enter amount"
+                    value={customAmount}
+                    onFocus={() => setAmountMode("custom")}
+                    onChange={(e) => onCustomChange(e.target.value)}
+                    aria-label="Custom payment amount"
+                    aria-invalid={customError != null}
+                    aria-describedby={customError ? "custom-amount-error" : undefined}
+                  />
+                </div>
+                {customError ? (
+                  <p id="custom-amount-error" className="mt-2 text-xs text-destructive" role="alert">
+                    {customError}
+                  </p>
+                ) : null}
               </div>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
@@ -97,28 +139,46 @@ export function PayRentView({
             </p>
 
             <dl className="mt-5 space-y-2 text-sm">
-              <BreakdownRow label="Monthly rent" value={formatUsd(summary.monthlyRent)} />
-              <BreakdownRow label="Late fee" value={formatUsd(summary.lateFee)} />
-              <BreakdownRow label="Other charges" value={formatUsd(summary.otherCharges)} />
-              <BreakdownRow
-                label="Account credit"
-                value={summary.accountCredit ? `−${formatUsd(Math.abs(summary.accountCredit))}` : formatUsd(0)}
-                tone="success"
-              />
+              <BreakdownRow label="Rent remaining" value={formatUsd(summary.rentRemaining)} />
+              {summary.otherRemaining > 0 ? (
+                <BreakdownRow label="Other open charges" value={formatUsd(summary.otherRemaining)} />
+              ) : null}
+              {summary.lateFeeAssessed != null && summary.lateFeeAssessed > 0 ? (
+                <BreakdownRow label="Late fee" value={formatUsd(summary.lateFeeAssessed)} />
+              ) : null}
+              {summary.accountCredit > 0 ? (
+                <BreakdownRow
+                  label="Account credit"
+                  value={`−${formatUsd(summary.accountCredit)}`}
+                  tone="success"
+                />
+              ) : (
+                <BreakdownRow label="Account credit" value="—" tone="success" />
+              )}
             </dl>
+            {summary.lateFeePolicy != null && summary.lateFeePolicy > 0 && summary.lateFeeAssessed == null ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Late fee policy {formatUsd(summary.lateFeePolicy)} · not assessed on this balance.
+              </p>
+            ) : null}
+            <p className="mt-2 text-xs text-muted-foreground">
+              Breakdown sums to outstanding {formatUsd(summary.outstanding)}.
+            </p>
           </section>
 
           <section className="rounded-lg border border-border bg-card p-5">
             <h2 className="text-lg font-semibold leading-7 text-foreground">
               2. Choose a payment method
             </h2>
-            <div className="mt-4 space-y-3">
+            <div
+              role="radiogroup"
+              aria-label="Payment method"
+              className="mt-4 space-y-3"
+            >
               <MethodRow
                 title="Zelle"
                 description={
-                  method === "zelle"
-                    ? "Selected · pay in your banking app; verify receipt separately."
-                    : "Pay in your banking app; verify receipt separately."
+                  method === "zelle" ? `Selected · ${METHOD_PREVIEW}` : METHOD_PREVIEW
                 }
                 selected={method === "zelle"}
                 onSelect={() => setMethod("zelle")}
@@ -131,9 +191,7 @@ export function PayRentView({
               <MethodRow
                 title="Credit / debit card"
                 description={
-                  method === "card"
-                    ? "Selected · Stripe secure checkout; no card details stored here."
-                    : "Stripe secure checkout; no card details stored here."
+                  method === "card" ? `Selected · ${METHOD_PREVIEW}` : METHOD_PREVIEW
                 }
                 selected={method === "card"}
                 onSelect={() => setMethod("card")}
@@ -146,9 +204,7 @@ export function PayRentView({
               <MethodRow
                 title="ACH bank transfer"
                 description={
-                  method === "ach"
-                    ? "Selected · Stripe ACH Direct Debit"
-                    : "Stripe ACH Direct Debit"
+                  method === "ach" ? `Selected · ${METHOD_PREVIEW}` : METHOD_PREVIEW
                 }
                 selected={method === "ach"}
                 onSelect={() => setMethod("ach")}
@@ -181,22 +237,10 @@ export function PayRentView({
           <p className="mt-1 text-xs text-muted-foreground">Property covers fees · test policy</p>
 
           <div className="mt-5 rounded-sm bg-muted px-4 py-4 text-sm">
-            <p className="font-medium text-foreground">
-              {method === "zelle"
-                ? "External bank transfer"
-                : method === "card"
-                  ? "Secure card checkout"
-                  : "Secure bank connection"}
-            </p>
+            <p className="font-medium text-foreground">Payment preview</p>
             <p className="mt-2 text-muted-foreground">
-              {method === "zelle"
-                ? // TODO(data-gap): Zelle recipient verification + mark-as-sent.
-                  "Zelle is not connected. Do not send funds using the example recipient."
-                : method === "card"
-                  ? // TODO(data-gap): Stripe Checkout.
-                    "Stripe card checkout is not connected. Card details never enter this portal."
-                  : // TODO(data-gap): Stripe ACH / Financial Connections.
-                    "Stripe ACH is not connected. Bank details never enter this portal directly."}
+              {/* TODO(data-gap): processors not connected. */}
+              {METHOD_PREVIEW}
             </p>
           </div>
 
@@ -208,13 +252,7 @@ export function PayRentView({
           >
             Authorize & pay · unavailable
           </Button>
-          <p className="mt-4 text-sm text-muted-foreground">
-            {method === "ach"
-              ? "A one-time debit mandate will be collected securely by Stripe. No bank connection or transfer is possible in this design."
-              : method === "card"
-                ? "Card numbers and CVVs remain with Stripe. Only authenticated payment events can confirm success."
-                : "Marking a Zelle payment sent would create Awaiting Verification until independently confirmed."}
-          </p>
+          <p className="mt-4 text-sm text-muted-foreground">{METHOD_PREVIEW}</p>
           <Button
             type="button"
             variant="outline"
@@ -312,7 +350,14 @@ function MethodRow({
         selected ? "bg-brand-tint" : "bg-muted",
       )}
     >
-      <button type="button" className="min-w-0 flex-1 text-left" onClick={onSelect}>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected}
+        aria-pressed={selected}
+        className="min-w-0 flex-1 text-left"
+        onClick={onSelect}
+      >
         <p className="text-sm font-medium text-brand-text">{title}</p>
         <p className="mt-1 text-xs text-muted-foreground">{description}</p>
       </button>

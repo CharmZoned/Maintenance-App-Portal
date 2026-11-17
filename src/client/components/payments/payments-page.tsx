@@ -39,7 +39,10 @@ export function PaymentsPage({
       setLoading(true);
       setLoadError(null);
       try {
-        const data = await loadTenantPaymentsSnapshot();
+        // Pay rent: charges + summary only. Ledger: batch-load Payments once.
+        const data = await loadTenantPaymentsSnapshot({
+          includeLedger: mode === "ledger",
+        });
         if (!cancelled) setSnapshot(data);
       } catch (err) {
         if (!cancelled) {
@@ -54,7 +57,7 @@ export function PaymentsPage({
     return () => {
       cancelled = true;
     };
-  }, [setError, reloadKey]);
+  }, [setError, reloadKey, mode]);
 
   const title = mode === "pay" ? "Pay rent" : "Payment ledger";
   const meta = snapshot

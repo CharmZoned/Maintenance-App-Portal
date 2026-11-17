@@ -23,6 +23,9 @@ export function BalanceSummaryCard({
           ? "text-success"
           : "text-muted-foreground";
 
+  const pendingLabel =
+    summary.pending == null ? "—" : formatUsd(summary.pending);
+
   return (
     <section
       className={cn(
@@ -48,7 +51,11 @@ export function BalanceSummaryCard({
           ) : null}
         </div>
         <Stat label="Past due" value={formatUsd(summary.pastDue)} />
-        <Stat label="Pending payments" value={formatUsd(summary.pending)} />
+        <Stat
+          label="Pending payments"
+          value={pendingLabel}
+          hint={summary.pending == null ? "Not tracked" : undefined}
+        />
         <Stat
           label="Next rent due"
           value={summary.nextDueDate ? formatPayDate(summary.nextDueDate) : "—"}
@@ -61,11 +68,20 @@ export function BalanceSummaryCard({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-2 text-lg font-semibold leading-7 tabular-nums text-foreground">{value}</p>
+      {hint ? <p className="mt-1 text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   );
 }

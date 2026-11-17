@@ -114,6 +114,7 @@ export function DateRangeFilterDialog({
                     "h-11 min-h-11 px-3",
                     selected && "bg-brand-tint text-brand-text shadow-none",
                   )}
+                  aria-pressed={selected}
                   onClick={() => selectQuick(r)}
                 >
                   {r.label === "All dates" ? "All dates" : r.label}

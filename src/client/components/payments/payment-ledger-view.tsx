@@ -60,7 +60,7 @@ export function PaymentLedgerView({
             <Button
               type="button"
               variant="outline"
-              className="h-11 min-h-11 px-3"
+              className="hidden h-11 min-h-11 px-3 md:inline-flex"
               onClick={() => setFilterOpen(true)}
             >
               Date range
@@ -220,7 +220,13 @@ function LedgerTableRows({
           {formatUsd(entry.balanceAfter)}
         </td>
         <td className="px-3 py-4 text-right">
-          <Button type="button" variant="outline" className="h-11 min-h-11 px-3" onClick={onToggle}>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 min-h-11 px-3"
+            aria-expanded={expanded}
+            onClick={onToggle}
+          >
             Details
           </Button>
         </td>
@@ -257,6 +263,7 @@ function LedgerMobileCard({
           type="button"
           variant="outline"
           className="h-11 min-h-11 shrink-0 px-3"
+          aria-expanded={expanded}
           onClick={onToggle}
         >
           Details
