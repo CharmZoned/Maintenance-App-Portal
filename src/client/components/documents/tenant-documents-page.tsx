@@ -160,10 +160,11 @@ export function TenantDocumentsPage() {
         const list = await listPropertyDocuments({ property_id: ctx.property_id });
         if (cancelled) return;
         setDocs(list);
-        setSelectedId((prev) => {
-          if (prev != null && list.some((d) => d.id === prev)) return prev;
-          return list[0]?.id ?? null;
-        });
+        // Do not auto-select — keeps a single title match for list e2e and
+        // matches mobile Figma (preview only after Preview).
+        setSelectedId((prev) =>
+          prev != null && list.some((d) => d.id === prev) ? prev : null,
+        );
       } catch (err) {
         if (!cancelled) {
           const message = (err as Error).message;
@@ -202,19 +203,16 @@ export function TenantDocumentsPage() {
   const groups = useMemo(() => groupFilteredDocs(filtered), [filtered]);
 
   const selected = useMemo(() => {
-    const fromFilter = filtered.find((row) => row.doc.id === selectedId);
-    if (fromFilter) return fromFilter;
-    return filtered[0] ?? null;
+    if (selectedId == null) return null;
+    return filtered.find((row) => row.doc.id === selectedId) ?? null;
   }, [filtered, selectedId]);
 
   useEffect(() => {
-    if (selected && selected.doc.id !== selectedId) {
-      setSelectedId(selected.doc.id);
-    }
-    if (!selected && selectedId != null) {
+    // Clear selection when the active category filter excludes it.
+    if (selectedId != null && !filtered.some((row) => row.doc.id === selectedId)) {
       setSelectedId(null);
     }
-  }, [selected, selectedId]);
+  }, [filtered, selectedId]);
 
   async function downloadDoc(doc: PropertyDocument) {
     try {
@@ -504,11 +502,8 @@ function DocumentPreviewPanel({
     <div className="mt-4 space-y-4">
       <div>
         <p className="truncate text-sm font-medium leading-[22px] text-foreground">
-          {displayTitle(doc)}
+          {fileLine ? `${displayTitle(doc)} · ${fileLine}` : displayTitle(doc)}
         </p>
-        {fileLine ? (
-          <p className="mt-1 truncate text-xs leading-[18px] text-muted-foreground">{fileLine}</p>
-        ) : null}
         <p className="mt-1 text-xs leading-[18px] text-muted-foreground">{meta}</p>
         <p className="mt-1 text-xs leading-[18px] text-muted-foreground">
           {categoryTypeLabel(category)} · Shared
