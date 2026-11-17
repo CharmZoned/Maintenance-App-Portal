@@ -353,7 +353,11 @@ export function RequestDetailPage({
           ← Requests
         </button>
         <div className="mt-4">
-          <TenantRequestDetailPanel order={order} navigate={navigate} />
+          <TenantRequestDetailPanel
+            order={order}
+            navigate={navigate}
+            extras={{ photos, comments, history }}
+          />
         </div>
         <aside
           className="mt-6 rounded-sm bg-warning-tint px-5 py-4 text-sm text-warning"

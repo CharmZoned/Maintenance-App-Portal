@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { MAX_MAINTENANCE_PHOTOS } from "./work-order-status";
 
 type UiPriority = "normal" | "urgent" | "emergency";
+type PermissionChoice = "yes" | "no";
 
 const PRIORITY_TO_DB: Record<UiPriority, WorkOrderPriority> = {
   normal: "normal",
@@ -49,14 +50,26 @@ interface Props {
  */
 export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
   const app = useApp();
+  const getTenantHomeContext = app.getTenantHomeContext;
+  const setError = app.setError;
+  const setNotice = app.setNotice;
+  const submitTenantRequest = app.submitTenantRequest;
+  const uploadMaintenancePhoto = app.uploadMaintenancePhoto;
+
   const [home, setHome] = useState<TenantHomeContext | null>(null);
+  const [homeReady, setHomeReady] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<MaintenanceCategory>("Plumbing");
-  const [priority, setPriority] = useState<UiPriority>("normal");
-  const [permission, setPermission] = useState<"yes" | "no">("yes");
+  const [category, setCategory] = useState<MaintenanceCategory | "">("");
+  const [priority, setPriority] = useState<UiPriority | null>(null);
+  const [permission, setPermission] = useState<PermissionChoice | "">("");
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const openRef = useRef(open);
+  openRef.current = open;
+  const savingRef = useRef(false);
+  const submitGenerationRef = useRef(0);
 
   const previews = useMemo(
     () => files.map((f) => ({ file: f, url: URL.createObjectURL(f) })),
@@ -69,37 +82,55 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
     };
   }, [previews]);
 
+  // Reset + load home only when the dialog opens — not when `app` identity flips.
   useEffect(() => {
     if (!open) return;
     setTitle("");
     setDescription("");
-    setCategory("Plumbing");
-    setPriority("normal");
-    setPermission("yes");
+    setCategory("");
+    setPriority(null);
+    setPermission("");
     setFiles([]);
+    setHome(null);
+    setHomeReady(false);
+    setSaving(false);
+    savingRef.current = false;
     let cancelled = false;
     (async () => {
       try {
-        const ctx = await app.getTenantHomeContext();
-        if (!cancelled) setHome(ctx);
+        const ctx = await getTenantHomeContext();
+        if (cancelled || !openRef.current) return;
+        setHome(ctx);
       } catch (err) {
-        if (!cancelled) app.setError((err as Error).message);
+        if (!cancelled && openRef.current) setError((err as Error).message);
+      } finally {
+        if (!cancelled && openRef.current) setHomeReady(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, app]);
+  }, [open, getTenantHomeContext, setError]);
 
-  const homeLabel = home
-    ? [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name]
-        .filter(Boolean)
-        .join(" · ") || "Your unit"
-    : "Loading unit…";
+  const homeLabel = !homeReady
+    ? "Loading unit…"
+    : home
+      ? [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name]
+          .filter(Boolean)
+          .join(" · ") || "Your unit"
+      : "Your unit";
 
-  const noUnit = home != null && home.unit_id == null;
+  const noUnit = homeReady && home != null && home.unit_id == null;
   const canSubmit =
-    !saving && !noUnit && Boolean(title.trim()) && Boolean(description.trim());
+    homeReady &&
+    !saving &&
+    !noUnit &&
+    home?.unit_id != null &&
+    Boolean(title.trim()) &&
+    Boolean(description.trim()) &&
+    category !== "" &&
+    priority != null &&
+    permission !== "";
 
   function addFiles(list: FileList | null) {
     if (!list) return;
@@ -110,31 +141,57 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function requestClose() {
+    // Bump generation so an in-flight submit ignores its result.
+    submitGenerationRef.current += 1;
+    savingRef.current = false;
+    setSaving(false);
+    onOpenChange(false);
+  }
+
   async function save() {
-    if (!canSubmit) return;
+    if (!canSubmit || savingRef.current) return;
+    const selectedCategory = category;
+    const selectedPriority = priority;
+    const selectedPermission = permission;
+    if (
+      !selectedCategory ||
+      selectedPriority == null ||
+      !selectedPermission
+    ) {
+      return;
+    }
+    savingRef.current = true;
     setSaving(true);
+    const generation = submitGenerationRef.current;
     try {
-      const created = await app.submitTenantRequest({
+      const created = await submitTenantRequest({
         title: title.trim(),
         description: description.trim(),
-        category,
-        permission_to_enter: permission === "yes",
-        priority: PRIORITY_TO_DB[priority],
+        category: selectedCategory,
+        permission_to_enter: selectedPermission === "yes",
+        priority: PRIORITY_TO_DB[selectedPriority],
       });
+      if (generation !== submitGenerationRef.current || !openRef.current) return;
+
       let photoFail = false;
       if (files.length) {
         try {
           await Promise.all(
             files
               .slice(0, MAX_MAINTENANCE_PHOTOS)
-              .map((file) => app.uploadMaintenancePhoto(created.id, file)),
+              .map((file) => uploadMaintenancePhoto(created.id, file)),
           );
         } catch (photoErr) {
           photoFail = true;
-          app.setError((photoErr as Error).message);
+          if (generation === submitGenerationRef.current && openRef.current) {
+            setError((photoErr as Error).message);
+          }
         }
       }
-      app.setNotice(
+      if (generation !== submitGenerationRef.current || !openRef.current) return;
+
+      setNotice(
         photoFail
           ? "Request submitted, but photo upload failed — open the request to add photos."
           : files.length
@@ -142,16 +199,28 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             : "Request submitted. Staff will update status in the portal.",
       );
       await onSaved?.(created);
+      if (generation !== submitGenerationRef.current || !openRef.current) return;
       onOpenChange(false);
     } catch (err) {
-      app.setError((err as Error).message);
+      if (generation === submitGenerationRef.current && openRef.current) {
+        setError((err as Error).message);
+      }
     } finally {
-      setSaving(false);
+      if (generation === submitGenerationRef.current) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) requestClose();
+        else onOpenChange(true);
+      }}
+    >
       <DialogContent
         className={cn(
           "max-h-[min(100dvh,100%)] gap-0 overflow-y-auto p-0 sm:max-h-[90dvh]",
@@ -189,21 +258,21 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Kitchen tap dripping"
-              disabled={noUnit}
+              disabled={!homeReady || noUnit}
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">
+            <Label htmlFor="tenant-category" className="text-xs font-semibold">
               Category <span aria-hidden>*</span>
             </Label>
             <Select
-              value={category}
+              value={category || undefined}
               onValueChange={(v) => setCategory(v as MaintenanceCategory)}
-              disabled={noUnit}
+              disabled={!homeReady || noUnit}
             >
-              <SelectTrigger className="h-12 min-h-11 w-full">
-                <SelectValue />
+              <SelectTrigger id="tenant-category" className="h-12 min-h-11 w-full">
+                <SelectValue placeholder="Select a category" />
               </SelectTrigger>
               <SelectContent>
                 {MAINTENANCE_CATEGORIES.map((c) => (
@@ -225,17 +294,20 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               onChange={(e) => setDescription(e.target.value)}
               rows={4}
               placeholder="Drips constantly from cold side…"
-              disabled={noUnit}
+              disabled={!homeReady || noUnit}
               className="min-h-[100px] text-[0.9375rem]"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Photos</Label>
+            <Label htmlFor="tenant-photos" className="text-xs font-semibold">
+              Photos
+            </Label>
             <label
+              htmlFor="tenant-photos"
               className={cn(
                 "flex min-h-[86px] cursor-pointer flex-col justify-center rounded-sm border border-border bg-muted px-4 py-3",
-                (noUnit || files.length >= MAX_MAINTENANCE_PHOTOS) &&
+                (!homeReady || noUnit || files.length >= MAX_MAINTENANCE_PHOTOS) &&
                   "cursor-not-allowed opacity-60",
               )}
             >
@@ -246,11 +318,12 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
                 Only the request’s authorized members can view them.
               </span>
               <input
+                id="tenant-photos"
                 type="file"
                 accept="image/*"
                 multiple
                 className="sr-only"
-                disabled={noUnit || files.length >= MAX_MAINTENANCE_PHOTOS}
+                disabled={!homeReady || noUnit || files.length >= MAX_MAINTENANCE_PHOTOS}
                 onChange={(e) => {
                   addFiles(e.target.files);
                   e.target.value = "";
@@ -281,10 +354,14 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">
+            <p id="tenant-priority-label" className="text-xs font-semibold text-foreground">
               Priority <span aria-hidden>*</span>
-            </Label>
-            <div className="grid grid-cols-3 gap-2">
+            </p>
+            <div
+              role="group"
+              aria-labelledby="tenant-priority-label"
+              className="grid grid-cols-3 gap-2"
+            >
               {(
                 [
                   ["normal", "Normal"],
@@ -295,7 +372,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
                 <button
                   key={value}
                   type="button"
-                  disabled={noUnit}
+                  disabled={!homeReady || noUnit}
                   aria-pressed={priority === value}
                   onClick={() => setPriority(value)}
                   className={cn(
@@ -325,14 +402,16 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
           </aside>
 
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Permission to enter</Label>
+            <Label htmlFor="tenant-permission" className="text-xs font-semibold">
+              Permission to enter <span aria-hidden>*</span>
+            </Label>
             <Select
-              value={permission}
-              onValueChange={(v) => setPermission(v as "yes" | "no")}
-              disabled={noUnit}
+              value={permission || undefined}
+              onValueChange={(v) => setPermission(v as PermissionChoice)}
+              disabled={!homeReady || noUnit}
             >
-              <SelectTrigger className="h-12 min-h-11 w-full">
-                <SelectValue />
+              <SelectTrigger id="tenant-permission" className="h-12 min-h-11 w-full">
+                <SelectValue placeholder="Select permission" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="yes">Yes, if no one home</SelectItem>
@@ -346,7 +425,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               type="button"
               variant="secondary"
               className="h-11 min-h-11 flex-1 text-sm text-brand-text sm:flex-none sm:w-[136px]"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
             >
               Cancel
             </Button>
@@ -357,7 +436,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               onClick={() => void save()}
               disabled={!canSubmit}
             >
-              {saving ? "Submitting…" : "Submit"}
+              {!homeReady ? "Loading…" : saving ? "Submitting…" : "Submit"}
             </Button>
           </div>
         </div>

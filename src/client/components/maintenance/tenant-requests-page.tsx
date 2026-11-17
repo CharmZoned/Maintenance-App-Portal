@@ -143,11 +143,12 @@ export function TenantRequestsPage({
     };
   }, [flight, setError]);
 
+  const getTenantHomeContext = app.getTenantHomeContext;
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const ctx = await app.getTenantHomeContext();
+        const ctx = await getTenantHomeContext();
         if (!cancelled) setHome(ctx);
       } catch {
         /* ignore */
@@ -156,7 +157,7 @@ export function TenantRequestsPage({
     return () => {
       cancelled = true;
     };
-  }, [app]);
+  }, [getTenantHomeContext]);
 
   useDeepLinkOpen({
     search,
@@ -232,7 +233,7 @@ export function TenantRequestsPage({
                 Requests
               </h2>
               <p className="mt-1 text-sm text-muted-foreground md:hidden">
-                Repairs shared with your unit.
+                Track the repairs you submitted for your unit.
               </p>
               <p className="mt-1 hidden text-sm text-muted-foreground md:block">
                 Track repairs and stay in touch with the people helping.
@@ -286,10 +287,10 @@ export function TenantRequestsPage({
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
             <section className="rounded-lg border border-border bg-card p-5 sm:p-6">
               <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
-                Your unit’s requests
+                Your requests
               </h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Shared with tenants assigned to this unit.
+                Requests you submitted for your unit.
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">
@@ -347,6 +348,13 @@ export function TenantRequestsPage({
                           type="button"
                           onClick={() => selectRequest(w)}
                           onDoubleClick={() => openFullDetail(w)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                              e.preventDefault();
+                              openFullDetail(w);
+                            }
+                          }}
+                          aria-current={selectedRow ? "true" : undefined}
                           className={cn(
                             "flex w-full min-h-11 flex-col gap-2 rounded-lg border px-4 py-4 text-left transition-colors",
                             selectedRow
@@ -385,7 +393,7 @@ export function TenantRequestsPage({
               )}
 
               <p className="mt-6 text-sm text-muted-foreground">
-                Only requests associated with your authorized unit appear here.
+                Only requests you submitted appear here.
                 {placeLabel && placeLabel !== "Your home" ? (
                   <span className="sr-only"> ({placeLabel})</span>
                 ) : null}
@@ -393,7 +401,7 @@ export function TenantRequestsPage({
               {selected ? (
                 <button
                   type="button"
-                  className="mt-3 min-h-11 text-sm font-medium text-brand-text hover:underline lg:hidden"
+                  className="mt-3 min-h-11 text-sm font-medium text-brand-text hover:underline"
                   onClick={() => openFullDetail(selected)}
                 >
                   Open full request
@@ -403,7 +411,13 @@ export function TenantRequestsPage({
 
             <section className="min-h-[20rem]">
               {selected ? (
-                <TenantRequestDetailPanel order={selected} navigate={go} compact />
+                <TenantRequestDetailPanel
+                  key={selected.id}
+                  order={selected}
+                  navigate={go}
+                  compact
+                  onOpenFullDetail={() => openFullDetail(selected)}
+                />
               ) : (
                 <div className="flex h-full min-h-[16rem] items-center justify-center rounded-lg border border-border bg-card p-6">
                   <p className="text-sm text-muted-foreground">

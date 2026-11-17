@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
-import { SkeletonRow, StatusChip } from "@/components/patterns";
+import { ErrorRetry, SkeletonRow, StatusChip } from "@/components/patterns";
 import {
   formatActivityStamp,
   priorityLevel,
@@ -9,51 +9,95 @@ import {
   toRequestStatus,
 } from "@/lib/request-status";
 import { formatDate } from "@/lib/utils";
-import type { MaintenanceComment, MaintenancePhoto, MaintenanceStatusEvent, WorkOrder } from "@/types";
+import type {
+  MaintenanceComment,
+  MaintenancePhoto,
+  MaintenanceStatusEvent,
+  WorkOrder,
+} from "@/types";
+
+export type TenantRequestExtras = {
+  photos: MaintenancePhoto[];
+  comments: MaintenanceComment[];
+  history: MaintenanceStatusEvent[];
+};
 
 /**
  * Tenant request summary — text + chips (Figma Requests detail panel).
  * Prefer this over disabled inputs for read-only fields.
+ *
+ * Pass `extras` when the parent already loaded companions (full detail page)
+ * so we do not double-fetch. Omit on the list inline panel to load once here.
  */
 export function TenantRequestDetailPanel({
   order,
   navigate,
   compact = false,
+  extras,
+  onOpenFullDetail,
 }: {
   order: WorkOrder;
   navigate: (to: string) => void;
   /** Inline panel on list page — lighter companion fetch. */
   compact?: boolean;
+  /** Preloaded companions — skips the panel fetch when provided. */
+  extras?: TenantRequestExtras;
+  /** Keyboard-accessible path to the full detail route (desktop + compact). */
+  onOpenFullDetail?: () => void;
 }) {
   const app = useApp();
-  const [photos, setPhotos] = useState<MaintenancePhoto[]>([]);
-  const [comments, setComments] = useState<MaintenanceComment[]>([]);
-  const [history, setHistory] = useState<MaintenanceStatusEvent[]>([]);
-  const [loadingExtras, setLoadingExtras] = useState(true);
+  const [photos, setPhotos] = useState<MaintenancePhoto[]>(extras?.photos ?? []);
+  const [comments, setComments] = useState<MaintenanceComment[]>(
+    extras?.comments ?? [],
+  );
+  const [history, setHistory] = useState<MaintenanceStatusEvent[]>(
+    extras?.history ?? [],
+  );
+  const [loadingExtras, setLoadingExtras] = useState(!extras);
+  const [extrasError, setExtrasError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const listPhotos = app.listMaintenancePhotos;
   const listComments = app.listMaintenanceComments;
   const listHistory = app.listMaintenanceStatusHistory;
 
+  // Sync when parent-provided extras change (full page reload).
   useEffect(() => {
+    if (!extras) return;
+    setPhotos(extras.photos);
+    setComments(extras.comments);
+    setHistory(extras.history);
+    setLoadingExtras(false);
+    setExtrasError(null);
+  }, [extras]);
+
+  useEffect(() => {
+    if (extras) return;
     let cancelled = false;
+    // Clear previous request's timeline immediately on switch.
+    setPhotos([]);
+    setComments([]);
+    setHistory([]);
+    setExtrasError(null);
+    setLoadingExtras(true);
+    const loadId = order.id;
     (async () => {
-      setLoadingExtras(true);
       try {
         const [p, c, h] = await Promise.all([
-          listPhotos(order.id),
-          listComments(order.id),
-          listHistory(order.id),
+          listPhotos(loadId),
+          listComments(loadId),
+          listHistory(loadId),
         ]);
         if (cancelled) return;
         setPhotos(p);
         setComments(c);
         setHistory(h);
-      } catch {
+      } catch (err) {
         if (!cancelled) {
           setPhotos([]);
           setComments([]);
           setHistory([]);
+          setExtrasError((err as Error).message || "Couldn’t load updates.");
         }
       } finally {
         if (!cancelled) setLoadingExtras(false);
@@ -62,15 +106,18 @@ export function TenantRequestDetailPanel({
     return () => {
       cancelled = true;
     };
-  }, [order.id, listPhotos, listComments, listHistory]);
+  }, [order.id, extras, listPhotos, listComments, listHistory, reloadKey]);
 
   const status = toRequestStatus(order);
   const nextStep = requestNextStep(order);
   const priority = priorityLevel(order.priority);
   const reporter =
-    [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ") || "You";
+    [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ") ||
+    "You";
   const reportedWhen = formatActivityStamp(order.created_at);
-  const assignedLabel = order.assigned_staff_id ? "Assigned (staff)" : "Not yet assigned";
+  const assignedLabel = order.assigned_staff_id
+    ? "Assigned (staff)"
+    : "Not yet assigned";
   const scheduledLabel = order.scheduled_at
     ? formatDate(order.scheduled_at, {
         weekday: "short",
@@ -93,7 +140,7 @@ export function TenantRequestDetailPanel({
       body:
         status === "New"
           ? "Awaiting assignment. Photos and additional details appear when available."
-          : order.description?.trim() || undefined,
+          : undefined,
       at: order.created_at,
     });
     for (const ev of history) {
@@ -113,12 +160,19 @@ export function TenantRequestDetailPanel({
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, compact ? 3 : 12);
   }, [order, history, comments, status, nextStep, compact]);
 
+  const openFull = onOpenFullDetail ?? (() => navigate(`/maintenance/${order.id}`));
+
   return (
-    <div className="flex h-full flex-col rounded-lg border border-border bg-card p-5 sm:p-6">
+    <div
+      key={order.id}
+      className="flex h-full flex-col rounded-lg border border-border bg-card p-5 sm:p-6"
+    >
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Request details
       </p>
-      <h2 className="mt-2 text-2xl font-semibold leading-8 text-foreground">{order.title}</h2>
+      <h2 className="mt-2 text-2xl font-semibold leading-8 text-foreground">
+        {order.title}
+      </h2>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <StatusChip status={status} />
@@ -133,29 +187,61 @@ export function TenantRequestDetailPanel({
         <DetailRow label="Reported" value={`${reporter} · ${reportedWhen}`} />
         <DetailRow label="Assigned to" value={assignedLabel} />
         <DetailRow label="Scheduled" value={scheduledLabel} />
-        {!compact && order.category ? (
-          <DetailRow label="Category" value={order.category} />
-        ) : null}
+        {order.category ? <DetailRow label="Category" value={order.category} /> : null}
       </dl>
 
-      {!compact && order.description ? (
+      {order.description ? (
         <div className="mt-5">
           <p className="text-xs font-medium text-muted-foreground">Description</p>
-          <p className="mt-1 text-sm text-foreground">{order.description}</p>
+          <p
+            className={
+              compact
+                ? "mt-1 line-clamp-3 text-sm text-foreground"
+                : "mt-1 text-sm text-foreground"
+            }
+          >
+            {order.description}
+          </p>
+          {compact ? (
+            <button
+              type="button"
+              className="mt-2 min-h-11 text-sm font-medium text-brand-text hover:underline"
+              onClick={openFull}
+            >
+              View full details
+            </button>
+          ) : null}
         </div>
+      ) : compact ? (
+        <button
+          type="button"
+          className="mt-5 min-h-11 self-start text-sm font-medium text-brand-text hover:underline"
+          onClick={openFull}
+        >
+          View full details
+        </button>
       ) : null}
 
       <div className="my-5 h-px bg-border" />
 
-      <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">Updates</h3>
+      <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
+        Updates
+      </h3>
       {loadingExtras ? (
-        <div className="mt-3 space-y-2" aria-busy="true">
+        <div className="mt-3 space-y-2" aria-busy="true" aria-label="Loading updates">
           <SkeletonRow />
+        </div>
+      ) : extrasError ? (
+        <div className="mt-3">
+          <ErrorRetry
+            message={extrasError}
+            onRetry={() => setReloadKey((k) => k + 1)}
+          />
         </div>
       ) : (
         <ul className="mt-3 space-y-4">
           {updates.map((row, i) => (
-            <li key={`${row.at}-${i}`}>
+            <li key={`${order.id}-${row.at}-${i}`}>
               <p className="text-xs text-muted-foreground">{row.when}</p>
               <p className="mt-1 text-sm font-medium text-foreground">{row.title}</p>
               {row.body ? (
@@ -188,7 +274,7 @@ export function TenantRequestDetailPanel({
           ) : (
             <li>
               <p className="text-sm text-muted-foreground">
-                Photos and additional details appear here when available.
+                No photos yet. Photos appear here when attached to this request.
               </p>
             </li>
           )}
