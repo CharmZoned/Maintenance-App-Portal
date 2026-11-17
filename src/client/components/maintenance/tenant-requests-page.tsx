@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import {
@@ -70,6 +70,10 @@ export function TenantRequestsPage({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [home, setHome] = useState<TenantHomeContext | null>(null);
+  /** Prefer this id after submit until it appears in the loaded list. */
+  const pendingSelectIdRef = useRef<number | null>(null);
+  /** Skip the dialog-close reload when onSaved already refreshed. */
+  const skipCloseReloadRef = useRef(false);
 
   const listWorkOrders = app.listWorkOrders;
   const setError = app.setError;
@@ -169,10 +173,20 @@ export function TenantRequestsPage({
 
   useEffect(() => {
     if (filtered.length === 0) {
+      // Keep a pending post-submit id; don't clear until the list catches up.
+      if (pendingSelectIdRef.current != null) return;
       setSelectedId(null);
       return;
     }
+    const pending = pendingSelectIdRef.current;
+    if (pending != null && filtered.some((o) => o.id === pending)) {
+      pendingSelectIdRef.current = null;
+      if (selectedId !== pending) setSelectedId(pending);
+      return;
+    }
     if (selectedId != null && filtered.some((o) => o.id === selectedId)) return;
+    // Don't fall back to filtered[0] while waiting for the submitted request.
+    if (pending != null) return;
     setSelectedId(filtered[0]!.id);
   }, [filtered, selectedId]);
 
@@ -406,17 +420,30 @@ export function TenantRequestsPage({
         open={submitOpen}
         onOpenChange={(o) => {
           setSubmitOpen(o);
-          if (!o) void load();
-        }}
-        onSaved={async () => {
-          const list = await load();
-          const newest = list
-            .slice()
-            .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
-          if (newest) {
-            setFilter("open");
-            setSelectedId(newest.id);
+          if (!o) {
+            if (skipCloseReloadRef.current) {
+              skipCloseReloadRef.current = false;
+              return;
+            }
+            void load();
           }
+        }}
+        onSaved={async (created) => {
+          skipCloseReloadRef.current = true;
+          pendingSelectIdRef.current = created.id;
+          setFilter("open");
+          setSelectedId(created.id);
+          // Optimistic insert so list + detail show the new request immediately.
+          setOrders((prev) =>
+            prev.some((o) => o.id === created.id) ? prev : [created, ...prev],
+          );
+          const list = await load();
+          if (!list.some((o) => o.id === created.id)) {
+            setOrders((prev) =>
+              prev.some((o) => o.id === created.id) ? prev : [created, ...prev],
+            );
+          }
+          setSelectedId(created.id);
         }}
       />
     </PageShell>

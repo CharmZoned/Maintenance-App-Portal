@@ -22,6 +22,7 @@ import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceCategory,
   type TenantHomeContext,
+  type WorkOrder,
   type WorkOrderPriority,
 } from "@/types";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,8 @@ const PRIORITY_TO_DB: Record<UiPriority, WorkOrderPriority> = {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved?: () => void | Promise<void>;
+  /** Receives the created request so callers can select it immediately. */
+  onSaved?: (created: WorkOrder) => void | Promise<void>;
 }
 
 /**
@@ -139,7 +141,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             ? "Request submitted with photos. Staff will update status in the portal."
             : "Request submitted. Staff will update status in the portal.",
       );
-      await onSaved?.();
+      await onSaved?.(created);
       onOpenChange(false);
     } catch (err) {
       app.setError((err as Error).message);
