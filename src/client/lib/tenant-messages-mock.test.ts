@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  createSyntheticRequestThread,
   loadTenantMessagesMock,
   MOCK_THREAD_IDS,
   resolveMessagesDeepLink,
+  syntheticRequestThreadId,
   TENANT_MESSAGES_MOCK,
   unreadCount,
 } from "./tenant-messages-mock";
@@ -33,25 +35,43 @@ describe("tenant-messages-mock", () => {
     ).rejects.toThrow(/Messages aren.t connected/i);
   });
 
-  it("resolveMessagesDeepLink maps ?request= to WO-linked mocks", () => {
+  it("resolveMessagesDeepLink maps demo WO numbers and synthesizes real PKs", () => {
     const convos = TENANT_MESSAGES_MOCK.conversations;
     expect(resolveMessagesDeepLink("?request=1842", convos)).toEqual({
       kind: "request",
       requestId: "1842",
       threadId: MOCK_THREAD_IDS.leakingTap,
+      synthetic: false,
     });
     expect(resolveMessagesDeepLink("?request=WO-1799", convos)).toEqual({
       kind: "request",
       requestId: "WO-1799",
       threadId: MOCK_THREAD_IDS.brokenHeater,
+      synthetic: false,
     });
-    expect(resolveMessagesDeepLink("?request=9999", convos)).toEqual({
-      kind: "request-missing",
-      requestId: "9999",
+
+    // Real Requests CTA uses MaintenanceRequests primary key (numeric or uuid).
+    expect(resolveMessagesDeepLink("?request=42", convos)).toEqual({
+      kind: "request",
+      requestId: "42",
+      threadId: syntheticRequestThreadId("42"),
+      synthetic: true,
     });
+    const uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    expect(resolveMessagesDeepLink(`?request=${uuid}`, convos)).toEqual({
+      kind: "request",
+      requestId: uuid,
+      threadId: syntheticRequestThreadId(uuid),
+      synthetic: true,
+    });
+
     expect(resolveMessagesDeepLink(`?thread=${MOCK_THREAD_IDS.parking}`, convos)).toEqual({
       kind: "thread",
       threadId: MOCK_THREAD_IDS.parking,
+    });
+    expect(resolveMessagesDeepLink("?thread=missing", convos)).toEqual({
+      kind: "not-found",
+      requestId: "missing",
     });
     // thread wins when both present
     expect(
@@ -60,5 +80,13 @@ describe("tenant-messages-mock", () => {
         convos,
       ),
     ).toEqual({ kind: "thread", threadId: MOCK_THREAD_IDS.parking });
+  });
+
+  it("createSyntheticRequestThread keys by request PK and links Open request", () => {
+    const thread = createSyntheticRequestThread("99");
+    expect(thread.id).toBe("mock:request:99");
+    expect(thread.linkedRequestIds).toContain("99");
+    expect(thread.openRequestPath).toBe("/maintenance?wo=99");
+    expect(thread.messages).toEqual([]);
   });
 });

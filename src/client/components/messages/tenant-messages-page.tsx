@@ -7,6 +7,7 @@ import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
 import { cn } from "@/lib/utils";
 import {
+  createSyntheticRequestThread,
   loadTenantMessagesMock,
   MOCK_THREAD_IDS,
   resolveMessagesDeepLink,
@@ -23,10 +24,12 @@ type LoadState = "loading" | "ready" | "error";
  * Phone: list vs thread as separate screens. Tablet: stacked. Desktop: split.
  *
  * Deep-link contract (Requests → Messages):
- * - `/messages?request=<workOrderId>` from Requests “Open request conversation”.
- *   Maps to a WO-linked mock when `linkedRequestIds` match (demo 1842 / 1799);
- *   otherwise soft-opens the inbox with a not-found empty state (CTA is never dead).
- * - `/messages?thread=<mockThreadId>` for in-page selection / phone thread.
+ * - `/messages?request=<workOrderId>` — `workOrderId` is MaintenanceRequests
+ *   **primary key** (`order.id`). Match demo `linkedRequestIds` / WO number soft
+ *   keys when possible; otherwise open a synthetic request thread for that id
+ *   so phone never lands on a silent unselected inbox.
+ * - `/messages?thread=<mockThreadId>` — in-page selection / phone thread.
+ *   Unknown thread → not-found empty on mobile + desktop.
  *
  * // TODO(data-gap): messages backend not available
  */
@@ -44,7 +47,7 @@ export function TenantMessagesPage({
   const [error, setLocalError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mobileThread, setMobileThread] = useState(false);
-  /** Set when `?request=` / unknown `?thread=` cannot map to a mock conversation. */
+  /** Unknown `?thread=` (or empty `?request=`) — show empty on phone + desktop. */
   const [deepLinkMiss, setDeepLinkMiss] = useState<string | null>(null);
   const [localMessages, setLocalMessages] = useState<Record<string, MockMessage[]>>(
     {},
@@ -74,23 +77,48 @@ export function TenantMessagesPage({
 
   const conversations = bundle?.conversations ?? [];
 
-  // Resolve ?request= (Requests) and ?thread= (inbox) per deep-link contract above.
+  // Resolve ?request= (Requests PK) and ?thread= (inbox) per deep-link contract.
   useEffect(() => {
     if (state !== "ready") return;
     const link = resolveMessagesDeepLink(search, conversations);
-    if (link.kind === "thread" || link.kind === "request") {
+
+    if (link.kind === "thread") {
       setSelectedId(link.threadId);
       setMobileThread(true);
       setDeepLinkMiss(null);
       return;
     }
-    if (link.kind === "request-missing") {
-      // Soft-open inbox — do not leave Requests CTA dead on unknown WO ids.
-      setSelectedId(null);
-      setMobileThread(false);
-      setDeepLinkMiss(link.requestId);
+
+    if (link.kind === "request") {
+      if (link.synthetic) {
+        // Ensure a conversation exists for this real order.id / uuid.
+        // TODO(data-gap): messages backend not available
+        setBundle((prev) => {
+          if (!prev) return prev;
+          if (prev.conversations.some((c) => c.id === link.threadId)) return prev;
+          const synthetic = createSyntheticRequestThread(link.requestId);
+          return {
+            ...prev,
+            conversations: [synthetic, ...prev.conversations],
+          };
+        });
+        setLocalMessages((prev) =>
+          prev[link.threadId] ? prev : { ...prev, [link.threadId]: [] },
+        );
+      }
+      setSelectedId(link.threadId);
+      setMobileThread(true);
+      setDeepLinkMiss(null);
       return;
     }
+
+    if (link.kind === "not-found") {
+      setSelectedId(null);
+      setMobileThread(true);
+      setDeepLinkMiss(link.requestId || "unknown");
+      return;
+    }
+
     // No deep-link — desktop/tablet Figma shows WO-1842 selected by default.
     setDeepLinkMiss(null);
     setSelectedId((prev) => prev ?? MOCK_THREAD_IDS.leakingTap);
@@ -102,6 +130,7 @@ export function TenantMessagesPage({
   );
   const threadMessages = selectedId ? (localMessages[selectedId] ?? []) : [];
   const unread = useMemo(() => unreadCount(conversations), [conversations]);
+  const showMobileConversation = Boolean(mobileThread && (selected || deepLinkMiss));
 
   function openThread(conversation: MockConversation) {
     setSelectedId(conversation.id);
@@ -198,6 +227,19 @@ export function TenantMessagesPage({
     </header>
   );
 
+  const notFoundEmpty = (
+    <EmptyState
+      message={
+        // TODO(data-gap): messages backend not available
+        deepLinkMiss
+          ? `No conversation for “${deepLinkMiss}” yet. Messaging isn’t connected — pick a thread from your inbox, or open the request from Requests.`
+          : "Select a conversation to read and reply."
+      }
+      actionLabel={deepLinkMiss ? "Back to requests" : undefined}
+      onAction={deepLinkMiss ? () => navigate("/maintenance") : undefined}
+    />
+  );
+
   const inboxCard = (
     <section
       aria-label="Inbox"
@@ -285,7 +327,14 @@ export function TenantMessagesPage({
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
         {threadMessages.length === 0 ? (
-          <EmptyState message="No messages in this conversation yet." />
+          <EmptyState
+            message={
+              // TODO(data-gap): messages backend not available
+              selected.id.startsWith("mock:request:")
+                ? "No messages for this request yet. Chat isn’t connected — you can still open the request, or write a local demo reply."
+                : "No messages in this conversation yet."
+            }
+          />
         ) : (
           threadMessages.map((m) => (
             <div
@@ -314,23 +363,8 @@ export function TenantMessagesPage({
       />
     </section>
   ) : (
-    <section
-      className={cn(
-        "min-h-[28rem] items-center justify-center rounded-lg border border-border bg-card md:min-h-[42rem]",
-        // Phone: only show not-found pane when a deep-link missed; otherwise inbox alone.
-        deepLinkMiss ? "flex" : "hidden md:flex",
-      )}
-    >
-      <EmptyState
-        message={
-          deepLinkMiss
-            ? // TODO(data-gap): messages backend not available
-              `No conversation for request ${deepLinkMiss} yet. Messaging isn’t connected — pick a thread from your inbox, or open the request from Requests.`
-            : "Select a conversation to read and reply."
-        }
-        actionLabel={deepLinkMiss ? "Back to requests" : undefined}
-        onAction={deepLinkMiss ? () => navigate("/maintenance") : undefined}
-      />
+    <section className="flex min-h-[28rem] items-center justify-center rounded-lg border border-border bg-card md:min-h-[42rem]">
+      {notFoundEmpty}
     </section>
   );
 
@@ -351,7 +385,7 @@ export function TenantMessagesPage({
             onRetry={() => setReloadKey((k) => k + 1)}
           />
         </div>
-      ) : conversations.length === 0 ? (
+      ) : conversations.length === 0 && !deepLinkMiss ? (
         <div className="space-y-6">
           {hero}
           <EmptyState message="No conversations yet. When messaging is connected, threads for your home and requests will show up here." />
@@ -361,18 +395,26 @@ export function TenantMessagesPage({
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Phone conversation is a separate screen (Figma Request conversation mobile). */}
-          <div className={cn(mobileThread && selected ? "block md:hidden" : "hidden")}>
+          {/* Phone conversation / not-found is a separate screen. */}
+          <div className={cn(showMobileConversation ? "block md:hidden" : "hidden")}>
             {mobileConversationHero}
             <div className="mt-4">{conversationCard}</div>
           </div>
 
-          <div className={cn(mobileThread && selected ? "hidden md:block" : "block")}>
+          <div className={cn(showMobileConversation ? "hidden md:block" : "block")}>
             {hero}
             <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-stretch">
               <div className="w-full lg:w-[360px] lg:shrink-0">{inboxCard}</div>
               {/* Tablet stacks conversation under inbox; desktop sits beside. */}
-              <div className="hidden min-w-0 flex-1 md:block">{conversationCard}</div>
+              <div
+                className={cn(
+                  "min-w-0 flex-1",
+                  // Always show pane on md+; on phone only when inbox layout (rare).
+                  deepLinkMiss && !selected ? "flex md:flex" : "hidden md:block",
+                )}
+              >
+                {conversationCard}
+              </div>
             </div>
             <p className="mt-6 text-center text-xs text-muted-foreground md:text-left">
               <span className="md:hidden">Only conversation members can read or reply.</span>

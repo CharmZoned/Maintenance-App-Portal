@@ -45,31 +45,89 @@ export type MockConversation = {
 /**
  * Deep-link contract with Requests (“Open request conversation”):
  * - `/messages?request=<workOrderId>` — preferred inbound from Requests.
- *   Resolves to a mock request thread when `linkedRequestIds` includes the
- *   param (demo keys: `1842`, `1799`, optionally `WO-1842`). Unknown ids do
- *   not invent a thread — callers soft-open the inbox with a not-found state.
+ *   `workOrderId` is the MaintenanceRequests **primary key** (`order.id`), not
+ *   necessarily a Figma-style request_number. Resolve order:
+ *   1) match demo `linkedRequestIds` / request_number soft keys (1842, WO-1842)
+ *   2) otherwise always open a **synthetic** request thread keyed by that id
+ *      so a real click never lands on a silent unselected inbox (esp. phone).
  * - `/messages?thread=<mockThreadId>` — internal inbox selection / phone thread
  *   (e.g. `mock:wo-1842`). Takes precedence when both params are present.
+ *   Unknown `thread` → not-found empty (mobile + desktop).
  */
 export type MessagesDeepLink =
   | { kind: "thread"; threadId: string }
-  | { kind: "request"; requestId: string; threadId: string }
-  | { kind: "request-missing"; requestId: string }
+  | {
+      kind: "request";
+      requestId: string;
+      threadId: string;
+      /** True when no demo thread matched — caller should ensure synthetic exists. */
+      synthetic: boolean;
+    }
+  | { kind: "not-found"; requestId: string }
   | { kind: "none" };
 
 export function normalizeRequestKey(raw: string): string {
   return raw.trim().replace(/^wo[-_]?/i, "").toLowerCase();
 }
 
+/** Stable thread id for a Requests deep-link that has no demo match. */
+export function syntheticRequestThreadId(requestId: string): string {
+  return `mock:request:${requestId.trim()}`;
+}
+
+/**
+ * Placeholder conversation for any real `order.id` / uuid deep-link.
+ * // TODO(data-gap): messages backend not available
+ */
+export function createSyntheticRequestThread(requestId: string): MockConversation {
+  const id = requestId.trim();
+  return {
+    id: syntheticRequestThreadId(id),
+    kind: "request",
+    title: `Request ${id}`,
+    preview: "No messages yet — messaging isn’t connected.",
+    timeLabel: "Just now",
+    unread: false,
+    openRequestPath: `/maintenance?wo=${encodeURIComponent(id)}`,
+    linkedRequestIds: [id],
+    participants: [
+      "You · property staff",
+      "Assigned request members only · demo thread",
+    ],
+    messages: [],
+  };
+}
+
 export function findMockThreadForRequest(
   conversations: MockConversation[],
   requestId: string,
 ): MockConversation | undefined {
-  const key = normalizeRequestKey(requestId);
+  const raw = requestId.trim();
+  const key = normalizeRequestKey(raw);
   if (!key) return undefined;
-  return conversations.find((c) =>
-    (c.linkedRequestIds ?? []).some((id) => normalizeRequestKey(id) === key),
+
+  // 1) Explicit linked keys (demo WO numbers + any stored PK strings).
+  const byLinked = conversations.find((c) =>
+    (c.linkedRequestIds ?? []).some((id) => {
+      const linked = id.trim();
+      return (
+        linked === raw ||
+        normalizeRequestKey(linked) === key ||
+        normalizeRequestKey(linked) === normalizeRequestKey(raw)
+      );
+    }),
   );
+  if (byLinked) return byLinked;
+
+  // 2) Soft match title request_number (e.g. "WO-1842 · …") or synthetic id.
+  const byTitleOrId = conversations.find((c) => {
+    if (c.id === syntheticRequestThreadId(raw) || c.id === `mock:wo-${key}`) {
+      return true;
+    }
+    const titleKey = c.title.match(/\bWO[-_]?(\w+)\b/i)?.[1];
+    return titleKey != null && normalizeRequestKey(titleKey) === key;
+  });
+  return byTitleOrId;
 }
 
 export function resolveMessagesDeepLink(
@@ -82,14 +140,29 @@ export function resolveMessagesDeepLink(
     if (conversations.some((c) => c.id === thread)) {
       return { kind: "thread", threadId: thread };
     }
-    // Unknown thread id — treat like a missing request deep-link.
-    return { kind: "request-missing", requestId: thread };
+    return { kind: "not-found", requestId: thread };
   }
   const request = params.get("request");
-  if (request) {
+  if (request != null && request.trim() !== "") {
     const match = findMockThreadForRequest(conversations, request);
-    if (match) return { kind: "request", requestId: request, threadId: match.id };
-    return { kind: "request-missing", requestId: request };
+    if (match) {
+      return {
+        kind: "request",
+        requestId: request.trim(),
+        threadId: match.id,
+        synthetic: false,
+      };
+    }
+    // Always open a conversation for the PK Requests put in the URL.
+    return {
+      kind: "request",
+      requestId: request.trim(),
+      threadId: syntheticRequestThreadId(request.trim()),
+      synthetic: true,
+    };
+  }
+  if (request != null) {
+    return { kind: "not-found", requestId: "" };
   }
   return { kind: "none" };
 }
