@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -19,6 +19,8 @@ export function MessageComposer({
   onVisibilityChange,
   onSend,
   className,
+  /** Active conversation id — draft clears whenever this changes (thread switch / deep-link). */
+  resetKey = null,
 }: {
   disabled?: boolean;
   placeholder?: string;
@@ -28,9 +30,15 @@ export function MessageComposer({
   onVisibilityChange?: (v: CommentVisibility) => void;
   onSend?: (body: string, visibility: CommentVisibility) => Promise<void> | void;
   className?: string;
+  resetKey?: string | number | null;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setValue("");
+    setBusy(false);
+  }, [resetKey]);
 
   async function submit() {
     const body = value.trim();
@@ -61,6 +69,7 @@ export function MessageComposer({
           disabled={disabled || busy}
           rows={2}
           className="min-h-11 min-w-0 flex-1 resize-none rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+          aria-label={placeholder}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -71,7 +80,7 @@ export function MessageComposer({
         <Button
           type="button"
           size="lg"
-          className="min-h-11 min-w-16 px-3.5"
+          className="min-h-11 min-w-16 rounded-md px-3.5"
           disabled={disabled || busy || !value.trim()}
           onClick={() => void submit()}
         >
