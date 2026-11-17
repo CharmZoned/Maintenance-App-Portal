@@ -73,7 +73,8 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
   const [home, setHome] = useState<TenantHomeContext | null>(null);
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [docCount, setDocCount] = useState(0);
-  const [rent, setRent] = useState<RentSummary>(RENT_UNAVAILABLE);
+  const [rent, setRent] = useState<RentSummary | null>(null);
+  const [rentLoading, setRentLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
@@ -84,7 +85,8 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
     (async () => {
       setLoading(true);
       setLoadError(null);
-      setRent(RENT_UNAVAILABLE);
+      setRent(null);
+      setRentLoading(false);
       try {
         const [ctx, woList] = await Promise.all([
           getTenantHomeContext(),
@@ -103,20 +105,27 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
 
         // Rent is loaded separately so a ledger failure does not blank Home.
         if (ctx?.tenant_id != null) {
+          if (!cancelled) setRentLoading(true);
           void (async () => {
             try {
               const charges = await listChargesForTenantLeases(ctx.tenant_id);
               if (!cancelled) setRent(summarizeRent(charges));
             } catch {
               if (!cancelled) setRent(RENT_UNAVAILABLE);
+            } finally {
+              if (!cancelled) setRentLoading(false);
             }
           })();
+        } else if (!cancelled) {
+          setRent(RENT_UNAVAILABLE);
+          setRentLoading(false);
         }
       } catch (err) {
         if (!cancelled) {
           const message = (err as Error).message;
           setLoadError(message);
           setError(message);
+          setRentLoading(false);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -221,6 +230,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
               <div className="grid gap-6 md:grid-cols-2 lg:hidden">
                 <RentCard
                   rent={rent}
+                  loading={rentLoading}
                   onPay={() => navigate("/payments")}
                   onLedger={() => navigate("/payments/ledger")}
                 />
@@ -250,6 +260,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
             <aside className="hidden space-y-6 lg:block">
               <RentCard
                 rent={rent}
+                loading={rentLoading}
                 onPay={() => navigate("/payments")}
                 onLedger={() => navigate("/payments/ledger")}
               />
@@ -326,32 +337,50 @@ function PropertyCard({
 
 function RentCard({
   rent,
+  loading,
   onPay,
   onLedger,
 }: {
-  rent: RentSummary;
+  rent: RentSummary | null;
+  loading: boolean;
   onPay: () => void;
   onLedger: () => void;
 }) {
+  const summary = rent ?? RENT_UNAVAILABLE;
   return (
-    <section className="flex flex-col rounded-lg border border-border bg-card px-5 py-5">
+    <section
+      className="flex flex-col rounded-lg border border-border bg-card px-5 py-5"
+      aria-busy={loading || undefined}
+      aria-label={loading ? "Loading rent summary" : undefined}
+    >
       <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
         Rent &amp; payments
       </h3>
-      <p className="mt-2 text-2xl font-semibold leading-8 text-foreground">{rent.balanceLabel}</p>
-      <dl className="mt-3 space-y-1">
-        <div className="flex justify-between gap-3 text-sm leading-[1.375rem]">
-          <dt className="text-muted-foreground">Due date</dt>
-          <dd className="font-medium text-foreground">{rent.dueLabel}</dd>
+      {loading ? (
+        <div className="mt-3 space-y-3">
+          <SkeletonRow />
+          <SkeletonRow />
         </div>
-        <div className="flex justify-between gap-3 text-sm leading-[1.375rem]">
-          <dt className="text-muted-foreground">Payment status</dt>
-          <dd className="font-medium text-foreground">
-            {/* TODO(data-gap): No Stripe/Plaid/Zelle processors — ledger status when charges exist. */}
-            {rent.hasCharges ? rent.statusLabel : "Not connected"}
-          </dd>
-        </div>
-      </dl>
+      ) : (
+        <>
+          <p className="mt-2 text-2xl font-semibold leading-8 text-foreground">
+            {summary.balanceLabel}
+          </p>
+          <dl className="mt-3 space-y-1">
+            <div className="flex justify-between gap-3 text-sm leading-[1.375rem]">
+              <dt className="text-muted-foreground">Due date</dt>
+              <dd className="font-medium text-foreground">{summary.dueLabel}</dd>
+            </div>
+            <div className="flex justify-between gap-3 text-sm leading-[1.375rem]">
+              <dt className="text-muted-foreground">Payment status</dt>
+              <dd className="font-medium text-foreground">
+                {/* TODO(data-gap): No Stripe/Plaid/Zelle processors — ledger status when charges exist. */}
+                {summary.hasCharges ? summary.statusLabel : "Not connected"}
+              </dd>
+            </div>
+          </dl>
+        </>
+      )}
       <div className="mt-4 flex gap-2">
         <Button variant="brand" className="h-11 min-h-11 flex-1" onClick={onPay}>
           Pay rent · preview
