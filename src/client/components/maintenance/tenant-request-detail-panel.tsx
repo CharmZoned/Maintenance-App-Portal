@@ -196,12 +196,17 @@ export function TenantRequestDetailPanel({
       )}
 
       <div className="mt-auto pt-6">
-        {/* Messages / request conversation is mocked elsewhere — link only. */}
+        {/*
+          TODO(data-gap): no messages↔WO join yet.
+          Tenant Messages (#74) only deep-links `?thread=` with mock ids
+          (`mock:wo-1842`, …). Do not pass `?request=` — it won’t select a
+          thread. Open the inbox stub until a real conversation id exists.
+        */}
         <Button
           type="button"
           variant="secondary"
           className="h-11 w-full min-h-11 text-sm text-brand-text"
-          onClick={() => navigate(`/messages?request=${order.id}`)}
+          onClick={() => navigate("/messages")}
         >
           Open request conversation
         </Button>
