@@ -401,7 +401,7 @@ BEGIN
   END IF;
 
   IF p_amount_cents IS NOT NULL THEN
-    expected_cents := round(intent.amount * 100)::
+    expected_cents := round(intent.amount * 100)::bigint;
     IF p_amount_cents IS DISTINCT FROM expected_cents THEN
       UPDATE public."PaymentProcessorEvents"
       SET processing_error = 'amount mismatch',
