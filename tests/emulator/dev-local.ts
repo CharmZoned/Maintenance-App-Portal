@@ -17,10 +17,16 @@ console.log(`\nDemo logins — password for all: ${PASSWORD}`);
 for (const p of Object.values(PERSONAS)) console.log(`  ${p.email.padEnd(24)} ${p.label}`);
 console.log(`\nEmails the app "sends" (sign-up / reset links): ${emulator.url}/__emulator/outbox\n`);
 
-const vite = spawn("pnpm", ["exec", "vite", "--port", String(DEV_APP_PORT), "--strictPort"], {
-  stdio: "inherit",
-  env: { ...process.env, VITE_SUPABASE_URL: emulator.url, VITE_SUPABASE_ANON_KEY: ANON_KEY },
-});
+// Bind IPv4 explicitly — default "localhost" can be ::1-only here, so
+  // http://127.0.0.1:<port> (and some browser / proxy paths) refuse to connect.
+  const vite = spawn(
+    "pnpm",
+    ["exec", "vite", "--host", "127.0.0.1", "--port", String(DEV_APP_PORT), "--strictPort"],
+    {
+      stdio: "inherit",
+      env: { ...process.env, VITE_SUPABASE_URL: emulator.url, VITE_SUPABASE_ANON_KEY: ANON_KEY },
+    },
+  );
 
 const stop = () => {
   vite.kill();
