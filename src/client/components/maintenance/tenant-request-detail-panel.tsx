@@ -197,16 +197,14 @@ export function TenantRequestDetailPanel({
 
       <div className="mt-auto pt-6">
         {/*
-          TODO(data-gap): no messages↔WO join yet.
-          Tenant Messages (#74) only deep-links `?thread=` with mock ids
-          (`mock:wo-1842`, …). Do not pass `?request=` — it won’t select a
-          thread. Open the inbox stub until a real conversation id exists.
+          TODO(data-gap): full messages↔WO join still needs the messages backend.
+          Messages accepts `?request=` (demo WO id map / soft-open for unknowns).
         */}
         <Button
           type="button"
           variant="secondary"
           className="h-11 w-full min-h-11 text-sm text-brand-text"
-          onClick={() => navigate("/messages")}
+          onClick={() => navigate(`/messages?request=${order.id}`)}
         >
           Open request conversation
         </Button>
