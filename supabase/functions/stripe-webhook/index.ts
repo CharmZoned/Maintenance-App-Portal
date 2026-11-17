@@ -1,6 +1,7 @@
 /**
  * LD-27: Stripe webhook → PaymentProcessorEvents (+ settle on success).
  * Without STRIPE_WEBHOOK_SECRET, rejects (safe no-op deploy).
+ * Settle failures return non-2xx so Stripe retries.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -37,8 +38,6 @@ Deno.serve(async (req) => {
 
   const payload = await req.text();
   const sigHeader = req.headers.get("stripe-signature") ?? "";
-  // Lightweight verification: require v1 signature match for timestamped payload.
-  // Production should use Stripe's official tolerance window; this blocks unsigned posts.
   const parts = Object.fromEntries(
     sigHeader.split(",").map((p) => {
       const [k, v] = p.split("=");
@@ -65,6 +64,12 @@ Deno.serve(async (req) => {
   const intentId = meta.payment_intent_id
     ? Number(meta.payment_intent_id)
     : null;
+  const processorPaymentId = typeof obj.id === "string" ? obj.id : null;
+  const amountCents = typeof obj.amount_received === "number"
+    ? obj.amount_received
+    : typeof obj.amount === "number"
+    ? obj.amount
+    : null;
   const settle = event.type === "payment_intent.succeeded";
 
   const supabase = createClient(
@@ -81,7 +86,9 @@ Deno.serve(async (req) => {
       p_payload: event,
       p_intent_id: intentId,
       p_settle: settle,
-      p_reference: typeof obj.id === "string" ? obj.id : null,
+      p_reference: processorPaymentId,
+      p_processor_payment_id: processorPaymentId,
+      p_amount_cents: amountCents,
     },
   );
 
@@ -90,6 +97,22 @@ Deno.serve(async (req) => {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Extra guard: settle events must end processed without error.
+  if (
+    settle &&
+    data &&
+    (data as { processed_at?: string | null; processing_error?: string | null })
+          .processed_at == null
+  ) {
+    return new Response(
+      JSON.stringify({
+        error: (data as { processing_error?: string }).processing_error ??
+          "settle did not complete",
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   return new Response(JSON.stringify({ ok: true, event: data }), {

@@ -525,6 +525,7 @@ export interface Database {
           category: string;
           uploaded_by_user_id: string | null;
           uploaded_by_role: AppRole | null;
+          uploaded_by_tenant_id: number | null;
           notes: string | null;
           is_test_data: boolean;
         };
@@ -542,6 +543,7 @@ export interface Database {
           category?: string;
           uploaded_by_user_id?: string | null;
           uploaded_by_role?: AppRole | null;
+          uploaded_by_tenant_id?: number | null;
           notes?: string | null;
           is_test_data?: boolean;
         };
@@ -726,6 +728,15 @@ export interface Database {
           p_notes?: string | null;
         };
         Returns: Database["public"]["Tables"]["PropertyDocuments"]["Row"];
+      };
+      register_payment_receipt: {
+        Args: {
+          p_payment_id: number;
+          p_file_name?: string;
+          p_content_type?: string;
+          p_byte_size?: number | null;
+        };
+        Returns: Database["public"]["Tables"]["PaymentReceipts"]["Row"];
       };
       list_user_accounts_for_admin: {
         Args: Record<string, never>;

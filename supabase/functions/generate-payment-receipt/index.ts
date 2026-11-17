@@ -1,6 +1,7 @@
 /**
- * LD-30 stub: register PaymentReceipts metadata for a settled payment.
- * Does not generate a real PDF yet — creates a placeholder path for later upload.
+ * LD-30: register PaymentReceipts metadata for a settled payment.
+ * Uses the caller JWT + register_payment_receipt RPC (can_select + staff/admin).
+ * Does not generate a real PDF yet.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -24,7 +25,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { payment_id } = await req.json() as { payment_id?: number };
+    const { payment_id, file_name, content_type, byte_size } = await req.json() as {
+      payment_id?: number;
+      file_name?: string;
+      content_type?: string;
+      byte_size?: number | null;
+    };
     if (!payment_id) {
       return new Response(JSON.stringify({ error: "payment_id required" }), {
         status: 400,
@@ -34,25 +40,16 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
     );
 
-    const storagePath = `receipts/${payment_id}/receipt.pdf`;
-    const { data, error } = await supabase
-      .from("PaymentReceipts")
-      .upsert(
-        {
-          payment_id,
-          storage_path: storagePath,
-          file_name: "receipt.pdf",
-          content_type: "application/pdf",
-          byte_size: null,
-        },
-        { onConflict: "payment_id" },
-      )
-      .select()
-      .single();
-
+    const { data, error } = await supabase.rpc("register_payment_receipt", {
+      p_payment_id: payment_id,
+      p_file_name: file_name ?? "receipt.pdf",
+      p_content_type: content_type ?? "application/pdf",
+      p_byte_size: byte_size ?? null,
+    });
     if (error) throw error;
 
     return new Response(

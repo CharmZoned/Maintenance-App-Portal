@@ -1,7 +1,6 @@
 /**
  * LD-27: Create / attach a tenant payment intent.
- * Always calls initiate_tenant_payment (or attaches processor id).
- * Stripe PI creation runs only when STRIPE_SECRET_KEY is set.
+ * Stripe PI is created once; retries retrieve the existing client_secret.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
@@ -64,8 +63,28 @@ Deno.serve(async (req) => {
       intent = data;
     }
 
+    // Only the owning tenant may create/attach Stripe PaymentIntents.
+    const { data: roleRow, error: roleErr } = await userClient
+      .from("user_roles")
+      .select("tenant_id, role, account_status")
+      .eq("user_id", (await userClient.auth.getUser()).data.user?.id ?? "")
+      .maybeSingle();
+    if (roleErr) throw roleErr;
+    if (
+      roleRow?.role !== "tenant" ||
+      roleRow?.account_status !== "approved" ||
+      roleRow?.tenant_id == null ||
+      Number(roleRow.tenant_id) !== Number(intent?.tenant_id)
+    ) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
+
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
     const method = String(intent?.method ?? body.method ?? "");
+    const status = String(intent?.status ?? "");
 
     if (!stripeKey || method === "zelle") {
       return new Response(
@@ -81,7 +100,42 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Minimal PaymentIntent create — amount in cents.
+    const existingProcessorId = intent?.processor_payment_id
+      ? String(intent.processor_payment_id)
+      : "";
+
+    // Retry path: retrieve existing Stripe PI — never create a second charge.
+    if (existingProcessorId) {
+      const stripeRes = await fetch(
+        `https://api.stripe.com/v1/payment_intents/${existingProcessorId}`,
+        {
+          headers: { Authorization: `Bearer ${stripeKey}` },
+        },
+      );
+      const stripeJson = await stripeRes.json();
+      if (!stripeRes.ok) {
+        throw new Error(stripeJson?.error?.message ?? "Stripe retrieve failed");
+      }
+      return new Response(
+        JSON.stringify({
+          intent,
+          processor_ready: true,
+          client_secret: stripeJson.client_secret ?? null,
+          reused: true,
+        }),
+        { headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (status !== "pending") {
+      return new Response(
+        JSON.stringify({
+          error: `Cannot create Stripe PaymentIntent from status ${status}`,
+        }),
+        { status: 400, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+
     const amountCents = Math.round(Number(intent!.amount) * 100);
     const stripeRes = await fetch("https://api.stripe.com/v1/payment_intents", {
       method: "POST",
@@ -118,6 +172,7 @@ Deno.serve(async (req) => {
         intent: attached,
         processor_ready: true,
         client_secret: stripeJson.client_secret ?? null,
+        reused: false,
       }),
       { headers: { ...cors, "Content-Type": "application/json" } },
     );
