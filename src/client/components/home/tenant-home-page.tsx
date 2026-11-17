@@ -4,9 +4,13 @@ import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/page-shell";
 import { ErrorRetry, SkeletonRow } from "@/components/patterns";
 import { TenantSubmitDialog } from "@/components/maintenance/tenant-submit-dialog";
+import {
+  countPropertyDocuments,
+  listChargesForTenantLeases,
+} from "@/lib/data";
 import { isOpenRequest, unitPropertyLabel } from "@/lib/request-status";
-import { cn, formatDate, formatMoney } from "@/lib/utils";
-import type { PropertyDocument, RentCharge, TenantHomeContext, WorkOrder } from "@/types";
+import { cn, formatDate, formatMoney, toIsoDate } from "@/lib/utils";
+import type { RentCharge, TenantHomeContext, WorkOrder } from "@/types";
 import illustrativePhoto from "@/assets/tenant-home-illustrative.jpg";
 
 type RentSummary = {
@@ -16,19 +20,17 @@ type RentSummary = {
   hasCharges: boolean;
 };
 
+const RENT_UNAVAILABLE: RentSummary = {
+  balanceLabel: "Balance unavailable",
+  dueLabel: "Not available",
+  statusLabel: "Not connected",
+  hasCharges: false,
+};
+
 function summarizeRent(charges: RentCharge[]): RentSummary {
-  const open = charges.filter(
-    (c) => c.status !== "paid" && c.status !== "waived",
-  );
+  const open = charges.filter((c) => c.status !== "paid" && c.status !== "waived");
   if (open.length === 0) {
-    if (charges.length === 0) {
-      return {
-        balanceLabel: "Balance unavailable",
-        dueLabel: "Not available",
-        statusLabel: "Not connected",
-        hasCharges: false,
-      };
-    }
+    if (charges.length === 0) return RENT_UNAVAILABLE;
     return {
       balanceLabel: formatMoney(0),
       dueLabel: "—",
@@ -37,6 +39,7 @@ function summarizeRent(charges: RentCharge[]): RentSummary {
     };
   }
 
+  const today = toIsoDate(new Date());
   const balance = open.reduce(
     (sum, c) => sum + Math.max(0, (c.amount ?? 0) - (c.amount_paid ?? 0)),
     0,
@@ -45,11 +48,11 @@ function summarizeRent(charges: RentCharge[]): RentSummary {
     .map((c) => c.due_date)
     .filter(Boolean)
     .sort()[0];
-  const overdue = open.some(
-    (c) =>
-      c.status === "overdue" ||
-      (c.due_date && c.due_date < new Date().toISOString().slice(0, 10)),
-  );
+  const overdue = open.some((c) => {
+    const remaining = (c.amount ?? 0) - (c.amount_paid ?? 0);
+    if (remaining <= 0) return false;
+    return c.status === "overdue" || (Boolean(c.due_date) && c.due_date < today);
+  });
   const partial = open.some((c) => c.status === "partial" || (c.amount_paid ?? 0) > 0);
 
   return {
@@ -62,21 +65,15 @@ function summarizeRent(charges: RentCharge[]): RentSummary {
 
 /**
  * Tenant Home — Figma triad Mobile `2024:1576` · Tablet `2024:1509` · Desktop `2017:2`.
- * Live: unit/property/address, open WO count, documents summary, rent from RentCharges.
- * Mocked with TODO(data-gap): messages, support contact, property manager, pay processors.
+ * Live: unit/property/address, open WO count, documents summary, rent from scoped RentCharges.
+ * Mocked with TODO(data-gap): messages inbox, support contact, property manager, pay processors.
  */
 export function TenantHomePage({ navigate }: { navigate: (to: string) => void }) {
-  const {
-    getTenantHomeContext,
-    listWorkOrders,
-    listPropertyDocuments,
-    listCharges,
-    setError,
-  } = useApp();
+  const { getTenantHomeContext, listWorkOrders, setError } = useApp();
   const [home, setHome] = useState<TenantHomeContext | null>(null);
   const [orders, setOrders] = useState<WorkOrder[]>([]);
-  const [docs, setDocs] = useState<PropertyDocument[]>([]);
-  const [charges, setCharges] = useState<RentCharge[]>([]);
+  const [docCount, setDocCount] = useState(0);
+  const [rent, setRent] = useState<RentSummary>(RENT_UNAVAILABLE);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
@@ -87,24 +84,33 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
     (async () => {
       setLoading(true);
       setLoadError(null);
+      setRent(RENT_UNAVAILABLE);
       try {
-        const [ctx, woList, chargeList] = await Promise.all([
+        const [ctx, woList] = await Promise.all([
           getTenantHomeContext(),
           listWorkOrders({ open_only: true, skip_staff_notes: true }),
-          listCharges(),
         ]);
         if (cancelled) return;
         setHome(ctx);
         setOrders(woList);
-        setCharges(chargeList);
+
         if (ctx?.property_id == null) {
-          setDocs([]);
+          setDocCount(0);
         } else {
-          const docList = await listPropertyDocuments({
-            property_id: ctx.property_id,
-            limit: 3,
-          });
-          if (!cancelled) setDocs(docList);
+          const count = await countPropertyDocuments(ctx.property_id);
+          if (!cancelled) setDocCount(count);
+        }
+
+        // Rent is loaded separately so a ledger failure does not blank Home.
+        if (ctx?.tenant_id != null) {
+          void (async () => {
+            try {
+              const charges = await listChargesForTenantLeases(ctx.tenant_id);
+              if (!cancelled) setRent(summarizeRent(charges));
+            } catch {
+              if (!cancelled) setRent(RENT_UNAVAILABLE);
+            }
+          })();
         }
       } catch (err) {
         if (!cancelled) {
@@ -119,14 +125,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
     return () => {
       cancelled = true;
     };
-  }, [
-    getTenantHomeContext,
-    listWorkOrders,
-    listPropertyDocuments,
-    listCharges,
-    setError,
-    reloadKey,
-  ]);
+  }, [getTenantHomeContext, listWorkOrders, setError, reloadKey]);
 
   const placeLabel = useMemo(
     () => unitPropertyLabel(home?.unit_label, home?.property_name),
@@ -135,21 +134,23 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
   const propertyName = home?.property_name?.trim() || "Your home";
   const unitLabel = home?.unit_label?.trim() || null;
   const openCount = useMemo(() => orders.filter(isOpenRequest).length, [orders]);
-  const rent = useMemo(() => summarizeRent(charges), [charges]);
   const hasUnit = home?.unit_id != null;
-  const docCount = docs.length;
 
-  // TODO(data-gap): No messages tables — mock empty inbox until messages migration.
-  const messagesSummary = "No new messages. Your conversations stay here.";
+  // TODO(data-gap): No messages tables — preview via open request threads only.
+  const messagesSummary =
+    openCount === 0
+      ? "Request conversations preview · no open requests yet."
+      : openCount === 1
+        ? "Request conversations preview · 1 open request thread."
+        : `Request conversations preview · ${openCount} open request threads.`;
 
   // TODO(data-gap): No dedicated support-contact field — mock until Settings/staff proposal.
   const supportConfigured = false;
 
-  // TODO(data-gap): Property manager not in home context join — mock until landlord/staff helper wired.
-  const propertyManagerLabel = "Name and contact not provided";
+  // TODO(data-gap): Property manager not in home context join — unwired, not blank contact fields.
+  const propertyManagerLabel = "Manager contact is not available in the portal yet.";
 
-  const addressLabel =
-    home?.property_address?.trim() || "Address not provided";
+  const addressLabel = home?.property_address?.trim() || "Address not provided";
 
   const welcomeSub =
     hasUnit && home?.property_name
@@ -199,7 +200,6 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
               Welcome home.
             </h2>
             <p className="text-sm leading-[1.375rem] text-muted-foreground">
-              {/* Desktop copy differs slightly from tablet/mobile in Figma. */}
               <span className="lg:hidden">
                 {welcomeSub ?? `Life at ${propertyName}, made simple.`}
               </span>
@@ -209,12 +209,6 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
             </p>
           </header>
 
-          {/*
-            Layout triad:
-            - Mobile: single column
-            - Tablet (md): property full; rent | maintenance; updates; support
-            - Desktop (lg): main (property + updates) | aside (rent, maintenance, support)
-          */}
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] lg:items-start">
             <div className="space-y-6">
               <PropertyCard
@@ -295,11 +289,7 @@ function PropertyCard({
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <div className="relative aspect-[1376/768] max-h-60 w-full overflow-hidden bg-muted md:max-h-[14.75rem]">
-        <img
-          src={illustrativePhoto}
-          alt=""
-          className="size-full object-cover"
-        />
+        <img src={illustrativePhoto} alt="" className="size-full object-cover" />
         <div className="absolute bottom-3 left-3 rounded-sm bg-card px-2.5 py-1.5">
           <p className="text-xs leading-[1.125rem] text-foreground">
             Illustrative photo · actual photo needed
@@ -357,7 +347,7 @@ function RentCard({
         <div className="flex justify-between gap-3 text-sm leading-[1.375rem]">
           <dt className="text-muted-foreground">Payment status</dt>
           <dd className="font-medium text-foreground">
-            {/* TODO(data-gap): No Stripe/Plaid/Zelle processors — ledger status when charges exist; otherwise "Not connected". */}
+            {/* TODO(data-gap): No Stripe/Plaid/Zelle processors — ledger status when charges exist. */}
             {rent.hasCharges ? rent.statusLabel : "Not connected"}
           </dd>
         </div>

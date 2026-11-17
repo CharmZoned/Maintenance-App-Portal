@@ -1614,11 +1614,12 @@ export async function getTenantHomeContext(): Promise<TenantHomeContext | null> 
   let propertyName: string | null = null;
   let propertyAddress: string | null = null;
   if (unit.property_id != null) {
-    const { data: prop } = await supabase
+    const { data: prop, error: propErr } = await supabase
       .from("Properties")
       .select("id, property_name, street_address, city, state, zip")
       .eq("id", unit.property_id)
       .maybeSingle();
+    if (propErr) throwSb(propErr);
     propertyName = prop?.property_name ?? null;
     propertyAddress = formatPropertyAddress(prop);
   }
@@ -1631,6 +1632,68 @@ export async function getTenantHomeContext(): Promise<TenantHomeContext | null> 
     property_name: propertyName,
     property_address: propertyAddress,
   };
+}
+
+/**
+ * RentCharges for the signed-in tenant’s own leases only (primary or LeaseTenants),
+ * preferring active leases. Used by Tenant Home so unit-mate / prior-lease charges
+ * are not rolled into “your” balance.
+ */
+export async function listChargesForTenantLeases(tenantId: number): Promise<RentCharge[]> {
+  const { data: primaryRows, error: primaryErr } = await supabase
+    .from("Leases")
+    .select("id, status")
+    .eq("primary_tenant_id", tenantId);
+  if (primaryErr) throwSb(primaryErr);
+
+  const { data: memberRows, error: memberErr } = await supabase
+    .from("LeaseTenants")
+    .select("lease_id")
+    .eq("tenant_id", tenantId);
+  if (memberErr) throwSb(memberErr);
+
+  const idSet = new Set<number>();
+  const statusById = new Map<number, string>();
+  for (const row of primaryRows ?? []) {
+    idSet.add(row.id);
+    statusById.set(row.id, row.status);
+  }
+  for (const row of memberRows ?? []) idSet.add(row.lease_id);
+
+  if (idSet.size === 0) return [];
+
+  const missingStatus = [...idSet].filter((id) => !statusById.has(id));
+  if (missingStatus.length > 0) {
+    const { data: extra, error: extraErr } = await supabase
+      .from("Leases")
+      .select("id, status")
+      .in("id", missingStatus);
+    if (extraErr) throwSb(extraErr);
+    for (const row of extra ?? []) statusById.set(row.id, row.status);
+  }
+
+  const activeIds = [...idSet].filter((id) => statusById.get(id) === "active");
+  const leaseIds = activeIds.length > 0 ? activeIds : [...idSet];
+
+  const rows = await selectAllPages<Tables<"RentCharges">>((from, to) =>
+    supabase
+      .from("RentCharges")
+      .select("*")
+      .in("lease_id", leaseIds)
+      .order("due_date", { ascending: false })
+      .range(from, to),
+  );
+  return rows.map((row) => mapCharge(row));
+}
+
+/** Exact count of tenant-visible property documents (for Home summary copy). */
+export async function countPropertyDocuments(propertyId: number): Promise<number> {
+  const { count, error } = await supabase
+    .from("PropertyDocuments")
+    .select("*", { count: "exact", head: true })
+    .eq("property_id", propertyId);
+  if (error) throwSb(error);
+  return count ?? 0;
 }
 
 export async function deleteWorkOrder(id: number): Promise<void> {
