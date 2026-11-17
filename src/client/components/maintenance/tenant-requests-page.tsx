@@ -448,10 +448,10 @@ export function TenantRequestsPage({
 
       <TenantSubmitDialog
         open={submitOpen}
-        onOpenChange={(o) => {
+        onOpenChange={(o, meta) => {
           setSubmitOpen(o);
           if (!o) {
-            if (skipCloseReloadRef.current) {
+            if (meta?.skipReload || skipCloseReloadRef.current) {
               skipCloseReloadRef.current = false;
               return;
             }

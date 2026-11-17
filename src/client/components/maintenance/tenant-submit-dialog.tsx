@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ErrorRetry } from "@/components/patterns";
 import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceCategory,
@@ -37,9 +38,20 @@ const PRIORITY_TO_DB: Record<UiPriority, WorkOrderPriority> = {
   emergency: "urgent",
 };
 
+const DEFAULT_CATEGORY: MaintenanceCategory = "General repair";
+const DEFAULT_PRIORITY: UiPriority = "normal";
+const DEFAULT_PERMISSION: PermissionChoice = "no";
+
+function isAbortError(err: unknown): boolean {
+  return (
+    (err instanceof DOMException && err.name === "AbortError") ||
+    (err instanceof Error && err.name === "AbortError")
+  );
+}
+
 interface Props {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (open: boolean, meta?: { skipReload?: boolean }) => void;
   /** Receives the created request so callers can select it immediately. */
   onSaved?: (created: WorkOrder) => void | Promise<void>;
 }
@@ -57,19 +69,24 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
   const uploadMaintenancePhoto = app.uploadMaintenancePhoto;
 
   const [home, setHome] = useState<TenantHomeContext | null>(null);
-  const [homeReady, setHomeReady] = useState(false);
+  const [homeStatus, setHomeStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+  const [homeError, setHomeError] = useState<string | null>(null);
+  const [homeRetryKey, setHomeRetryKey] = useState(0);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<MaintenanceCategory | "">("");
-  const [priority, setPriority] = useState<UiPriority | null>(null);
-  const [permission, setPermission] = useState<PermissionChoice | "">("");
+  const [category, setCategory] = useState<MaintenanceCategory>(DEFAULT_CATEGORY);
+  const [priority, setPriority] = useState<UiPriority>(DEFAULT_PRIORITY);
+  const [permission, setPermission] =
+    useState<PermissionChoice>(DEFAULT_PERMISSION);
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
 
   const openRef = useRef(open);
   openRef.current = open;
   const savingRef = useRef(false);
-  const submitGenerationRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const previews = useMemo(
     () => files.map((f) => ({ file: f, url: URL.createObjectURL(f) })),
@@ -87,50 +104,59 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
     if (!open) return;
     setTitle("");
     setDescription("");
-    setCategory("");
-    setPriority(null);
-    setPermission("");
+    setCategory(DEFAULT_CATEGORY);
+    setPriority(DEFAULT_PRIORITY);
+    setPermission(DEFAULT_PERMISSION);
     setFiles([]);
     setHome(null);
-    setHomeReady(false);
-    setSaving(false);
-    savingRef.current = false;
+    setHomeStatus("loading");
+    setHomeError(null);
+    // Do not clear savingRef here if a prior abort is still finishing.
+    if (!savingRef.current) setSaving(false);
     let cancelled = false;
     (async () => {
       try {
         const ctx = await getTenantHomeContext();
         if (cancelled || !openRef.current) return;
+        if (ctx == null) {
+          setHome(null);
+          setHomeError("Couldn’t load your unit. Try again.");
+          setHomeStatus("error");
+          return;
+        }
         setHome(ctx);
+        setHomeError(null);
+        setHomeStatus("ready");
       } catch (err) {
-        if (!cancelled && openRef.current) setError((err as Error).message);
-      } finally {
-        if (!cancelled && openRef.current) setHomeReady(true);
+        if (!cancelled && openRef.current) {
+          setHome(null);
+          setHomeError((err as Error).message || "Couldn’t load your unit.");
+          setHomeStatus("error");
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, getTenantHomeContext, setError]);
+  }, [open, homeRetryKey, getTenantHomeContext]);
 
-  const homeLabel = !homeReady
-    ? "Loading unit…"
-    : home
-      ? [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name]
-          .filter(Boolean)
-          .join(" · ") || "Your unit"
-      : "Your unit";
+  const homeLabel =
+    homeStatus === "loading"
+      ? "Loading unit…"
+      : home
+        ? [home.unit_label ? `Unit ${home.unit_label}` : null, home.property_name]
+            .filter(Boolean)
+            .join(" · ") || "Your unit"
+        : "Your unit";
 
-  const noUnit = homeReady && home != null && home.unit_id == null;
+  const noUnit = homeStatus === "ready" && home != null && home.unit_id == null;
+  const contextReady = homeStatus === "ready" && home?.unit_id != null;
+  const fieldsDisabled = homeStatus !== "ready" || noUnit || saving;
   const canSubmit =
-    homeReady &&
+    contextReady &&
     !saving &&
-    !noUnit &&
-    home?.unit_id != null &&
     Boolean(title.trim()) &&
-    Boolean(description.trim()) &&
-    category !== "" &&
-    priority != null &&
-    permission !== "";
+    Boolean(description.trim());
 
   function addFiles(list: FileList | null) {
     if (!list) return;
@@ -142,37 +168,30 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
   }
 
   function requestClose() {
-    // Bump generation so an in-flight submit ignores its result.
-    submitGenerationRef.current += 1;
-    savingRef.current = false;
-    setSaving(false);
-    onOpenChange(false);
+    const wasSaving = savingRef.current;
+    abortRef.current?.abort();
+    // Keep savingRef set until save()'s finally runs so a reopen cannot double-submit.
+    onOpenChange(false, { skipReload: wasSaving });
   }
 
   async function save() {
     if (!canSubmit || savingRef.current) return;
-    const selectedCategory = category;
-    const selectedPriority = priority;
-    const selectedPermission = permission;
-    if (
-      !selectedCategory ||
-      selectedPriority == null ||
-      !selectedPermission
-    ) {
-      return;
-    }
     savingRef.current = true;
     setSaving(true);
-    const generation = submitGenerationRef.current;
+    const ac = new AbortController();
+    abortRef.current = ac;
     try {
-      const created = await submitTenantRequest({
-        title: title.trim(),
-        description: description.trim(),
-        category: selectedCategory,
-        permission_to_enter: selectedPermission === "yes",
-        priority: PRIORITY_TO_DB[selectedPriority],
-      });
-      if (generation !== submitGenerationRef.current || !openRef.current) return;
+      const created = await submitTenantRequest(
+        {
+          title: title.trim(),
+          description: description.trim(),
+          category,
+          permission_to_enter: permission === "yes",
+          priority: PRIORITY_TO_DB[priority],
+        },
+        { signal: ac.signal },
+      );
+      ac.signal.throwIfAborted();
 
       let photoFail = false;
       if (files.length) {
@@ -180,16 +199,19 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
           await Promise.all(
             files
               .slice(0, MAX_MAINTENANCE_PHOTOS)
-              .map((file) => uploadMaintenancePhoto(created.id, file)),
+              .map((file) =>
+                uploadMaintenancePhoto(created.id, file, undefined, {
+                  signal: ac.signal,
+                }),
+              ),
           );
         } catch (photoErr) {
+          if (isAbortError(photoErr) || ac.signal.aborted) throw photoErr;
           photoFail = true;
-          if (generation === submitGenerationRef.current && openRef.current) {
-            setError((photoErr as Error).message);
-          }
+          if (openRef.current) setError((photoErr as Error).message);
         }
       }
-      if (generation !== submitGenerationRef.current || !openRef.current) return;
+      ac.signal.throwIfAborted();
 
       setNotice(
         photoFail
@@ -199,17 +221,17 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             : "Request submitted. Staff will update status in the portal.",
       );
       await onSaved?.(created);
-      if (generation !== submitGenerationRef.current || !openRef.current) return;
-      onOpenChange(false);
+      if (!ac.signal.aborted && openRef.current) onOpenChange(false);
     } catch (err) {
-      if (generation === submitGenerationRef.current && openRef.current) {
-        setError((err as Error).message);
+      if (isAbortError(err) || ac.signal.aborted) {
+        // Dismissed mid-submit — do not toast; skipReload already set.
+        return;
       }
+      if (openRef.current) setError((err as Error).message);
     } finally {
-      if (generation === submitGenerationRef.current) {
-        savingRef.current = false;
-        setSaving(false);
-      }
+      if (abortRef.current === ac) abortRef.current = null;
+      savingRef.current = false;
+      setSaving(false);
     }
   }
 
@@ -241,6 +263,13 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             </DialogDescription>
           </div>
 
+          {homeStatus === "error" ? (
+            <ErrorRetry
+              message={homeError || "Couldn’t load your unit."}
+              onRetry={() => setHomeRetryKey((k) => k + 1)}
+            />
+          ) : null}
+
           {noUnit ? (
             <p className="text-sm text-destructive">
               Your account isn’t linked to a unit yet. Ask staff to assign a unit
@@ -258,7 +287,9 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Kitchen tap dripping"
-              disabled={!homeReady || noUnit}
+              disabled={fieldsDisabled}
+              aria-required="true"
+              required
             />
           </div>
 
@@ -267,12 +298,16 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               Category <span aria-hidden>*</span>
             </Label>
             <Select
-              value={category || undefined}
+              value={category}
               onValueChange={(v) => setCategory(v as MaintenanceCategory)}
-              disabled={!homeReady || noUnit}
+              disabled={fieldsDisabled}
             >
-              <SelectTrigger id="tenant-category" className="h-12 min-h-11 w-full">
-                <SelectValue placeholder="Select a category" />
+              <SelectTrigger
+                id="tenant-category"
+                className="h-12 min-h-11 w-full"
+                aria-required="true"
+              >
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {MAINTENANCE_CATEGORIES.map((c) => (
@@ -294,8 +329,10 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               onChange={(e) => setDescription(e.target.value)}
               rows={4}
               placeholder="Drips constantly from cold side…"
-              disabled={!homeReady || noUnit}
+              disabled={fieldsDisabled}
               className="min-h-[100px] text-[0.9375rem]"
+              aria-required="true"
+              required
             />
           </div>
 
@@ -307,7 +344,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               htmlFor="tenant-photos"
               className={cn(
                 "flex min-h-[86px] cursor-pointer flex-col justify-center rounded-sm border border-border bg-muted px-4 py-3",
-                (!homeReady || noUnit || files.length >= MAX_MAINTENANCE_PHOTOS) &&
+                (fieldsDisabled || files.length >= MAX_MAINTENANCE_PHOTOS) &&
                   "cursor-not-allowed opacity-60",
               )}
             >
@@ -323,7 +360,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
                 accept="image/*"
                 multiple
                 className="sr-only"
-                disabled={!homeReady || noUnit || files.length >= MAX_MAINTENANCE_PHOTOS}
+                disabled={fieldsDisabled || files.length >= MAX_MAINTENANCE_PHOTOS}
                 onChange={(e) => {
                   addFiles(e.target.files);
                   e.target.value = "";
@@ -360,6 +397,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             <div
               role="group"
               aria-labelledby="tenant-priority-label"
+              aria-required="true"
               className="grid grid-cols-3 gap-2"
             >
               {(
@@ -372,7 +410,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
                 <button
                   key={value}
                   type="button"
-                  disabled={!homeReady || noUnit}
+                  disabled={fieldsDisabled}
                   aria-pressed={priority === value}
                   onClick={() => setPriority(value)}
                   className={cn(
@@ -406,12 +444,16 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               Permission to enter <span aria-hidden>*</span>
             </Label>
             <Select
-              value={permission || undefined}
+              value={permission}
               onValueChange={(v) => setPermission(v as PermissionChoice)}
-              disabled={!homeReady || noUnit}
+              disabled={fieldsDisabled}
             >
-              <SelectTrigger id="tenant-permission" className="h-12 min-h-11 w-full">
-                <SelectValue placeholder="Select permission" />
+              <SelectTrigger
+                id="tenant-permission"
+                className="h-12 min-h-11 w-full"
+                aria-required="true"
+              >
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="yes">Yes, if no one home</SelectItem>
@@ -436,7 +478,11 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               onClick={() => void save()}
               disabled={!canSubmit}
             >
-              {!homeReady ? "Loading…" : saving ? "Submitting…" : "Submit"}
+              {homeStatus === "loading"
+                ? "Loading…"
+                : saving
+                  ? "Submitting…"
+                  : "Submit"}
             </Button>
           </div>
         </div>
