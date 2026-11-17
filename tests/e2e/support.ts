@@ -54,7 +54,8 @@ export async function signIn(page: Page, who: PersonaKey | { email: string; pass
   const password = typeof who === "string" ? PASSWORD : (who.password ?? PASSWORD);
   await page.goto("/");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
+  // exact: avoid matching the "Show password" toggle (aria-label substring).
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   // Phase 0 chrome: signed-in shell shows Primary nav (Sign out lives in Account menu).
   await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
