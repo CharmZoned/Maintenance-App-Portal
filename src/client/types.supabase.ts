@@ -522,6 +522,7 @@ export interface Database {
           byte_size: number | null;
           storage_path: string;
           visibility: string;
+          category: string;
           uploaded_by_user_id: string | null;
           uploaded_by_role: AppRole | null;
           notes: string | null;
@@ -538,12 +539,129 @@ export interface Database {
           byte_size?: number | null;
           storage_path: string;
           visibility?: string;
+          category?: string;
           uploaded_by_user_id?: string | null;
           uploaded_by_role?: AppRole | null;
           notes?: string | null;
           is_test_data?: boolean;
         };
         Update: Partial<Database["public"]["Tables"]["PropertyDocuments"]["Insert"]>;
+        Relationships: [];
+      };
+      PropertyZelleInstructions: {
+        Row: {
+          id: number;
+          created_at: string;
+          updated_at: string;
+          property_id: number;
+          recipient_name: string;
+          zelle_target: string;
+          instructions: string | null;
+          is_enabled: boolean;
+          is_test_data: boolean;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          updated_at?: string;
+          property_id: number;
+          recipient_name: string;
+          zelle_target: string;
+          instructions?: string | null;
+          is_enabled?: boolean;
+          is_test_data?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["PropertyZelleInstructions"]["Insert"]>;
+        Relationships: [];
+      };
+      PaymentIntents: {
+        Row: {
+          id: number;
+          created_at: string;
+          updated_at: string;
+          charge_id: number;
+          tenant_id: number;
+          amount: number;
+          method: string;
+          status: string;
+          processor: string | null;
+          processor_payment_id: string | null;
+          client_reference: string | null;
+          bank_confirmation_ref: string | null;
+          payment_id: number | null;
+          failure_reason: string | null;
+          is_test_data: boolean;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          updated_at?: string;
+          charge_id: number;
+          tenant_id: number;
+          amount: number;
+          method: string;
+          status?: string;
+          processor?: string | null;
+          processor_payment_id?: string | null;
+          client_reference?: string | null;
+          bank_confirmation_ref?: string | null;
+          payment_id?: number | null;
+          failure_reason?: string | null;
+          is_test_data?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["PaymentIntents"]["Insert"]>;
+        Relationships: [];
+      };
+      PaymentProcessorEvents: {
+        Row: {
+          id: number;
+          created_at: string;
+          provider: string;
+          event_id: string;
+          event_type: string;
+          payload: Record<string, unknown>;
+          payment_intent_id: number | null;
+          processed_at: string | null;
+          processing_error: string | null;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          provider: string;
+          event_id: string;
+          event_type: string;
+          payload?: Record<string, unknown>;
+          payment_intent_id?: number | null;
+          processed_at?: string | null;
+          processing_error?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["PaymentProcessorEvents"]["Insert"]>;
+        Relationships: [];
+      };
+      PaymentReceipts: {
+        Row: {
+          id: number;
+          created_at: string;
+          payment_id: number;
+          storage_path: string;
+          file_name: string;
+          content_type: string;
+          byte_size: number | null;
+          generated_at: string;
+          is_test_data: boolean;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          payment_id: number;
+          storage_path: string;
+          file_name: string;
+          content_type?: string;
+          byte_size?: number | null;
+          generated_at?: string;
+          is_test_data?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["PaymentReceipts"]["Insert"]>;
         Relationships: [];
       };
     };
@@ -563,6 +681,51 @@ export interface Database {
       delete_payment: {
         Args: { p_payment_id: number };
         Returns: Database["public"]["Tables"]["RentCharges"]["Row"];
+      };
+      update_tenant_profile: {
+        Args: {
+          p_first_name: string;
+          p_last_name: string;
+          p_mobile_phone?: string | null;
+          p_emergency_contact?: string | null;
+        };
+        Returns: Database["public"]["Tables"]["Tenants"]["Row"];
+      };
+      initiate_tenant_payment: {
+        Args: { p_charge_id: number; p_amount: number; p_method: string };
+        Returns: Database["public"]["Tables"]["PaymentIntents"]["Row"];
+      };
+      report_zelle_sent: {
+        Args: { p_intent_id: number; p_bank_confirmation_ref?: string | null };
+        Returns: Database["public"]["Tables"]["PaymentIntents"]["Row"];
+      };
+      cancel_tenant_payment_intent: {
+        Args: { p_intent_id: number };
+        Returns: Database["public"]["Tables"]["PaymentIntents"]["Row"];
+      };
+      confirm_zelle_payment: {
+        Args: { p_intent_id: number; p_notes?: string | null };
+        Returns: Database["public"]["Tables"]["PaymentIntents"]["Row"];
+      };
+      attach_payment_intent_processor_id: {
+        Args: {
+          p_intent_id: number;
+          p_processor_payment_id: string;
+          p_status?: string;
+        };
+        Returns: Database["public"]["Tables"]["PaymentIntents"]["Row"];
+      };
+      submit_tenant_property_document: {
+        Args: {
+          p_title: string;
+          p_file_name: string;
+          p_storage_path: string;
+          p_category?: string;
+          p_content_type?: string | null;
+          p_byte_size?: number | null;
+          p_notes?: string | null;
+        };
+        Returns: Database["public"]["Tables"]["PropertyDocuments"]["Row"];
       };
       list_user_accounts_for_admin: {
         Args: Record<string, never>;
