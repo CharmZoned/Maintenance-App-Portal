@@ -9,20 +9,21 @@ import { ANON_KEY } from "./jwt";
 import { PASSWORD, PERSONAS } from "./seed";
 import { startEmulator } from "./server";
 
-// Bind all interfaces so Cursor Cloud / Docker port-forward can reach the app
-// (loopback-only listeners are not forwarded to the user's localhost).
-const emulator = await startEmulator({ port: DEV_EMULATOR_PORT, host: "0.0.0.0" });
+const emulator = await startEmulator({ port: DEV_EMULATOR_PORT });
 await emulator.reset({ seed: true });
 
 console.log(`\nLocal backend ready (${emulator.db.migrations.length} migrations applied) at ${emulator.url}`);
 console.log(`\nDemo logins — password for all: ${PASSWORD}`);
 for (const p of Object.values(PERSONAS)) console.log(`  ${p.email.padEnd(24)} ${p.label}`);
 console.log(`\nEmails the app "sends" (sign-up / reset links): ${emulator.url}/__emulator/outbox\n`);
-console.log(`Open the portal at http://localhost:${DEV_APP_PORT}/ (maintenance: /maintenance)\n`);
+console.log(`Open the portal at http://127.0.0.1:${DEV_APP_PORT}/ (maintenance: /maintenance)\n`);
 
+// Bind IPv4 explicitly — Chrome often resolves localhost to 127.0.0.1 first,
+// and Vite's default (::1 only on some hosts) causes ERR_CONNECTION_REFUSED.
+// Keep the emulator on 127.0.0.1 so unauthenticated /__emulator/* stays loopback-only.
 const vite = spawn(
   "pnpm",
-  ["exec", "vite", "--host", "0.0.0.0", "--port", String(DEV_APP_PORT), "--strictPort"],
+  ["exec", "vite", "--host", "127.0.0.1", "--port", String(DEV_APP_PORT), "--strictPort"],
   {
     stdio: "inherit",
     env: { ...process.env, VITE_SUPABASE_URL: emulator.url, VITE_SUPABASE_ANON_KEY: ANON_KEY },

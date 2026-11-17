@@ -75,9 +75,7 @@ function identify(headers: Headers): Caller {
   return { ok: true, role, claims: v.claims };
 }
 
-export async function startEmulator(
-  opts: { port?: number; host?: string; quiet?: boolean } = {},
-): Promise<Emulator> {
+export async function startEmulator(opts: { port?: number; quiet?: boolean } = {}): Promise<Emulator> {
   const db = await EmulatorDb.create();
   let url = "";
   const auth = new AuthApi(db, () => url);
@@ -209,17 +207,12 @@ export async function startEmulator(
     });
   });
 
-  // Default loopback keeps tests isolated. Pass host "0.0.0.0" for Cloud Agent /
-  // Docker port-forward so clients on the forwarded localhost can connect.
-  const host = opts.host ?? "127.0.0.1";
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(opts.port ?? 0, host, resolve);
+    server.listen(opts.port ?? 0, "127.0.0.1", resolve);
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : (opts.port ?? 0);
-  // Always advertise loopback in the client URL — browsers hit the forwarded
-  // localhost port, not the container's bind address.
   url = `http://127.0.0.1:${port}`;
 
   return {
