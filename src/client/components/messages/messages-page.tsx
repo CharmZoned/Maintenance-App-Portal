@@ -281,6 +281,7 @@ function StaffMessagesPage({
         )}
       </div>
       <MessageComposer
+        resetKey={selected.id}
         disabled={isLandlord || selected.kind !== "request"}
         placeholder={
           isLandlord

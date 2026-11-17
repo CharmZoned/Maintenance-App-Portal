@@ -356,6 +356,7 @@ export function TenantMessagesPage({
       </div>
       <MessageComposer
         // TODO(data-gap): messages backend not available — send stays local
+        resetKey={selected.id}
         placeholder="Write a message…"
         onSend={async (body) => {
           await sendMockMessage(body);

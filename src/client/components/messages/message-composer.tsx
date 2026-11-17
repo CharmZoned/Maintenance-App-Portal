@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -19,6 +19,8 @@ export function MessageComposer({
   onVisibilityChange,
   onSend,
   className,
+  /** Active conversation id — draft clears whenever this changes (thread switch / deep-link). */
+  resetKey = null,
 }: {
   disabled?: boolean;
   placeholder?: string;
@@ -28,9 +30,15 @@ export function MessageComposer({
   onVisibilityChange?: (v: CommentVisibility) => void;
   onSend?: (body: string, visibility: CommentVisibility) => Promise<void> | void;
   className?: string;
+  resetKey?: string | number | null;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setValue("");
+    setBusy(false);
+  }, [resetKey]);
 
   async function submit() {
     const body = value.trim();
