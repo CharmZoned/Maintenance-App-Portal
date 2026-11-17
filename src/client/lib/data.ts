@@ -1555,6 +1555,20 @@ export async function updateWorkOrder(
   return mapWorkOrder(fallback!, { notes: notesMap.get(id) ?? null });
 }
 
+function formatPropertyAddress(prop: {
+  street_address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+} | null): string | null {
+  if (!prop) return null;
+  const line1 = prop.street_address?.trim() || "";
+  const line2 = [prop.city, prop.state].filter(Boolean).join(", ");
+  const withZip = prop.zip ? `${line2}${line2 ? " " : ""}${prop.zip}` : line2;
+  const full = [line1, withZip].filter(Boolean).join(", ");
+  return full || null;
+}
+
 /** Unit + property label for the signed-in tenant (submit context). */
 export async function getTenantHomeContext(): Promise<TenantHomeContext | null> {
   const {
@@ -1586,6 +1600,7 @@ export async function getTenantHomeContext(): Promise<TenantHomeContext | null> 
       unit_label: null,
       property_id: null,
       property_name: null,
+      property_address: null,
     };
   }
 
@@ -1597,13 +1612,15 @@ export async function getTenantHomeContext(): Promise<TenantHomeContext | null> 
   if (unitErr) throwSb(unitErr);
 
   let propertyName: string | null = null;
+  let propertyAddress: string | null = null;
   if (unit.property_id != null) {
     const { data: prop } = await supabase
       .from("Properties")
-      .select("id, property_name")
+      .select("id, property_name, street_address, city, state, zip")
       .eq("id", unit.property_id)
       .maybeSingle();
     propertyName = prop?.property_name ?? null;
+    propertyAddress = formatPropertyAddress(prop);
   }
 
   return {
@@ -1612,6 +1629,7 @@ export async function getTenantHomeContext(): Promise<TenantHomeContext | null> 
     unit_label: unit.unit_label,
     property_id: unit.property_id,
     property_name: propertyName,
+    property_address: propertyAddress,
   };
 }
 

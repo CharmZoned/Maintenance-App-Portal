@@ -312,6 +312,8 @@ export interface TenantHomeContext {
   unit_label: string | null;
   property_id: number | null;
   property_name: string | null;
+  /** Formatted property address from Properties columns, when present. */
+  property_address: string | null;
 }
 
 export interface MaintenancePhoto {
