@@ -7,6 +7,12 @@ describe("parseRoute", () => {
     expect(parseRoute("/maintenance/42")).toEqual({ name: "request", id: 42 });
     expect(parseRoute("/maintenance/0")).toEqual({ name: "request", id: 0 });
   });
+
+  it("maps tenant payment routes", () => {
+    expect(parseRoute("/payments")).toEqual({ name: "payments" });
+    expect(parseRoute("/payments/ledger")).toEqual({ name: "payments-ledger" });
+    expect(parseRoute("/payments/other")).toEqual({ name: "not-found" });
+  });
 });
 
 describe("pathnameOf / splitLocation", () => {

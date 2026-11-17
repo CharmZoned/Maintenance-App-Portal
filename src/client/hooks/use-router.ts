@@ -17,6 +17,8 @@ export type Route =
   | { name: "people" }
   | { name: "messages" }
   | { name: "account" }
+  | { name: "payments" }
+  | { name: "payments-ledger" }
   | { name: "foundation" }
   | { name: "applications" }
   | { name: "users" }
@@ -58,6 +60,8 @@ export function parseRoute(path: string): Route {
   if (path === "/people") return { name: "people" };
   if (path === "/messages") return { name: "messages" };
   if (path === "/account") return { name: "account" };
+  if (path === "/payments") return { name: "payments" };
+  if (path === "/payments/ledger") return { name: "payments-ledger" };
   if (path === "/foundation") return { name: "foundation" };
   if (path === "/applications") return { name: "applications" };
   if (path === "/users") return { name: "users" };

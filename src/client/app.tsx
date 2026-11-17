@@ -37,6 +37,7 @@ import { MessagesPage } from "./components/messages/messages-page";
 import { NotificationsHost } from "./components/messages/notifications-host";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
+import { PaymentsPage } from "./components/payments";
 import { navItemsForAudience } from "./lib/portal-nav";
 import {
   isLandlordAllowedRoute,
@@ -52,6 +53,8 @@ function activeFor(route: Route): string {
     return "people";
   }
   if (route.name === "account") return "account";
+  // Payments are Home CTAs in Figma — keep Home nav highlight.
+  if (route.name === "payments" || route.name === "payments-ledger") return "home";
   return route.name;
 }
 
@@ -311,6 +314,12 @@ export function App() {
                     <MessagesPage search={search} navigate={navigate} replace={replace} />
                   )}
                   {route.name === "documents" && <TenantDocumentsPage />}
+                  {route.name === "payments" && (
+                    <PaymentsPage mode="pay" navigate={navigate} />
+                  )}
+                  {route.name === "payments-ledger" && (
+                    <PaymentsPage mode="ledger" navigate={navigate} />
+                  )}
                   {route.name === "account" && (
                     <AccountPage
                       userId={auth.gate.user.id}
@@ -324,6 +333,8 @@ export function App() {
                     route.name !== "request" &&
                     route.name !== "messages" &&
                     route.name !== "documents" &&
+                    route.name !== "payments" &&
+                    route.name !== "payments-ledger" &&
                     route.name !== "account" && (
                       <Placeholder
                         title="Tenant portal"
