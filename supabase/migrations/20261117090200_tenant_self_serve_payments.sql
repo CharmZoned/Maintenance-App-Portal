@@ -281,9 +281,13 @@ BEGIN
     CASE intent.method
       WHEN 'zelle' THEN 'zelle'
       WHEN 'ach' THEN 'ach'
-      ELSE 'card'
+      WHEN 'card' THEN 'credit'
+      ELSE 'other'
     END
   );
+  IF v_method = 'card' THEN
+    v_method := 'credit';
+  END IF;
 
   INSERT INTO public."Payments" (charge_id, amount, method, reference, notes, paid_at)
   VALUES (
