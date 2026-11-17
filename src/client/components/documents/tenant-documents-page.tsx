@@ -19,6 +19,8 @@ import type { PropertyDocument, TenantHomeContext } from "@/types";
 
 type DocCategory = "leases" | "addenda" | "notices" | "other";
 
+type CategorizedDoc = { doc: PropertyDocument; category: DocCategory };
+
 const CATEGORY_FILTERS: { id: "all" | DocCategory; label: string }[] = [
   { id: "all", label: "All" },
   { id: "leases", label: "Leases" },
@@ -52,11 +54,13 @@ function fileKindLabel(doc: PropertyDocument): string {
 /**
  * TODO(data-gap): PropertyDocuments has no category enum. Heuristic from
  * title/file_name until a dedicated column or check constraint exists.
+ * Addenda / amendments are checked before generic "lease" so "Lease addendum"
+ * lands in Addenda.
  */
 function inferDocCategory(doc: PropertyDocument): DocCategory {
   const hay = `${doc.title} ${doc.file_name} ${doc.notes ?? ""}`.toLowerCase();
-  if (/\b(lease|rental\s+agreement)\b/.test(hay)) return "leases";
   if (/\b(addendum|addenda|amendment|rider)\b/.test(hay)) return "addenda";
+  if (/\b(lease|rental\s+agreement)\b/.test(hay)) return "leases";
   if (/\b(notice|fire\s+safety|announcement|building\s+notice)\b/.test(hay)) return "notices";
   return "other";
 }
@@ -74,14 +78,52 @@ function categoryTypeLabel(category: DocCategory): string {
   }
 }
 
-function displayFileName(doc: PropertyDocument): string {
-  return doc.file_name?.trim() || doc.title;
+/** Primary list/preview label — prefer document title (tenant e2e looks for titles). */
+function displayTitle(doc: PropertyDocument): string {
+  return doc.title?.trim() || doc.file_name?.trim() || "Document";
 }
 
-function unitScopeLabel(doc: PropertyDocument, homeUnit: string | null | undefined): string {
-  if (doc.unit_name) return `Unit ${doc.unit_name}`;
-  if (homeUnit) return `Unit ${homeUnit}`;
+/** Show file name only when it differs from the title. */
+function secondaryFileName(doc: PropertyDocument): string | null {
+  const title = doc.title?.trim() || "";
+  const file = doc.file_name?.trim() || "";
+  if (!file || !title) return null;
+  if (file.toLowerCase() === title.toLowerCase()) return null;
+  return file;
+}
+
+/** Building-wide docs (no unit) stay "Whole property" — never borrow the tenant's unit. */
+function unitScopeLabel(doc: PropertyDocument): string {
+  if (doc.unit_name?.trim()) return `Unit ${doc.unit_name.trim()}`;
   return "Whole property";
+}
+
+function scopeGroupKey(doc: PropertyDocument): string {
+  if (doc.unit_id != null) return `unit:${doc.unit_id}`;
+  return "property";
+}
+
+function groupFilteredDocs(rows: CategorizedDoc[]): {
+  key: string;
+  label: string;
+  rows: CategorizedDoc[];
+}[] {
+  const order: string[] = [];
+  const map = new Map<string, { label: string; rows: CategorizedDoc[] }>();
+  for (const row of rows) {
+    const key = scopeGroupKey(row.doc);
+    const existing = map.get(key);
+    if (existing) {
+      existing.rows.push(row);
+    } else {
+      order.push(key);
+      map.set(key, { label: unitScopeLabel(row.doc).toUpperCase(), rows: [row] });
+    }
+  }
+  return order.map((key) => {
+    const group = map.get(key)!;
+    return { key, label: group.label, rows: group.rows };
+  });
 }
 
 export function TenantDocumentsPage() {
@@ -157,6 +199,8 @@ export function TenantDocumentsPage() {
     return categorized.filter((row) => row.category === category);
   }, [categorized, category]);
 
+  const groups = useMemo(() => groupFilteredDocs(filtered), [filtered]);
+
   const selected = useMemo(() => {
     const fromFilter = filtered.find((row) => row.doc.id === selectedId);
     if (fromFilter) return fromFilter;
@@ -210,9 +254,10 @@ export function TenantDocumentsPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">
             Important papers, easy to find
           </p>
-          <h2 className="text-2xl font-semibold leading-8 text-foreground md:text-[34px] md:leading-[42px]">
+          {/* Display title only (not a heading) — PageShell owns the Documents heading */}
+          <p className="text-2xl font-semibold leading-8 text-foreground md:text-[34px] md:leading-[42px]">
             Documents
-          </h2>
+          </p>
           <p className="text-sm leading-[22px] text-muted-foreground md:hidden">
             {mobileDescription}
           </p>
@@ -239,13 +284,13 @@ export function TenantDocumentsPage() {
         ) : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] lg:items-start">
             <section className="rounded-lg border border-border bg-card p-4 sm:p-5">
-              <h3 className="text-lg font-semibold leading-[26px] text-foreground">
+              <h2 className="text-lg font-semibold leading-[26px] text-foreground">
                 Shared with you
-              </h3>
+              </h2>
 
               <div
                 className="mt-4 flex flex-wrap gap-2"
-                role="tablist"
+                role="group"
                 aria-label="Document categories"
               >
                 {CATEGORY_FILTERS.map((chip) => {
@@ -255,8 +300,7 @@ export function TenantDocumentsPage() {
                     <button
                       key={chip.id}
                       type="button"
-                      role="tab"
-                      aria-selected={active}
+                      aria-pressed={active}
                       onClick={() => setCategory(chip.id)}
                       className={cn(
                         "inline-flex h-9 min-h-9 items-center rounded-sm px-3 text-xs",
@@ -286,29 +330,30 @@ export function TenantDocumentsPage() {
                   onClear={() => setCategory("all")}
                 />
               ) : (
-                <>
-                  {unitLabel ? (
-                    <p className="mt-5 text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">
-                      Unit {unitLabel}
-                    </p>
-                  ) : null}
-
-                  <ul className="mt-3 space-y-3">
-                    {filtered.map(({ doc, category: cat }) => {
-                      const active = selected?.doc.id === doc.id;
-                      return (
-                        <li key={doc.id}>
-                          <DocumentRow
-                            doc={doc}
-                            category={cat}
-                            selected={active}
-                            onSelect={() => setSelectedId(doc.id)}
-                          />
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </>
+                <div className="mt-5 space-y-5">
+                  {groups.map((group) => (
+                    <div key={group.key}>
+                      <p className="text-xs font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+                        {group.label}
+                      </p>
+                      <ul className="mt-3 space-y-3">
+                        {group.rows.map(({ doc, category: cat }) => {
+                          const active = selected?.doc.id === doc.id;
+                          return (
+                            <li key={doc.id}>
+                              <DocumentRow
+                                doc={doc}
+                                category={cat}
+                                selected={active}
+                                onSelect={() => setSelectedId(doc.id)}
+                              />
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
               )}
 
               <p className="mt-5 text-xs leading-[18px] text-muted-foreground md:hidden">
@@ -326,15 +371,14 @@ export function TenantDocumentsPage() {
                 !selected && "hidden lg:block",
               )}
             >
-              <h3 className="text-lg font-semibold leading-[26px] text-foreground">
+              <h2 className="text-lg font-semibold leading-[26px] text-foreground">
                 Document preview
-              </h3>
+              </h2>
 
               {selected ? (
                 <DocumentPreviewPanel
                   doc={selected.doc}
                   category={selected.category}
-                  homeUnit={unitLabel}
                   downloading={downloadingId === selected.doc.id}
                   onDownload={() => void downloadDoc(selected.doc)}
                 />
@@ -349,8 +393,8 @@ export function TenantDocumentsPage() {
 
         <p className="text-xs leading-[18px] text-muted-foreground md:hidden">
           {/* TODO(data-gap): in-app preview / e-sign not wired */}
-          Preview and download require authorized document access. No document contents
-          are connected yet.
+          Download uses a short-lived authorized link. In-browser preview is not available
+          yet.
         </p>
         <p className="hidden text-xs leading-[18px] text-muted-foreground md:block">
           Access follows your tenant and unit assignments. Maintenance workers cannot
@@ -375,6 +419,7 @@ function DocumentRow({
   const kind = fileKindLabel(doc);
   const uploaded = formatUploaded(doc.created_at);
   const size = formatBytes(doc.byte_size);
+  const fileLine = secondaryFileName(doc);
   const meta = [uploaded, size].filter(Boolean).join(" · ");
   const typeLine = `${categoryTypeLabel(category)} · Shared`;
 
@@ -406,8 +451,13 @@ function DocumentRow({
           </span>
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium leading-[22px] text-foreground">
-              {displayFileName(doc)}
+              {displayTitle(doc)}
             </span>
+            {fileLine ? (
+              <span className="mt-0.5 block truncate text-xs leading-[18px] text-muted-foreground">
+                {fileLine}
+              </span>
+            ) : null}
             {meta ? (
               <span className="mt-0.5 block truncate text-xs leading-[18px] text-muted-foreground">
                 {meta}
@@ -435,28 +485,30 @@ function DocumentRow({
 function DocumentPreviewPanel({
   doc,
   category,
-  homeUnit,
   downloading,
   onDownload,
 }: {
   doc: PropertyDocument;
   category: DocCategory;
-  homeUnit: string | null;
   downloading: boolean;
   onDownload: () => void;
 }) {
   const kind = fileKindLabel(doc);
   const uploaded = formatUploaded(doc.created_at);
   const size = formatBytes(doc.byte_size);
-  const scope = unitScopeLabel(doc, homeUnit);
+  const scope = unitScopeLabel(doc);
+  const fileLine = secondaryFileName(doc);
   const meta = [scope, uploaded, size].filter(Boolean).join(" · ");
 
   return (
     <div className="mt-4 space-y-4">
       <div>
         <p className="truncate text-sm font-medium leading-[22px] text-foreground">
-          {displayFileName(doc)}
+          {displayTitle(doc)}
         </p>
+        {fileLine ? (
+          <p className="mt-1 truncate text-xs leading-[18px] text-muted-foreground">{fileLine}</p>
+        ) : null}
         <p className="mt-1 text-xs leading-[18px] text-muted-foreground">{meta}</p>
         <p className="mt-1 text-xs leading-[18px] text-muted-foreground">
           {categoryTypeLabel(category)} · Shared
@@ -485,8 +537,8 @@ function DocumentPreviewPanel({
       </Button>
 
       <p className="text-sm leading-[22px] text-muted-foreground">
-        Preview and download require an authorized document and a short-lived access
-        link.
+        Download uses a short-lived authorized link. In-browser preview is not available
+        yet.
       </p>
     </div>
   );
