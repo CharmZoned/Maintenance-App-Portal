@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSyntheticRequestThread,
   loadTenantMessagesMock,
+  messagesLoadScenarioFromSearch,
   MOCK_THREAD_IDS,
   resolveMessagesDeepLink,
   syntheticRequestThreadId,
@@ -88,5 +89,12 @@ describe("tenant-messages-mock", () => {
     expect(thread.linkedRequestIds).toContain("99");
     expect(thread.openRequestPath).toBe("/maintenance?wo=99");
     expect(thread.messages).toEqual([]);
+  });
+
+  it("messagesLoadScenarioFromSearch reads ?demo= / ?scenario=", () => {
+    expect(messagesLoadScenarioFromSearch("")).toBe("ok");
+    expect(messagesLoadScenarioFromSearch("?demo=empty")).toBe("empty");
+    expect(messagesLoadScenarioFromSearch("?scenario=error")).toBe("error");
+    expect(messagesLoadScenarioFromSearch("?demo=ok")).toBe("ok");
   });
 });

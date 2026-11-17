@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import {
   createSyntheticRequestThread,
   loadTenantMessagesMock,
+  messagesLoadScenarioFromSearch,
   MOCK_THREAD_IDS,
   resolveMessagesDeepLink,
   unreadCount,
@@ -54,12 +55,15 @@ export function TenantMessagesPage({
   );
   const [reloadKey, setReloadKey] = useState(0);
 
+  const loadScenario = useMemo(() => messagesLoadScenarioFromSearch(search), [search]);
+
   const load = useCallback(async () => {
     setState("loading");
     setLocalError(null);
     try {
       // TODO(data-gap): messages backend not available
-      const data = await loadTenantMessagesMock({ scenario: "ok" });
+      // Reachable empty/error via ?demo=empty|error (see messagesLoadScenarioFromSearch).
+      const data = await loadTenantMessagesMock({ scenario: loadScenario });
       setBundle(data);
       setLocalMessages(
         Object.fromEntries(data.conversations.map((c) => [c.id, [...c.messages]])),
@@ -69,7 +73,7 @@ export function TenantMessagesPage({
       setLocalError((err as Error).message);
       setState("error");
     }
-  }, []);
+  }, [loadScenario]);
 
   useEffect(() => {
     void load();

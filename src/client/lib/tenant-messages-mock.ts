@@ -308,12 +308,26 @@ export function unreadCount(conversations: MockConversation[]): number {
   return conversations.filter((c) => c.unread).length;
 }
 
+export type TenantMessagesLoadScenario = "ok" | "empty" | "error";
+
+/**
+ * Demo load scenario for empty/error UI (Figma interface states).
+ * Use `/messages?demo=empty` or `/messages?demo=error` (alias `?scenario=`).
+ * Default is the Figma demo inbox (`ok`).
+ */
+export function messagesLoadScenarioFromSearch(search: string): TenantMessagesLoadScenario {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const raw = (params.get("demo") ?? params.get("scenario") ?? "").trim().toLowerCase();
+  if (raw === "empty" || raw === "error") return raw;
+  return "ok";
+}
+
 /**
  * Simulated fetch for loading / empty / error UI states.
  * // TODO(data-gap): messages backend not available
  */
 export async function loadTenantMessagesMock(opts?: {
-  scenario?: "ok" | "empty" | "error";
+  scenario?: TenantMessagesLoadScenario;
   delayMs?: number;
 }): Promise<TenantMessagesMockBundle> {
   const scenario = opts?.scenario ?? "ok";
