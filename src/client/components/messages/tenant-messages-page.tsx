@@ -246,12 +246,12 @@ export function TenantMessagesPage({
 
   const inboxCard = (
     <section
-      aria-label="Inbox"
+      aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox, all caught up"}
       className="overflow-hidden rounded-lg border border-border bg-card"
     >
       <div className="flex items-center justify-between gap-3 px-5 py-5">
         <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">Inbox</h3>
-        <p className="text-xs text-brand-text">
+        <p className="text-xs text-brand-text" aria-hidden={unread > 0 ? undefined : true}>
           {unread > 0 ? `${unread} unread` : "All caught up"}
         </p>
       </div>
@@ -266,13 +266,18 @@ export function TenantMessagesPage({
                 c.id === selectedId ? "bg-brand-tint" : "bg-card hover:bg-muted/50",
               )}
               aria-current={c.id === selectedId ? "true" : undefined}
+              aria-label={
+                c.unread
+                  ? `${c.title}, unread. ${c.preview}. ${c.timeLabel}`
+                  : `${c.title}. ${c.preview}. ${c.timeLabel}`
+              }
             >
               <div className="flex h-full w-2 shrink-0 items-center justify-center">
                 {c.unread ? (
-                  <span className="size-2 rounded-full bg-brand" aria-label="Unread" />
+                  <span className="size-2 rounded-full bg-brand" aria-hidden />
                 ) : null}
               </div>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1" aria-hidden>
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-1.5">
                     {c.kind === "request" ? (
