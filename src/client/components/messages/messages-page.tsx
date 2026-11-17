@@ -7,6 +7,7 @@ import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
 import { MessageThreadRow } from "./message-thread-row";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
+import { TenantMessagesPage } from "./tenant-messages-page";
 import {
   commentSenderLabel,
   formatMessageTime,
@@ -18,10 +19,36 @@ import type { CommentVisibility, MaintenanceComment, WorkOrder } from "@/types";
 type LoadState = "loading" | "ready" | "error";
 
 /**
- * Figma 05 Messages — N4 list + thread (mobile stack / admin split).
- * Request threads use MaintenanceRequestComments; direct DMs are stubbed.
+ * Messages route entry.
+ * Tenants: fully mocked Figma inbox/conversation (no messages tables).
+ * Staff/landlord: request threads via MaintenanceRequestComments.
  */
 export function MessagesPage({
+  search = "",
+  navigate,
+  replace,
+}: {
+  search?: string;
+  navigate: (to: string) => void;
+  replace?: (to: string) => void;
+}) {
+  const { isTenant } = useApp();
+
+  // TODO(data-gap): messages backend not available — tenant path is mock-only
+  if (isTenant) {
+    return <TenantMessagesPage search={search} navigate={navigate} replace={replace} />;
+  }
+
+  return (
+    <StaffMessagesPage search={search} navigate={navigate} replace={replace} />
+  );
+}
+
+/**
+ * Figma 05 Messages — staff/landlord list + thread (WO comments).
+ * Request threads use MaintenanceRequestComments; direct DMs are stubbed.
+ */
+function StaffMessagesPage({
   search = "",
   navigate,
   replace,

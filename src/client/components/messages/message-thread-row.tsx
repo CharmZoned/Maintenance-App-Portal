@@ -19,8 +19,8 @@ export function MessageThreadRow({
       type="button"
       onClick={onSelect}
       className={cn(
-        "flex h-[100px] w-full items-center gap-3 border-b border-border bg-card px-4 py-3.5 text-left transition-colors",
-        selected ? "bg-muted/70" : "hover:bg-muted/50",
+        "flex min-h-[7.375rem] w-full items-center gap-3 border-b border-border bg-card px-4 py-3.5 text-left transition-colors",
+        selected ? "bg-brand-tint" : "hover:bg-muted/50",
       )}
     >
       <div className="flex h-full w-2 shrink-0 items-center justify-center">
