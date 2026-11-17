@@ -74,37 +74,44 @@ export function TenantRequestsPage({
   const pendingSelectIdRef = useRef<number | null>(null);
   /** Skip the dialog-close reload when onSaved already refreshed. */
   const skipCloseReloadRef = useRef(false);
+  /** True after at least one successful list fetch — failed refreshes keep rows. */
+  const hasLoadedOnceRef = useRef(false);
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
 
   const listWorkOrders = app.listWorkOrders;
   const setError = app.setError;
   const flight = useMemo(
-    () =>
-      createSingleFlightLoader(async () => {
-        try {
-          setListError(null);
-          setError(null);
-          return await listWorkOrders();
-        } catch (err) {
-          const message = (err as Error).message;
-          setListError(message);
-          setError(message);
-          throw err;
-        }
-      }),
-    [listWorkOrders, setError],
+    () => createSingleFlightLoader(() => listWorkOrders()),
+    [listWorkOrders],
   );
 
-  async function load() {
-    setLoading(true);
+  /**
+   * Fetch the queue. Initial failure clears the list + shows ErrorRetry.
+   * Background refresh failure keeps current rows (banner via setError only).
+   */
+  async function load(): Promise<WorkOrder[]> {
+    const isInitial = !hasLoadedOnceRef.current;
+    if (isInitial) setLoading(true);
     try {
       const list = await flight.load();
+      setListError(null);
+      setError(null);
       setOrders(list);
+      hasLoadedOnceRef.current = true;
       return list;
-    } catch {
-      setOrders([]);
-      return [] as WorkOrder[];
+    } catch (err) {
+      const message = (err as Error).message;
+      setError(message);
+      if (!hasLoadedOnceRef.current) {
+        setListError(message);
+        setOrders([]);
+        return [] as WorkOrder[];
+      }
+      // Keep on-screen rows; do not set listError (that swaps in ErrorRetry).
+      return ordersRef.current;
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }
 
@@ -115,9 +122,18 @@ export function TenantRequestsPage({
       try {
         const list = await flight.load();
         if (cancelled) return;
+        setListError(null);
+        setError(null);
         setOrders(list);
-      } catch {
-        if (!cancelled) setOrders([]);
+        hasLoadedOnceRef.current = true;
+      } catch (err) {
+        if (cancelled) return;
+        const message = (err as Error).message;
+        setError(message);
+        if (!hasLoadedOnceRef.current) {
+          setListError(message);
+          setOrders([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -125,7 +141,7 @@ export function TenantRequestsPage({
     return () => {
       cancelled = true;
     };
-  }, [flight]);
+  }, [flight, setError]);
 
   useEffect(() => {
     let cancelled = false;
