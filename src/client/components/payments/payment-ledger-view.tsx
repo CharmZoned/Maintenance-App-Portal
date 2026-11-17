@@ -220,7 +220,7 @@ function LedgerTableRows({
           {formatUsd(entry.balanceAfter)}
         </td>
         <td className="px-3 py-4 text-right">
-          <Button type="button" variant="outline" className="h-9 px-3" onClick={onToggle}>
+          <Button type="button" variant="outline" className="h-11 min-h-11 px-3" onClick={onToggle}>
             Details
           </Button>
         </td>
@@ -253,13 +253,14 @@ function LedgerMobileCard({
       </div>
       <div className="mt-2 flex items-start justify-between gap-3">
         <p className="font-medium text-foreground">{entry.description}</p>
-        <button
+        <Button
           type="button"
-          className="shrink-0 text-sm font-medium text-brand-text hover:underline"
+          variant="outline"
+          className="h-11 min-h-11 shrink-0 px-3"
           onClick={onToggle}
         >
           Details
-        </button>
+        </Button>
       </div>
       <div className="mt-3 flex items-end justify-between gap-3">
         <p className="text-lg font-semibold tabular-nums text-foreground">{amountLabel(entry)}</p>
