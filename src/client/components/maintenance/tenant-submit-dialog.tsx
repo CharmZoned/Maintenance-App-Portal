@@ -1,29 +1,58 @@
 import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { MAINTENANCE_CATEGORIES, type MaintenanceCategory, type TenantHomeContext } from "@/types";
-import { X } from "lucide-react";
+import {
+  MAINTENANCE_CATEGORIES,
+  type MaintenanceCategory,
+  type TenantHomeContext,
+  type WorkOrderPriority,
+} from "@/types";
+import { cn } from "@/lib/utils";
 import { MAX_MAINTENANCE_PHOTOS } from "./work-order-status";
+
+type UiPriority = "normal" | "urgent" | "emergency";
+
+const PRIORITY_TO_DB: Record<UiPriority, WorkOrderPriority> = {
+  normal: "normal",
+  urgent: "high",
+  emergency: "urgent",
+};
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved?: () => void;
+  onSaved?: () => void | Promise<void>;
 }
 
+/**
+ * Tenant new-request form — drawer on md+, full-screen sheet on phone (Figma).
+ * Submit stays live via `submitTenantMaintenanceRequest`.
+ */
 export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
   const app = useApp();
   const [home, setHome] = useState<TenantHomeContext | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState<MaintenanceCategory>("General repair");
-  const [emergency, setEmergency] = useState(false);
-  const [permission, setPermission] = useState(false);
+  const [category, setCategory] = useState<MaintenanceCategory>("Plumbing");
+  const [priority, setPriority] = useState<UiPriority>("normal");
+  const [permission, setPermission] = useState<"yes" | "no">("yes");
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -42,9 +71,9 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
     if (!open) return;
     setTitle("");
     setDescription("");
-    setCategory("General repair");
-    setEmergency(false);
-    setPermission(false);
+    setCategory("Plumbing");
+    setPriority("normal");
+    setPermission("yes");
     setFiles([]);
     let cancelled = false;
     (async () => {
@@ -67,6 +96,8 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
     : "Loading unit…";
 
   const noUnit = home != null && home.unit_id == null;
+  const canSubmit =
+    !saving && !noUnit && Boolean(title.trim()) && Boolean(description.trim());
 
   function addFiles(list: FileList | null) {
     if (!list) return;
@@ -78,21 +109,23 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
   }
 
   async function save() {
-    if (!title.trim() || !description.trim() || noUnit) return;
+    if (!canSubmit) return;
     setSaving(true);
     try {
       const created = await app.submitTenantRequest({
         title: title.trim(),
         description: description.trim(),
         category,
-        permission_to_enter: permission,
-        priority: emergency ? "urgent" : "normal",
+        permission_to_enter: permission === "yes",
+        priority: PRIORITY_TO_DB[priority],
       });
       let photoFail = false;
       if (files.length) {
         try {
           await Promise.all(
-            files.slice(0, MAX_MAINTENANCE_PHOTOS).map((file) => app.uploadMaintenancePhoto(created.id, file)),
+            files
+              .slice(0, MAX_MAINTENANCE_PHOTOS)
+              .map((file) => app.uploadMaintenancePhoto(created.id, file)),
           );
         } catch (photoErr) {
           photoFail = true;
@@ -106,7 +139,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             ? "Request submitted with photos. Staff will update status in the portal."
             : "Request submitted. Staff will update status in the portal.",
       );
-      onSaved?.();
+      await onSaved?.();
       onOpenChange(false);
     } catch (err) {
       app.setError((err as Error).message);
@@ -117,38 +150,57 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Submit a maintenance request</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid gap-3">
-          <p className="rounded border bg-muted/40 px-3 py-2 text-sm">
-            Reporting for <span className="font-medium text-foreground">{homeLabel}</span>
-          </p>
-          {noUnit && (
-            <p className="text-sm text-destructive">
-              Your account isn’t linked to a unit yet. Ask staff to assign a unit before submitting.
-            </p>
-          )}
+      <DialogContent
+        className={cn(
+          "max-h-[min(100dvh,100%)] gap-0 overflow-y-auto p-0 sm:max-h-[90dvh]",
+          // Phone: near full-screen sheet. md+: drawer-width panel (~480).
+          "max-w-[100vw] rounded-none sm:max-w-md sm:rounded-lg md:max-w-[480px]",
+        )}
+      >
+        <div className="space-y-5 p-6">
           <div>
-            <Label htmlFor="tenant-title">Title</Label>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Requests / New request
+            </p>
+            <DialogTitle className="mt-2 text-2xl font-semibold leading-8">
+              Request maintenance
+            </DialogTitle>
+            <DialogDescription className="mt-2 text-sm text-muted-foreground">
+              {homeLabel}
+            </DialogDescription>
+          </div>
+
+          {noUnit ? (
+            <p className="text-sm text-destructive">
+              Your account isn’t linked to a unit yet. Ask staff to assign a unit
+              before submitting.
+            </p>
+          ) : null}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="tenant-title" className="text-xs font-semibold">
+              Issue title <span aria-hidden>*</span>
+            </Label>
             <Input
               id="tenant-title"
+              className="h-12 min-h-11 shadow-none ring-1 ring-border focus:shadow-[inset_0_0_0_1px_var(--ring),0_0_0_3px_var(--brand-tint)]"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Leaking kitchen faucet"
+              placeholder="Kitchen tap dripping"
               disabled={noUnit}
             />
           </div>
-          <div>
-            <Label>Category</Label>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">
+              Category <span aria-hidden>*</span>
+            </Label>
             <Select
               value={category}
               onValueChange={(v) => setCategory(v as MaintenanceCategory)}
               disabled={noUnit}
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-12 min-h-11 w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -160,58 +212,61 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label htmlFor="tenant-desc">Description</Label>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="tenant-desc" className="text-xs font-semibold">
+              Description <span aria-hidden>*</span>
+            </Label>
             <Textarea
               id="tenant-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={4}
-              placeholder="What needs fixing? When did it start?"
+              placeholder="Drips constantly from cold side…"
               disabled={noUnit}
+              className="min-h-[100px] text-[0.9375rem]"
             />
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={emergency}
-              onChange={(e) => setEmergency(e.target.checked)}
-              className="size-4"
-              disabled={noUnit}
-            />
-            This is an emergency (urgent)
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={permission}
-              onChange={(e) => setPermission(e.target.checked)}
-              className="size-4"
-              disabled={noUnit}
-            />
-            Permission to enter if nobody is home
-          </label>
-          <div>
-            <Label htmlFor="tenant-photos">Photos (optional, up to {MAX_MAINTENANCE_PHOTOS})</Label>
-            <Input
-              id="tenant-photos"
-              type="file"
-              accept="image/*"
-              multiple
-              disabled={noUnit || files.length >= MAX_MAINTENANCE_PHOTOS}
-              onChange={(e) => {
-                addFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            {previews.length > 0 && (
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Photos</Label>
+            <label
+              className={cn(
+                "flex min-h-[86px] cursor-pointer flex-col justify-center rounded-sm border border-border bg-muted px-4 py-3",
+                (noUnit || files.length >= MAX_MAINTENANCE_PHOTOS) &&
+                  "cursor-not-allowed opacity-60",
+              )}
+            >
+              <span className="text-sm font-medium text-brand-text">
+                Add up to {MAX_MAINTENANCE_PHOTOS} photos
+              </span>
+              <span className="mt-1 text-xs text-muted-foreground">
+                Only the request’s authorized members can view them.
+              </span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="sr-only"
+                disabled={noUnit || files.length >= MAX_MAINTENANCE_PHOTOS}
+                onChange={(e) => {
+                  addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {previews.length > 0 ? (
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {previews.map((p, i) => (
-                  <div key={p.url} className="relative overflow-hidden rounded border">
-                    <img src={p.url} alt={p.file.name} className="aspect-square w-full object-cover" />
+                  <div key={p.url} className="relative overflow-hidden rounded-sm border border-border">
+                    <img
+                      src={p.url}
+                      alt={p.file.name}
+                      className="aspect-square w-full object-cover"
+                    />
                     <button
                       type="button"
-                      className="absolute right-1 top-1 rounded bg-background/90 p-0.5"
+                      className="absolute right-1 top-1 rounded-sm bg-background/90 p-1"
                       onClick={() => removeFile(i)}
                       aria-label="Remove photo"
                     >
@@ -220,22 +275,90 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
                   </div>
                 ))}
               </div>
-            )}
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">
+              Priority <span aria-hidden>*</span>
+            </Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["normal", "Normal"],
+                  ["urgent", "Urgent"],
+                  ["emergency", "Emergency"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={noUnit}
+                  aria-pressed={priority === value}
+                  onClick={() => setPriority(value)}
+                  className={cn(
+                    "flex h-11 min-h-11 items-center justify-center rounded-sm border border-border text-sm",
+                    priority === value
+                      ? "bg-brand-tint font-medium text-brand-text"
+                      : "bg-card text-foreground hover:bg-muted/50",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <aside
+            className="rounded-sm border border-border bg-warning-tint px-4 py-3 text-warning"
+            role="note"
+          >
+            <p className="text-sm font-medium">
+              Immediate danger? Contact local emergency services.
+            </p>
+            <p className="mt-1 text-xs">
+              Do not wait for a response here. Manager emergency contact is not
+              configured.
+            </p>
+          </aside>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Permission to enter</Label>
+            <Select
+              value={permission}
+              onValueChange={(v) => setPermission(v as "yes" | "no")}
+              disabled={noUnit}
+            >
+              <SelectTrigger className="h-12 min-h-11 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="yes">Yes, if no one home</SelectItem>
+                <SelectItem value="no">No — please schedule first</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-11 min-h-11 flex-1 text-sm text-brand-text sm:flex-none sm:w-[136px]"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="brand"
+              className="h-11 min-h-11 flex-[2] text-sm"
+              onClick={() => void save()}
+              disabled={!canSubmit}
+            >
+              {saving ? "Submitting…" : "Submit"}
+            </Button>
           </div>
         </div>
-
-        <DialogFooter className="mt-2">
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void save()}
-            disabled={saving || noUnit || !title.trim() || !description.trim()}
-          >
-            {saving ? "Submitting…" : "Submit request"}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
