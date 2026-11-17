@@ -54,7 +54,9 @@ export function isTenantAllowedRoute(route: Route): boolean {
     route.name === "request" ||
     route.name === "messages" ||
     route.name === "documents" ||
-    route.name === "account"
+    route.name === "account" ||
+    route.name === "payments" ||
+    route.name === "payments-ledger"
   );
 }
 

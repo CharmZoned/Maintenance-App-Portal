@@ -139,6 +139,9 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
     expect(clampPathForAudience("/maintenance/9", "tenant")).toBe("/maintenance/9");
     expect(clampPathForAudience("/home", "tenant")).toBe("/home");
     expect(clampPathForAudience("/messages", "tenant")).toBe("/messages");
+    expect(clampPathForAudience("/payments", "tenant")).toBe("/payments");
+    expect(clampPathForAudience("/payments/ledger", "tenant")).toBe("/payments/ledger");
+    expect(clampPathForAudience("/rent", "tenant")).toBe(ROLE_HOME.tenant);
     expect(clampPathForAudience("/rent", "landlord")).toBe(ROLE_HOME.landlord);
     expect(clampPathForAudience("/properties/3", "landlord")).toBe("/properties/3");
     expect(clampPathForAudience("/documents", "landlord")).toBe("/documents");
