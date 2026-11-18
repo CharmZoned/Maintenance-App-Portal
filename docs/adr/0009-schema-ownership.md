@@ -1,7 +1,6 @@
 # ADR-0009: Schema ownership across portal and website
 
-**Status:** Proposed — used as the working rule in the build plan; awaiting the owner's
-yes or no
+**Status:** Accepted — owner decision, 2026-11-18: yes, this repo only
 
 ## The decision in one line
 
@@ -32,7 +31,7 @@ production skips staging entirely.
 
 ## Options
 
-1. **This repo owns all schema (recommended).** `supabase/migrations/` here is the only
+1. **This repo owns all schema (chosen).** `supabase/migrations/` here is the only
    source. The website repo carries no migrations and applies none.
 2. **Split by schema.** Website tables move to their own Postgres schema with their own
    migration history. Clean separation, but a real migration project on live tables.
@@ -40,7 +39,7 @@ production skips staging entirely.
    but the website reads portal units for listings, so it needs an API or sync between
    the two.
 
-## Decision (recommended)
+## Decision
 
 Option 1.
 

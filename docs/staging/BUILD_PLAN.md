@@ -1,6 +1,6 @@
 # Staging environment — build plan
 
-**Status:** Ready to start · 2026-11-18
+**Status:** Phase 1 in progress · 2026-11-18
 **Design and reasoning:** [`DESIGN_PLAN.md`](DESIGN_PLAN.md) · **Decisions:** [`docs/adr/`](../adr/README.md)
 
 This is the ordered list of work to turn the approved design into a running staging
@@ -21,8 +21,7 @@ Everything that needs you, in the order it is needed.
 | # | Action | Where | Unblocks |
 |---|---|---|---|
 | O1 | Upgrade the GitHub plan, **then** switch the repo to private. Re-grant access to the Vercel, Supabase, Cursor, and Claude GitHub apps if any lose it. | GitHub → Settings | Safe from the start; not a blocker for Phase 1 |
-| O2 | Say yes or no to [ADR-0009](../adr/0009-schema-ownership.md). | Reply | Phase 4 (automatic releases) |
-| O3 | After the `staging` branch exists: make it the default branch; add protection rules for `staging` and `master` (see 1.2). | GitHub → Settings → Branches / Rules | End of Phase 1 |
+| O3 | Make `staging` the default branch; add protection rules for `staging` and `master` (see 1.2). The branch exists as of 2026-11-18. | GitHub → Settings → Branches / Rules | End of Phase 1 |
 | O4 | Add four repository secrets (see 2.7). | GitHub → Settings → Secrets → Actions | Seeding in Phase 2 |
 | O5 | Import the repo into the Vercel Pro team; turn on Vercel Authentication. | Vercel | Phase 3 |
 | O6 | Invite testers to the Vercel team as Viewers. | Vercel → Team → Members | Testers can open staging |
@@ -40,9 +39,9 @@ safeguards as `master`. No effect on production.
 
 | # | Who | Task |
 |---|---|---|
-| 1.1 | Agent | Create `staging` from the tip of `master`. |
-| 1.2 | Owner | Default branch → `staging`. Protection on both branches: pull request required; required checks `typecheck / build / test` and `Supabase Preview`. On `master` only: allowed merge method = merge commit. |
-| 1.3 | Agent | CI: run on `staging` as well as `master`. Add a `release-source` job that fails any PR into `master` whose source branch is not `staging`. |
+| 1.1 | Agent | Create `staging` from the tip of `master`. **Done 2026-11-18** (`90a0239`). |
+| 1.2 | Owner | Default branch → `staging`. Protection on both branches: pull request required; required checks `typecheck / build / test` and `Supabase Preview`. On `master` only: also require `release source`, and set allowed merge method = merge commit. |
+| 1.3 | Agent | CI: run on `staging` as well as `master`. Add a `release source` job that fails any PR into `master` whose source branch is not `staging`. Stop skipping docs-only changes, so required checks always report. |
 | 1.4 | Agent | Add `supabase/config.toml`: project id, the `custom_access_token_hook`, auth site URL and redirect list, storage and realtime defaults mirroring production. No `[remotes.production]` block — production auth settings stay untouched. Record production's current auth settings in the PR so the base config can be compared against them. |
 | 1.5 | Agent | Add `src/client/lib/env.ts` (`APP_ENV`, `isProduction`, production-project guard), declare `VITE_APP_ENV` and `VITE_DEMO_PASSWORD` in `vite-env.d.ts`, document them in `.env.example`. |
 | 1.6 | Agent | Add `vercel.json` with a catch-all rewrite to `/index.html` so deep links survive a refresh. |
@@ -114,7 +113,7 @@ safeguards as `master`. No effect on production.
 | 4.1 | Owner | Hostnames and DNS for production and staging. |
 | 4.2 | Owner + Agent | Configure Vercel's production environment (production Supabase URL and key, `VITE_APP_ENV=production`). |
 | 4.3 | Owner + Agent | Set production's Supabase Auth site URL and redirect list to the production hostname. This is a one-time dashboard change on production, recorded in the ops doc. |
-| 4.4 | Owner | Turn on "Deploy to production" in the Supabase GitHub integration. Requires a yes on [ADR-0009](../adr/0009-schema-ownership.md). |
+| 4.4 | Owner | Turn on "Deploy to production" in the Supabase GitHub integration. From then on the website repo applies no migrations ([ADR-0009](../adr/0009-schema-ownership.md)). |
 | 4.5 | Agent | Rehearsal release: one harmless additive migration and one visible UI change, taken through `staging` → test → release PR → `master`. |
 | 4.6 | Owner | Approve the rehearsal release PR. |
 | 4.7 | Agent | Verify: production migration list gained exactly the new version; production site shows the UI change; staging and production are on the same commit. Write the release runbook from what actually happened. |

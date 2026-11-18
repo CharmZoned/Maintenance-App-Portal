@@ -3,8 +3,8 @@
 **Status:** Approved by the owner · 2026-11-18 · build steps in [`BUILD_PLAN.md`](BUILD_PLAN.md)
 **Scope:** A real staging environment (UI + database) with one-click role sign-in, and a
 controlled path from staging to production for both the UI and the database.
-**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). Nine are settled, one
-is awaiting a yes or no — see [Decisions needed](#decisions-needed).
+**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). All ten are
+settled — see [Decisions needed](#decisions-needed).
 
 Nothing in this plan has been executed. No database, branch, or hosting change was made
 while writing it.
@@ -157,13 +157,8 @@ Settled by the owner on 2026-11-18:
 | [0006](../adr/0006-one-click-role-sign-in.md) | How the four buttons sign in | Demo password as a staging-only build variable, reachable only after the Vercel login |
 | [0007](../adr/0007-staging-data-and-seeding.md) | Staging data | Scripted fake data with a reset action; never a copy of production |
 | [0008](../adr/0008-pr-previews.md) | Preview site per pull request | Yes, pointed at the staging database |
+| [0009](../adr/0009-schema-ownership.md) | Database structure changes | Written in this repo only; the website repo applies none |
 | [0010](../adr/0010-repository-visibility.md) | Repo visibility | Private, after moving GitHub to a paid plan |
-
-Awaiting a yes or no:
-
-| # | Question | Working assumption |
-|---|---|---|
-| [0009](../adr/0009-schema-ownership.md) | When the website needs a database structure change, is it written in this repo? | Yes — required for automatic releases to keep working |
 
 Smaller items, with the default the build plan assumes until the owner says otherwise:
 
@@ -181,7 +176,7 @@ Each phase is independently shippable and leaves production untouched until Phas
 
 | Phase | Work | Owner action needed | Size |
 |---|---|---|---|
-| **0 — Owner setup** | Move GitHub to a paid plan, then make the repo private; answer ADR-0009. | See [`BUILD_PLAN.md`](BUILD_PLAN.md) | — |
+| **0 — Owner setup** | Move GitHub to a paid plan, then make the repo private. | See [`BUILD_PLAN.md`](BUILD_PLAN.md) | — |
 | **1 — Repo foundations** | Create `staging` branch from `master`; make it the default; extend CI to it; add `supabase/config.toml`; add `VITE_APP_ENV` and an `env.ts` module; add `vercel.json` (SPA fallback); update the stale ops docs. | Change default branch and branch protection in GitHub settings | S |
 | **2 — Staging database** | Rebuild the staging branch as persistent and linked to git `staging`; confirm all migrations apply from zero; confirm the access-token hook is on; add the seed script and the "Reset staging data" workflow. | Add secrets to GitHub (wipe already approved) | M |
 | **3 — Staging site** | Vercel project; staging environment variables; login gate; staging domain. Build the quick sign-in card, ribbon, role switcher, `?as=` deep link, and the production-bundle guard test. | Invite testers as Viewers; DNS record | M |

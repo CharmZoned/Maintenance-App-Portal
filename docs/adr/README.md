@@ -16,7 +16,7 @@ new ADR that supersedes it.
 | [0006](0006-one-click-role-sign-in.md) | One-click role sign-in on staging | Accepted |
 | [0007](0007-staging-data-and-seeding.md) | Staging data and seeding | Accepted |
 | [0008](0008-pr-previews.md) | Per-pull-request preview sites | Accepted |
-| [0009](0009-schema-ownership.md) | Schema ownership across portal and website | Proposed (working rule) |
+| [0009](0009-schema-ownership.md) | Schema ownership across portal and website | Accepted |
 | [0010](0010-repository-visibility.md) | Repository visibility | Accepted |
 
 Overview: [`docs/staging/DESIGN_PLAN.md`](../staging/DESIGN_PLAN.md) · Build steps:
