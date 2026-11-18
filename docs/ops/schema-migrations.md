@@ -19,8 +19,8 @@ Agents: phase-ship expects migrations in the PR. Applying is never a substitute 
 ## Filenames and versions (must stay unique)
 
 - Repo files are `YYYYMMDDHHMMSS_<snake_name>.sql`. The **14-digit prefix is the migration version**.
-- **Every new migration version must be unique** across `master` and all open PRs. Do not reuse a timestamp already claimed by another branch (coordinate or bump by ≥1 second / use a later slot).
-- Prefer bumping forward from the latest repo prefix on `master` (and scan open `cursor/*` branches before picking).
+- **Every new migration version must be unique** across `staging`, `master`, and all open PRs. Do not reuse a timestamp already claimed by another branch (coordinate or bump by ≥1 second / use a later slot).
+- Prefer bumping forward from the latest repo prefix on `staging` (and scan open `cursor/*` branches before picking).
 
 ## Applying without version drift
 

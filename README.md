@@ -89,7 +89,7 @@ pnpm build
 
 ```bash
 pnpm test:ui      # dashboard at http://localhost:4600 — requirements, workflows, what needs fixing
-pnpm test         # data-layer tests (~25s); CI runs this on PRs to master
+pnpm test         # data-layer tests (~25s); CI runs this on PRs to staging and master
 pnpm test:all     # everything, incl. the real UI in a browser; writes tests/.results/report.html
 pnpm dev:local    # run the portal against a local backend with demo logins (never touches live)
 ```
@@ -98,10 +98,21 @@ Tests run against a local Supabase emulator built from `supabase/migrations/`. S
 
 ## CI
 
-PRs to `master` run `pnpm typecheck`, `pnpm build`, and `pnpm test` via
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml). Making that check
-**required** needs an owner click in branch protection — see
+PRs into `staging` and `master` (and pushes to either) run `pnpm typecheck`,
+`pnpm build`, and `pnpm test` via
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml), including docs-only
+changes. A second job, `release source`, fails any PR into `master` that does
+not come from `staging`. Making the checks **required** needs an owner click in
+branch protection — see
 [`docs/ops/ci-required-checks.md`](docs/ops/ci-required-checks.md).
+
+## Environments and releases
+
+Work goes feature branch → PR into `staging` → release PR `staging` → `master`
+(production). The staging environment and release path are being built in phases:
+design in [`docs/staging/DESIGN_PLAN.md`](docs/staging/DESIGN_PLAN.md), ordered
+steps in [`docs/staging/BUILD_PLAN.md`](docs/staging/BUILD_PLAN.md), decisions in
+[`docs/adr/`](docs/adr/README.md).
 
 ## Project layout
 

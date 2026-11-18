@@ -12,14 +12,14 @@
 | **WS-O** thin calendar | **YES** — staffed |
 | **WS-P** Zillow research | **NO** — leave deferred |
 | **WS-Q** website visual | **NO** — leave deferred |
-| **Portal hosting + URL** (**roadmap #3** = hygiene **#13**) | **Out of Wave 3** — deferred until owner provides the link (live landlordgopher.com still old WordPress; Next.js not launched). ≠ hygiene #3 |
+| **Portal hosting + URL** (**roadmap #3** = hygiene **#13**) | **Out of Wave 3** (live landlordgopher.com still old WordPress; Next.js not launched). ≠ hygiene #3. **Update 2026-11-18:** no longer deferred — planned on Vercel in Phases 3–4 of [`docs/staging/BUILD_PLAN.md`](./staging/BUILD_PLAN.md) |
 | Status labels (hygiene #11) | **Keep live five** — Open / Scheduled / In Progress / On Hold / Closed (tenant shows Open as Submitted). No CHECK rename. |
 
 ## Streams (staffed)
 
 | Stream | Size | Conflict | Start |
 |--------|------|----------|-------|
-| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL. Status SoT: [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) § Staging / §E |
+| **WS-I** Staging Supabase + migration history repair (#8 only) | S–M | Low–med vs S history | Now — **no** hosting/URL. **Update 2026-11-18:** history verified matching (done, do not re-run §E); staging rebuild moved to [`docs/staging/BUILD_PLAN.md`](./staging/BUILD_PLAN.md) Phase 2. Status SoT: [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) § Staging database |
 | **WS-K** Accept & schedule | M | **High** on `work-order-dialog.tsx` | Now |
 | **WS-N** Perf/docs (one lane) | S–M | Low–med | Now |
 | **WS-O** Thin read-only calendar | M | Med; prefer after K | After K (or coordinated) |
@@ -35,7 +35,7 @@
 9 → **WS-R**  
 11 → **done (docs)** — keep live five statuses (no New/Assigned/Completed rename)  
 12 web push → **WS-L hold**  
-13 hosting/deploy + portal URL + website env → **deferred-work** (not Wave 3)
+13 hosting/deploy + portal URL + website env → not Wave 3; since 2026-11-18 planned in [`docs/staging/BUILD_PLAN.md`](./staging/BUILD_PLAN.md) (Phases 3–4)
 
 ## Hold / not staffed
 

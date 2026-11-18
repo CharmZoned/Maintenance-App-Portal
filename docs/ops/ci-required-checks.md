@@ -34,8 +34,8 @@ Branch protection cannot be set from a PR — a repo admin/owner must set it in 
 This is owner action **O3** in [`docs/staging/BUILD_PLAN.md`](../staging/BUILD_PLAN.md)
 (task 1.2).
 
-1. **Settings → General → Default branch:** change it to `staging`, so PRs target it
-   without being told.
+1. In the repo **Settings**, change the **default branch** to `staging`, so PRs target
+   it without being told.
 2. Open **Settings → Branches → Branch protection rules**  
    (or **Rules → Rulesets** if the repo uses rulesets) and add a rule for each branch:
 
@@ -57,6 +57,7 @@ Until this is set, the workflow still runs on PRs but merge is not blocked by Gi
 
 ## Notes
 
+- Only require checks that always report. Do not put a path filter back on the workflow while its jobs are required.
 - Do **not** require Playwright (`pnpm test:browser`) or the full dashboard run in this gate — those are slower / optional.
 - R6 notification todos stay as `test.todo` until **WS-L**; they must not fail CI.
 - Action versions are pinned by commit SHA in the workflow (not floating `@v4` tags alone).
