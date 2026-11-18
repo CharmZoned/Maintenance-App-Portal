@@ -5,6 +5,11 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  server: {
+    // Bind IPv4 so Cloud Agent / browser previews on 127.0.0.1 work
+    // (default Vite listen can be IPv6-only ::1 on this host).
+    host: "127.0.0.1",
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,
