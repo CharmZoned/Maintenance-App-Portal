@@ -92,11 +92,12 @@ LeaseTenants: composite PK `(lease_id, tenant_id)`.
 ### `RentCharges` / `Payments`
 
 Charges: `lease_id`, `period` (`YYYY-MM`), `due_date`, `amount`, `amount_paid`, `status`, `notes`.  
-Payments: `charge_id`, `paid_at`, `amount`, `method`, `reference`, `notes`.
+Payments: `charge_id`, `paid_at`, `amount`, `method` (`cash|check|ach|credit|other|zelle`), `reference`, `notes`.
 
 Same advisor gap → Phase 1 policies.  
 **Phase 1.5:** `FORCE ROW LEVEL SECURITY`; portal mutates via RPCs `public.record_payment` / `public.delete_payment` (admin-only; `amount_paid`/`status` from `SUM(Payments)`). Authenticated Payment INSERT/UPDATE/DELETE policies dropped — use RPCs only (SELECT kept for history).  
-**WS-S S2 #3:** `EXECUTE` revoked from `anon` (+ `PUBLIC`); re-asserted `GRANT` to `authenticated` (`20261114050000_*`). `service_role` retains EXECUTE via prior defaults. No other payment RPCs.
+**WS-S S2 #3:** `EXECUTE` revoked from `anon` (+ `PUBLIC`); re-asserted `GRANT` to `authenticated` (`20261114050000_*`). `service_role` retains EXECUTE via prior defaults.  
+**Tenant self-serve (LD-27):** `PaymentIntents` / `PaymentProcessorEvents` / `PropertyZelleInstructions` + RPCs `initiate_tenant_payment`, `report_zelle_sent`, `cancel_tenant_payment_intent`, `confirm_zelle_payment` (admin), `attach_payment_intent_processor_id`. Settlement via `private.settle_payment_intent` (service_role / admin confirm) — tenants never INSERT `Payments`. Edge stubs: `create-payment-intent`, `stripe-webhook`.
 
 ### `Vendors`
 
@@ -150,9 +151,15 @@ Internal staff notes for a work order (WS-E). PK `maintenance_request_id` → `M
 
 ### `PropertyDocuments`
 
-Property (and optional unit) file metadata. Visibility CHECK: `tenant | staff | landlord` (default `staff`). Path shape `{property_id}/{filename}`.
+Property (and optional unit) file metadata. Visibility CHECK: `tenant | staff | landlord` (default `staff`). Path shape `{property_id}/{filename}`.  
+**LD-29:** `category` CHECK `lease|addendum|notice|other` (default `other`) for tenant portal chips.  
+**LD-30:** `submit_tenant_property_document` RPC — tenant metadata-first upload forced to `visibility=tenant` on own unit; storage INSERT allows uploader JWT when row exists.
 
-**Phase 5:** Admin-only visibility mark (trigger + INSERT/UPDATE policies). Hierarchical SELECT via `private.can_select_property_document`. Staff/admin manage via `private.can_manage_property_documents`. FORCE RLS. Storage bucket `property-documents` (private, 20 MB). `unit_id` ON DELETE CASCADE (unit-scoped docs must not widen ACL via SET NULL).
+**Phase 5:** Admin-only visibility mark (trigger + INSERT/UPDATE policies; tenant self-upload exception for `visibility=tenant`). Hierarchical SELECT via `private.can_select_property_document`. Staff/admin manage via `private.can_manage_property_documents`. FORCE RLS. Storage bucket `property-documents` (private, 20 MB). `unit_id` ON DELETE CASCADE (unit-scoped docs must not widen ACL via SET NULL).
+
+### `PaymentIntents` / `PaymentProcessorEvents` / `PropertyZelleInstructions` / `PaymentReceipts`
+
+Tenant pay flow + webhook audit + Zelle copy + receipt metadata (LD-27/30). See payment RPC notes under RentCharges/Payments.
 
 ### `inquiries`
 
@@ -184,6 +191,12 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `public.refresh_property_unit_statuses` | Sync property occupancy from units |
 | `public.record_payment(...)` | Phase 1.5: admin-only atomic payment + charge update; anon EXECUTE revoked (WS-S S2 #3) |
 | `public.delete_payment(id)` | Phase 1.5: admin-only atomic payment delete + balance recompute; anon EXECUTE revoked (WS-S S2 #3) |
+| `public.update_tenant_profile(...)` | LD-28: approved tenant updates own name/phone/emergency only |
+| `public.initiate_tenant_payment(...)` | LD-27: tenant creates PaymentIntent; does not post Payments |
+| `public.report_zelle_sent` / `confirm_zelle_payment` | LD-27: tenant awaiting-verification → admin settle |
+| `public.submit_tenant_property_document(...)` | LD-30: tenant document metadata insert |
+
+**Realtime (LD-30):** `supabase_realtime` publishes `MaintenanceRequests` + `MaintenanceRequestComments` only (not messages).
 
 ---
 
@@ -192,7 +205,8 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | Bucket | Public | Limit | Notes |
 |--------|--------|-------|-------|
 | `maintenance-photos` | private | 10 MB | Path prefix = request id; policies mirror maintenance ACL |
-| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL; INSERT/UPDATE/DELETE require existing `PropertyDocuments.storage_path` (WS-E; upload inserts metadata first) |
+| `property-documents` | private | 20 MB | Path prefix = property id; SELECT via document row + visibility ACL; INSERT/UPDATE/DELETE require existing `PropertyDocuments.storage_path` (WS-E; upload inserts metadata first); tenant uploader allowed for own tenant-visible rows |
+| `payment-receipts` | private | 10 MB | Path `receipts/{payment_id}/…`; SELECT via payment lease ACL; staff/admin insert after metadata row |
 
 ---
 
