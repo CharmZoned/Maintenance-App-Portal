@@ -1,10 +1,10 @@
 # Staging environment — design plan
 
-**Status:** Draft for owner review · 2026-11-18
+**Status:** Approved by the owner · 2026-11-18 · build steps in [`BUILD_PLAN.md`](BUILD_PLAN.md)
 **Scope:** A real staging environment (UI + database) with one-click role sign-in, and a
 controlled path from staging to production for both the UI and the database.
-**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). Eight are settled, two
-are awaiting an owner answer — see [Decisions needed](#decisions-needed).
+**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). Nine are settled, one
+is awaiting a yes or no — see [Decisions needed](#decisions-needed).
 
 Nothing in this plan has been executed. No database, branch, or hosting change was made
 while writing it.
@@ -91,7 +91,7 @@ A "Staging quick sign-in" card sits above the normal form:
 | Admin | Ada Admin — operations manager | Dashboard |
 | Landlord | Lena Owner — Maple Court | Landlord home |
 | Tenant | Tina Renter — Unit 1A | Tenant home |
-| Maintenance | Sam Fixit — technician | My jobs |
+| Maintenance | Sam Fixit — technician | Assigned jobs |
 
 One click signs in and routes to that role's home. The regular email/password form stays
 underneath so real sign-up, password reset, and the approval queue can still be tested.
@@ -154,28 +154,26 @@ Settled by the owner on 2026-11-18:
 | [0003](../adr/0003-staging-database.md) | Broken staging database | Wipe and rebuild as a persistent branch |
 | [0004](../adr/0004-database-promotion.md) | Database releases | Applied to production automatically when the release PR is approved |
 | [0005](../adr/0005-staging-access-gate.md) | Who can reach staging | Owner plus named testers, via Vercel Authentication and free Viewer seats |
+| [0006](../adr/0006-one-click-role-sign-in.md) | How the four buttons sign in | Demo password as a staging-only build variable, reachable only after the Vercel login |
 | [0007](../adr/0007-staging-data-and-seeding.md) | Staging data | Scripted fake data with a reset action; never a copy of production |
 | [0008](../adr/0008-pr-previews.md) | Preview site per pull request | Yes, pointed at the staging database |
 | [0010](../adr/0010-repository-visibility.md) | Repo visibility | Private, after moving GitHub to a paid plan |
 
-Still open — the owner asked for clarification before deciding:
+Awaiting a yes or no:
 
-| # | Question | Recommendation |
+| # | Question | Working assumption |
 |---|---|---|
-| [0006](../adr/0006-one-click-role-sign-in.md) | How do the four buttons authenticate? | Demo password as a staging-only build variable, reachable only after the Vercel login |
-| [0009](../adr/0009-schema-ownership.md) | Which repo may change the shared database's structure? | This repo only |
+| [0009](../adr/0009-schema-ownership.md) | When the website needs a database structure change, is it written in this repo? | Yes — required for automatic releases to keep working |
 
-Smaller items that need an answer but not an ADR:
+Smaller items, with the default the build plan assumes until the owner says otherwise:
 
-- **Domains.** Production and staging hostnames for the portal (for example
-  `portal.<domain>` and `staging-portal.<domain>`), and who controls DNS.
-- **Stale `main` branch.** Delete it? It is 42 commits behind `master` and unused.
-- **Backups before releases.** Production has daily backups on Pro. Point-in-time
-  recovery is a paid add-on; recommended only once real rent payments flow through.
-- **Staging email.** Leave staging on Supabase's built-in rate-limited mailer, or route it
-  to a mail sandbox so sign-up and reset flows can be tested without limits.
-- **Stripe on staging.** Deploy the three Edge Functions to staging with Stripe test keys
-  now, or wait until the Stripe hold lifts.
+| Item | Default |
+|---|---|
+| Portal hostnames | Staging starts on the Vercel-provided address; real hostnames are needed only for Phase 4 |
+| Stale `main` branch (42 commits behind `master`) | Left alone until the owner approves deleting it |
+| Staging email | Supabase's built-in mailer |
+| Stripe and the three Edge Functions | Not deployed to staging or production until the Stripe hold lifts |
+| Point-in-time recovery on production | Not purchased; revisit when real rent payments flow through the portal |
 
 ## 5. Rollout plan
 
@@ -183,7 +181,7 @@ Each phase is independently shippable and leaves production untouched until Phas
 
 | Phase | Work | Owner action needed | Size |
 |---|---|---|---|
-| **0 — Decide** | Answer ADR-0006 and ADR-0009; confirm domains; move GitHub to a paid plan, then make the repo private. | Decisions above | — |
+| **0 — Owner setup** | Move GitHub to a paid plan, then make the repo private; answer ADR-0009. | See [`BUILD_PLAN.md`](BUILD_PLAN.md) | — |
 | **1 — Repo foundations** | Create `staging` branch from `master`; make it the default; extend CI to it; add `supabase/config.toml`; add `VITE_APP_ENV` and an `env.ts` module; add `vercel.json` (SPA fallback); update the stale ops docs. | Change default branch and branch protection in GitHub settings | S |
 | **2 — Staging database** | Rebuild the staging branch as persistent and linked to git `staging`; confirm all migrations apply from zero; confirm the access-token hook is on; add the seed script and the "Reset staging data" workflow. | Add secrets to GitHub (wipe already approved) | M |
 | **3 — Staging site** | Vercel project; staging environment variables; login gate; staging domain. Build the quick sign-in card, ribbon, role switcher, `?as=` deep link, and the production-bundle guard test. | Invite testers as Viewers; DNS record | M |

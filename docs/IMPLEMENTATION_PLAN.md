@@ -16,6 +16,7 @@ This file used to hold the full phased plan. That snapshot is archived at
 | [`docs/ops/ci-required-checks.md`](ops/ci-required-checks.md) | CI workflow + making the check required |
 | [`docs/phases/`](phases/) | Per-phase briefs (historical DoD) |
 | [`docs/supabase-schema.md`](supabase-schema.md) | Schema field notes |
+| [`docs/staging/BUILD_PLAN.md`](staging/BUILD_PLAN.md) | Staging environment + staging → production release path (design in [`DESIGN_PLAN.md`](staging/DESIGN_PLAN.md), decisions in [`docs/adr/`](adr/README.md)) |
 
 ## Status snapshot (after Wave 1–2 on `master`)
 

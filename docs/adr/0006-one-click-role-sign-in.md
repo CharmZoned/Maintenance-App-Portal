@@ -1,6 +1,6 @@
 # ADR-0006: One-click role sign-in on staging
 
-**Status:** Proposed
+**Status:** Accepted — owner decision, 2026-11-18: Option A, behind the Vercel login
 
 ## Context
 
@@ -16,7 +16,7 @@ Constraints:
 
 ## Options
 
-### A. Demo password as a staging-only build variable (recommended)
+### A. Demo password as a staging-only build variable (chosen)
 
 The staging build receives `VITE_DEMO_PASSWORD` from Vercel. Each button calls the normal
 `signInWithPassword` with that role's demo email. Role emails are not secret and live in
@@ -43,7 +43,7 @@ A function holding the service-role key issues a session for the chosen demo use
 - Puts a sign-in-as-anyone endpoint into a codebase that deploys to production. A single
   misconfigured variable would turn it into a production backdoor. **Rejected.**
 
-## Decision (recommended)
+## Decision
 
 **Option A**, with four independent production guards:
 
@@ -62,7 +62,8 @@ A function holding the service-role key issues a session for the chosen demo use
 
 - Card titled "Staging quick sign-in" above the normal form, four buttons, each showing the
   role, the persona name, and what they can see (for example "Tenant · Tina · Unit 1A").
-- Click → sign in → route to that role's home. Failure shows the Supabase error inline
+- Click → sign in → route to that role's home (`ROLE_HOME` in `safe-redirect.ts`: admin
+  `/dashboard`, landlord and tenant `/home`, maintenance `/maintenance`). Failure shows the Supabase error inline
   with a hint to run "Reset staging data".
 - `/login?as=admin|landlord|tenant|maintenance` does the same without a click; it honours
   the existing `?redirect=` handling.

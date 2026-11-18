@@ -1,6 +1,21 @@
 # ADR-0009: Schema ownership across portal and website
 
-**Status:** Proposed
+**Status:** Proposed — used as the working rule in the build plan; awaiting the owner's
+yes or no
+
+## The decision in one line
+
+When the website needs a change to the database's structure, is that change written in
+**this repo** (yes) or in the **website repo** (no)?
+
+The owner maintains both repos, so nobody else has to agree. Saying yes changes nothing
+today: the website keeps reading listings and saving inquiries exactly as it does now. It
+only changes where the *next* structural change is written.
+
+Saying no conflicts with [ADR-0004](0004-database-promotion.md), which is already
+accepted. Automatic releases fail when production contains a migration this repo does not
+know about — which is what happened on 2026-11-14 and needed five "history parity" files
+to fix.
 
 ## Context
 
@@ -43,4 +58,6 @@ Option 1.
 - Website changes that need schema work require a PR here first. That is a small
   coordination cost paid deliberately.
 - Options 2 and 3 remain open later; nothing here blocks them.
-- Needs the website repo's maintainers to agree, and a matching note in that repo.
+- In practice: when asking an agent for a website feature that needs a new table,
+  column, or access rule, the database part is a PR here. A short note in each repo's
+  agent instructions makes that automatic.
