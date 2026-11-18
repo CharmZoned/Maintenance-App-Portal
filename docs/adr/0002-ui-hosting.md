@@ -1,6 +1,6 @@
 # ADR-0002: UI hosting on Vercel
 
-**Status:** Accepted — owner decision, 2026-11-18. Plan tier and domains still open.
+**Status:** Accepted — owner decision, 2026-11-18. Domains still open.
 
 ## Context
 
@@ -44,9 +44,8 @@ documented sync race on preview deployments.
 
 ## Consequences
 
-- This is a client's commercial product, so the team must be on **Pro** ($20/month per
-  seat that deploys). Viewer seats are free and unlimited. See
-  [ADR-0005](0005-staging-access-gate.md).
+- The owner's Vercel team is already on **Pro**, which a commercial product requires.
+  Viewer seats are free and unlimited. See [ADR-0005](0005-staging-access-gate.md).
 - Pro includes one custom environment per project, which is exactly the staging
   environment. More cost $50/month per pack of five.
 - Rollback of the UI is Vercel's instant rollback to the previous production deployment.

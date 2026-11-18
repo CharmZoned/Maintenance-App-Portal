@@ -1,6 +1,6 @@
 # ADR-0010: Repository visibility
 
-**Status:** Proposed
+**Status:** Accepted — owner decision, 2026-11-18: make the repository private
 
 ## Context
 
@@ -24,26 +24,30 @@ fork pull requests become a route to preview builds.
 
 ## Options
 
-1. **Make it private (recommended).** One setting. CI, Vercel, and Supabase integrations
+1. **Make it private (chosen).** One setting. CI, Vercel, and Supabase integrations
    keep working once their GitHub apps are granted access.
 2. **Stay public, deliberately.** Keep the open-source lineage visible. Accept the
    exposure and keep every secret out of the repo, as this plan already does.
 3. **Split.** Publish a sanitised template; keep the Landlord Gopher product private.
    Most work, only worthwhile if open-sourcing is a goal.
 
-## Decision (recommended)
+## Decision
 
-Option 1, unless there is a reason to stay public that is not visible in the repo.
+Option 1. The GitHub account is on the free plan today; the owner will move to a paid
+plan.
+
+Order matters: **upgrade the GitHub plan first, then switch the repository to private.**
+Done the other way round, branch protection is lost in between.
 
 ## Consequences
 
-- Check the GitHub plan before switching. On the free plan, private repositories get a
-  monthly Actions-minutes allowance and lose branch protection, which
-  [ADR-0001](0001-environments-and-promotion.md) depends on. Going private may therefore
-  mean a paid GitHub plan.
+- On the free plan, private repositories lose branch protection, which
+  [ADR-0001](0001-environments-and-promotion.md) depends on — hence the paid plan.
+  Private repositories also draw on a monthly Actions-minutes allowance.
+- After the switch, re-grant repository access to the Vercel, Supabase, Cursor, and
+  Claude GitHub apps if any of them lose it.
 - The staging design in this plan is safe either way. It was written for the public case,
   so nothing needs to change if the repo stays public.
 - Going private does not un-publish history already cloned or indexed. Treat anything
   that was ever committed as known.
-- If it stays public: add secret scanning and push protection in the repository settings,
-  and keep the fork-PR rules in [ADR-0008](0008-pr-previews.md).
+- Until the switch happens, the fork-PR rules in [ADR-0008](0008-pr-previews.md) apply.

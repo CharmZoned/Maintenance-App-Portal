@@ -1,7 +1,7 @@
 # ADR-0005: Who can reach staging, and how
 
-**Status:** Audience **Accepted** (owner, 2026-11-18): the owner plus named testers.
-Mechanism **Proposed**.
+**Status:** Accepted — owner decision, 2026-11-18: the owner plus named testers, gated
+by Vercel Authentication on the existing Pro team.
 
 ## Context
 
@@ -22,7 +22,7 @@ endpoint; it is protected by the fact that the demo password is not published an
 | **C. Shareable links** | Anyone holding a link | Free | Revoke the link |
 | **D. In-app unlock code** | Anyone who enters a code once per browser | Free, host-independent | Rotate the code for everyone |
 
-## Decision (recommended)
+## Decision
 
 **A**, with **C** for one-off reviewers:
 
@@ -35,11 +35,11 @@ endpoint; it is protected by the fact that the demo password is not published an
 
 ## Consequences
 
-- The Vercel team must be on Pro. Hobby allows only the owner past the gate and is
-  limited to non-commercial use.
+- The owner's Vercel team is already on Pro, so Viewer seats for testers cost nothing
+  extra.
 - Named access: each tester signs in as themselves and can be removed individually.
 - **Must verify during setup:** open the staging domain in a private window and confirm
   the Vercel login wall appears; confirm a Viewer seat gets through. If the staging custom
   domain turns out not to be covered by Standard Protection, fall back to **B**.
-- If the owner prefers not to pay for Pro, **D** is the fallback: no host dependency, but
-  access is one shared code rather than named people.
+- **D** stays available as a host-independent fallback if the Vercel gate ever proves
+  unsuitable; access would then be one shared code rather than named people.

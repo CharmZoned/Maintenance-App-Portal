@@ -1,6 +1,6 @@
 # ADR-0007: Staging data and seeding
 
-**Status:** Proposed
+**Status:** Accepted — owner decision, 2026-11-18
 
 ## Context
 
@@ -14,7 +14,7 @@ out.
 
 ## Options
 
-1. **Scripted synthetic seed (recommended).** A script creates the demo world and the demo
+1. **Scripted synthetic seed (chosen).** A script creates the demo world and the demo
    users through the Supabase admin API, with the password supplied from a secret. Run on
    demand from GitHub Actions.
 2. **`seed.sql` run by Supabase.** Automatic at branch creation, but cannot hold
@@ -22,7 +22,7 @@ out.
 3. **Anonymised copy of production.** Most realistic, but needs a scrubbing pipeline and
    carries a real risk of leaking tenant data into a sandbox where everyone is admin.
 
-## Decision (recommended)
+## Decision
 
 Option 1.
 

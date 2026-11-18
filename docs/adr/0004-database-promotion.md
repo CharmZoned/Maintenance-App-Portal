@@ -1,6 +1,6 @@
 # ADR-0004: Promoting database changes to production
 
-**Status:** Proposed
+**Status:** Accepted — owner decision, 2026-11-18: automatic on release approval
 
 ## Context
 
@@ -30,7 +30,7 @@ Auth settings, and it never runs seed files against production.
 | Things to build | None | None | Workflow, secrets, runbook |
 | Production DB credentials outside Supabase | No | On someone's machine | In GitHub secrets |
 
-## Decision (recommended)
+## Decision
 
 Option 1, with these rules:
 

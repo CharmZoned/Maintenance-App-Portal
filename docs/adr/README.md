@@ -10,13 +10,13 @@ new ADR that supersedes it.
 |---|---|---|
 | [0001](0001-environments-and-promotion.md) | Environments and promotion flow | Accepted |
 | [0002](0002-ui-hosting.md) | UI hosting on Vercel | Accepted |
-| [0003](0003-staging-database.md) | Staging database: rebuild, repair, or separate project | Proposed |
-| [0004](0004-database-promotion.md) | Promoting database changes to production | Proposed |
-| [0005](0005-staging-access-gate.md) | Who can reach staging, and how | Accepted (audience) · Proposed (mechanism) |
+| [0003](0003-staging-database.md) | Staging database: rebuild, repair, or separate project | Accepted |
+| [0004](0004-database-promotion.md) | Promoting database changes to production | Accepted |
+| [0005](0005-staging-access-gate.md) | Who can reach staging, and how | Accepted |
 | [0006](0006-one-click-role-sign-in.md) | One-click role sign-in on staging | Proposed |
-| [0007](0007-staging-data-and-seeding.md) | Staging data and seeding | Proposed |
-| [0008](0008-pr-previews.md) | Per-pull-request preview sites | Proposed |
+| [0007](0007-staging-data-and-seeding.md) | Staging data and seeding | Accepted |
+| [0008](0008-pr-previews.md) | Per-pull-request preview sites | Accepted |
 | [0009](0009-schema-ownership.md) | Schema ownership across portal and website | Proposed |
-| [0010](0010-repository-visibility.md) | Repository visibility | Proposed |
+| [0010](0010-repository-visibility.md) | Repository visibility | Accepted |
 
 Overview and rollout: [`docs/staging/DESIGN_PLAN.md`](../staging/DESIGN_PLAN.md).

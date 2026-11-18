@@ -1,6 +1,6 @@
 # ADR-0003: Staging database — rebuild, repair, or separate project
 
-**Status:** Proposed — owner asked for the trade-offs before deciding
+**Status:** Accepted — owner decision, 2026-11-18: Option A, wipe and rebuild
 
 ## Context
 
@@ -28,7 +28,7 @@ of `MIGRATIONS_FAILED`, and it will recur on every push until the history matche
 
 ## Options
 
-### A. Wipe and rebuild as a persistent branch (recommended)
+### A. Wipe and rebuild as a persistent branch (chosen)
 
 Delete the branch. Create a new persistent branch named `staging`, linked to git
 `staging`. Supabase applies every migration in `supabase/migrations/` from zero. Seed with
@@ -68,16 +68,17 @@ push migrations to it from CI.
 | Can test a Postgres upgrade on staging first | Loses the Supabase check that validates a PR's migrations before merge |
 | Roughly the same cost (~$10/month compute) | More secrets to hold in CI (access token, database passwords) |
 
-## Recommendation
+## Decision
 
 **Option A.** The only thing lost is test data nobody has used. What is gained is a
 staging database that is provably built from the repo and stays in step automatically.
 Option C is the right move later if staging ever needs production-grade isolation — for
 example, a copy of anonymised real data — and nothing in Option A blocks that.
 
-## Consequences if A is accepted
+## Consequences
 
-- Deleting the branch is destructive and needs an explicit owner go-ahead at the time.
+- The owner has approved the wipe. It is carried out in Phase 2 of the rollout, after
+  `config.toml` exists, and is announced before it runs because it cannot be undone.
 - `supabase/config.toml` must exist first, with the access-token hook declared; otherwise
   the new branch comes up with RLS policies that read JWT claims nobody sets.
 - The new project ref goes into `[remotes.staging]` in `config.toml`, into Vercel's

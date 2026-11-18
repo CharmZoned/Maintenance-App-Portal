@@ -3,8 +3,8 @@
 **Status:** Draft for owner review · 2026-11-18
 **Scope:** A real staging environment (UI + database) with one-click role sign-in, and a
 controlled path from staging to production for both the UI and the database.
-**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). Three are settled, the
-rest need an owner answer — see [Decisions needed](#decisions-needed).
+**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). Eight are settled, two
+are awaiting an owner answer — see [Decisions needed](#decisions-needed).
 
 Nothing in this plan has been executed. No database, branch, or hosting change was made
 while writing it.
@@ -145,26 +145,25 @@ deploy applies migrations, declared functions, and declared buckets only.
 
 ## 4. Decisions needed
 
-Settled on 2026-11-18:
+Settled by the owner on 2026-11-18:
 
 | # | Decision | Outcome |
 |---|---|---|
 | [0001](../adr/0001-environments-and-promotion.md) | Release flow | `staging` branch → release PR → `master` |
-| [0002](../adr/0002-ui-hosting.md) | UI hosting | Vercel |
-| [0005](../adr/0005-staging-access-gate.md) | Who can reach staging | You plus named testers (mechanism still open) |
+| [0002](../adr/0002-ui-hosting.md) | UI hosting | Vercel (existing Pro team) |
+| [0003](../adr/0003-staging-database.md) | Broken staging database | Wipe and rebuild as a persistent branch |
+| [0004](../adr/0004-database-promotion.md) | Database releases | Applied to production automatically when the release PR is approved |
+| [0005](../adr/0005-staging-access-gate.md) | Who can reach staging | Owner plus named testers, via Vercel Authentication and free Viewer seats |
+| [0007](../adr/0007-staging-data-and-seeding.md) | Staging data | Scripted fake data with a reset action; never a copy of production |
+| [0008](../adr/0008-pr-previews.md) | Preview site per pull request | Yes, pointed at the staging database |
+| [0010](../adr/0010-repository-visibility.md) | Repo visibility | Private, after moving GitHub to a paid plan |
 
-Open — each ADR has options, trade-offs, and a recommendation:
+Still open — the owner asked for clarification before deciding:
 
-| # | Question | Recommendation | Cost / risk if wrong |
-|---|---|---|---|
-| [0003](../adr/0003-staging-database.md) | Fix the broken staging database how? | Wipe and rebuild as a persistent branch | Destroys the `phase4-*` test data; ~$10/month |
-| [0004](../adr/0004-database-promotion.md) | Apply migrations to production automatically on release, or by hand? | Automatically, gated by release-PR approval | A bad migration reaches production as soon as you approve |
-| [0005](../adr/0005-staging-access-gate.md) | Which gate mechanism, which Vercel plan? | Vercel Authentication on a Pro team; testers as free Viewer seats | $20/month per deploying seat |
-| [0006](../adr/0006-one-click-role-sign-in.md) | How do the buttons authenticate? | Demo password as a staging-only build variable, behind the gate | Depends on the gate staying on |
-| [0007](../adr/0007-staging-data-and-seeding.md) | Where does staging data come from? | Scripted synthetic seed, reset on demand | Staging will not show real-world data oddities |
-| [0008](../adr/0008-pr-previews.md) | Should every PR get its own preview site? | Yes, pointed at the staging database | Schema-changing PRs cannot be previewed until merged to staging |
-| [0009](../adr/0009-schema-ownership.md) | Which repo owns the shared database schema? | This repo only | Drift returns if the website keeps applying its own migrations |
-| [0010](../adr/0010-repository-visibility.md) | Should this repo stay public? | Make it private | Schema, RLS logic, and project refs are world-readable today |
+| # | Question | Recommendation |
+|---|---|---|
+| [0006](../adr/0006-one-click-role-sign-in.md) | How do the four buttons authenticate? | Demo password as a staging-only build variable, reachable only after the Vercel login |
+| [0009](../adr/0009-schema-ownership.md) | Which repo may change the shared database's structure? | This repo only |
 
 Smaller items that need an answer but not an ADR:
 
@@ -184,10 +183,10 @@ Each phase is independently shippable and leaves production untouched until Phas
 
 | Phase | Work | Owner action needed | Size |
 |---|---|---|---|
-| **0 — Decide** | Answer the open ADRs; confirm domains. | Decisions above | — |
+| **0 — Decide** | Answer ADR-0006 and ADR-0009; confirm domains; move GitHub to a paid plan, then make the repo private. | Decisions above | — |
 | **1 — Repo foundations** | Create `staging` branch from `master`; make it the default; extend CI to it; add `supabase/config.toml`; add `VITE_APP_ENV` and an `env.ts` module; add `vercel.json` (SPA fallback); update the stale ops docs. | Change default branch and branch protection in GitHub settings | S |
-| **2 — Staging database** | Rebuild the staging branch as persistent and linked to git `staging`; confirm all migrations apply from zero; confirm the access-token hook is on; add the seed script and the "Reset staging data" workflow. | Go-ahead to wipe; add secrets to GitHub | M |
-| **3 — Staging site** | Vercel project; staging environment variables; login gate; staging domain. Build the quick sign-in card, ribbon, role switcher, `?as=` deep link, and the production-bundle guard test. | Create/upgrade Vercel team; invite testers; DNS record | M |
+| **2 — Staging database** | Rebuild the staging branch as persistent and linked to git `staging`; confirm all migrations apply from zero; confirm the access-token hook is on; add the seed script and the "Reset staging data" workflow. | Add secrets to GitHub (wipe already approved) | M |
+| **3 — Staging site** | Vercel project; staging environment variables; login gate; staging domain. Build the quick sign-in card, ribbon, role switcher, `?as=` deep link, and the production-bundle guard test. | Invite testers as Viewers; DNS record | M |
 | **4 — Production site** | Production domain and environment; Supabase Auth site URL and redirect list; enable production deploys on the Supabase integration; release-PR template; rehearse one full release end to end. | DNS record; approve first release PR | S |
 | **5 — Hardening** | Browser smoke test against staging after each deploy; scheduled migration drift check (repo vs. both databases); release tags; staging environment for the marketing website. | — | M |
 
@@ -211,7 +210,7 @@ Each phase is independently shippable and leaves production untouched until Phas
 | A migration works on staging but fails on production because the data differs | Supabase migration check on the release PR runs against a branch of production's schema; migrations stay additive; data-touching migrations get a dry run and a backup first |
 | UI and database deploy at slightly different moments during a release | Expand-then-contract rule: a migration must work with the previous UI; removals ship one release later |
 | `staging` and `master` drift apart | `master` accepts merges only from `staging`; release PRs use merge commits, never squash |
-| Fork pull requests on a public repo trigger builds with staging secrets | Demo variables scoped to the `staging` branch and team-authored previews only; Vercel requires approval for fork deploys |
+| Fork pull requests trigger builds with staging secrets while the repo is still public | Demo variables scoped to the `staging` branch and team-authored previews only; Vercel requires approval for fork deploys |
 | Website repo applies migrations to production again | ADR-0009; drift-check workflow in Phase 5 flags it within a day |
 | Branch compute is not covered by the Supabase spend cap | One persistent branch only (~$10/month); ephemeral PR branches stay off unless ADR-0008 changes |
 
