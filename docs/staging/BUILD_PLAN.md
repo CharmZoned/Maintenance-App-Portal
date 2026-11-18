@@ -1,6 +1,6 @@
 # Staging environment — build plan
 
-**Status:** Phase 1 in progress · 2026-11-18
+**Status:** Phase 1 built on branch `claude/amazing-pasteur-tzcs1d`, awaiting merge into `staging` and owner action O3 · 2026-11-18
 **Design and reasoning:** [`DESIGN_PLAN.md`](DESIGN_PLAN.md) · **Decisions:** [`docs/adr/`](../adr/README.md)
 
 This is the ordered list of work to turn the approved design into a running staging
@@ -41,12 +41,12 @@ safeguards as `master`. No effect on production.
 |---|---|---|
 | 1.1 | Agent | Create `staging` from the tip of `master`. **Done 2026-11-18** (`90a0239`). |
 | 1.2 | Owner | Default branch → `staging`. Protection on both branches: pull request required; required checks `typecheck / build / test` and `Supabase Preview`. On `master` only: also require `release source`, and set allowed merge method = merge commit. |
-| 1.3 | Agent | CI: run on `staging` as well as `master`. Add a `release source` job that fails any PR into `master` whose source branch is not `staging`. Stop skipping docs-only changes, so required checks always report. |
-| 1.4 | Agent | Add `supabase/config.toml`: project id, the `custom_access_token_hook`, auth site URL and redirect list, storage and realtime defaults mirroring production. No `[remotes.production]` block — production auth settings stay untouched. Record production's current auth settings in the PR so the base config can be compared against them. |
-| 1.5 | Agent | Add `src/client/lib/env.ts` (`APP_ENV`, `isProduction`, production-project guard), declare `VITE_APP_ENV` and `VITE_DEMO_PASSWORD` in `vite-env.d.ts`, document them in `.env.example`. |
-| 1.6 | Agent | Add `vercel.json` with a catch-all rewrite to `/index.html` so deep links survive a refresh. |
-| 1.7 | Agent | Add a default PR template and a release PR template (what is included, migrations listed, tested by, rollback note). |
-| 1.8 | Agent | Docs: replace the stale "staging does not exist" and "repair pending" sections of `docs/ops/schema-migrations.md` with the real state; update the hosting and staging rows in `docs/deferred-work.md`; point `docs/IMPLEMENTATION_PLAN.md` and the README at this plan. |
+| 1.3 ✅ | Agent | CI: run on `staging` as well as `master`. Add a `release source` job that fails any PR into `master` whose source branch is not `staging`. Stop skipping docs-only changes, so required checks always report. |
+| 1.4 ✅ | Agent | Add `supabase/config.toml`: project id, Postgres version, email confirmation, password minimum, local redirect list, the `custom_access_token_hook`. No `[remotes.production]` block — production auth settings stay untouched. Validated with `supabase config validate`. Production's own Auth settings cannot be read from here; see [Production settings to confirm](#production-settings-to-confirm). |
+| 1.5 ✅ | Agent | Add `src/client/lib/env.ts` (`APP_ENV`, `isProduction`, production-project guard), declare `VITE_APP_ENV` and `VITE_DEMO_PASSWORD` in `vite-env.d.ts`, document them in `.env.example`. |
+| 1.6 ✅ | Agent | Add `vercel.json` with a catch-all rewrite to `/index.html` so deep links survive a refresh. |
+| 1.7 ✅ | Agent | Add a default PR template and a release PR template (what is included, migrations listed, tested by, rollback note). |
+| 1.8 ✅ | Agent | Docs: replace the stale "staging does not exist" and "repair pending" sections of `docs/ops/schema-migrations.md` with the real state; update the hosting and staging rows in `docs/deferred-work.md`; point `docs/IMPLEMENTATION_PLAN.md` and the README at this plan. |
 
 **Checks**
 
@@ -56,6 +56,18 @@ safeguards as `master`. No effect on production.
   Supabase ones (existing behaviour unchanged).
 - The `Supabase Preview` check passes on the PR that adds `config.toml`.
 
+### Production settings to confirm
+
+These live only in the Supabase dashboard for production and cannot be read by an agent.
+The owner checks them once (Authentication → Sign In / Providers, URL Configuration,
+Hooks, Emails) so staging can be set to match. None blocks Phase 2.
+
+- Is the custom access token hook enabled?
+- Is "Confirm email" on, and are sign-ups allowed?
+- Minimum password length, required characters, leaked-password protection.
+- Site URL and the redirect allow-list.
+- Custom SMTP or Supabase's built-in mailer.
+
 ## Phase 2 — Staging database
 
 **Goal:** a staging database built entirely from the repo, holding the demo world.
@@ -63,11 +75,11 @@ safeguards as `master`. No effect on production.
 | # | Who | Task |
 |---|---|---|
 | 2.1 | Agent | Announce, then delete the broken branch `ffczsojnowxthntnliac`. This destroys its seven `phase4-*` accounts and cannot be undone (approved in [ADR-0003](../adr/0003-staging-database.md)). |
-| 2.2 | Agent | Create a persistent Supabase branch `staging` linked to git `staging`. Put its project ref in `[remotes.staging]` in `config.toml` and in the ops doc. |
+| 2.2 | Agent | Create a persistent Supabase branch `staging` linked to git `staging`. Put its project ref in `[remotes.staging]` in `config.toml` and in the ops doc, then push to `staging` — Supabase applies `config.toml` to a persistent branch only once a `[remotes]` block names it. |
 | 2.3 | Agent | Confirm all 59 migrations applied from zero and the recorded versions equal the repo filenames. Fix any failure with a new forward migration, never by editing an applied file. |
-| 2.4 | Agent | Verify what migrations do not carry: sign in and confirm the JWT contains `user_role`; confirm the four storage buckets exist; confirm the realtime publication. |
+| 2.4 | Agent | Verify what migrations do not carry: email confirmation and the 8-character minimum are enforced; a signed-in JWT contains `user_role`; the four storage buckets exist; the realtime publication exists. Check whether the three on-hold Edge Functions were deployed to the branch and remove them if so. |
 | 2.5 | Agent | Run Supabase security and performance advisors on staging and compare with production. |
-| 2.6 | Agent | Seed: split `tests/emulator/seed.ts` into one world definition with two targets (emulator, real Supabase). Extend the world: active and ended leases, several months of rent charges and payments, maintenance requests in every status with photos and comments, property documents, a pending account. Add `scripts/staging/seed.ts`, which aborts unless the target is the staging project ref. |
+| 2.6 | Agent | Seed: split `tests/emulator/seed.ts` into one world definition with two targets (emulator, real Supabase). Extend the world: active and ended leases, several months of rent charges and payments, maintenance requests in every status with photos and comments, property documents, a pending account. Add `scripts/staging/seed.ts`, which aborts unless the target is the staging project ref and creates demo users already email-confirmed (the built-in mailer cannot deliver to demo addresses). |
 | 2.7 | Owner | Add secrets: `STAGING_SUPABASE_URL`, `STAGING_SERVICE_ROLE_KEY`, `STAGING_DB_URL`, `STAGING_DEMO_PASSWORD` (a long random value; it is reused in Vercel in Phase 3). |
 | 2.8 | Agent | Add the manually triggered "Reset staging data" workflow: clear domain tables, delete demo users, re-seed. Run it once. |
 

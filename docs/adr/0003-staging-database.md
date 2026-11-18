@@ -79,8 +79,14 @@ example, a copy of anonymised real data — and nothing in Option A blocks that.
 
 - The owner has approved the wipe. It is carried out in Phase 2 of the rollout, after
   `config.toml` exists, and is announced before it runs because it cannot be undone.
-- `supabase/config.toml` must exist first, with the access-token hook declared; otherwise
-  the new branch comes up with RLS policies that read JWT claims nobody sets.
+- `supabase/config.toml` must exist first; otherwise the new branch comes up with
+  Supabase's default Auth settings (no email confirmation, six-character passwords, no
+  access-token hook) and behaves differently from production. Supabase applies the file
+  to a persistent branch only once `[remotes.staging]` names that branch, so the order
+  is: create the branch, record its ref in `[remotes.staging]`, push, then verify.
+- Correction, 2026-11-18: an earlier draft said RLS policies read the hook's JWT claims.
+  They do not; access helpers look roles up in `user_roles`. The hook is declared for
+  parity with production.
 - The new project ref goes into `[remotes.staging]` in `config.toml`, into Vercel's
   staging variables, and into `docs/ops/schema-migrations.md`, which is rewritten to
   describe the real state.

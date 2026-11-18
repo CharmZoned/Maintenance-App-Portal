@@ -66,9 +66,10 @@ uri = "pg-functions://postgres/public/custom_access_token_hook"
 
 # Staging block: filled in during Phase 2, once the persistent `staging` branch exists.
 # project_id must be the ref of an existing branch (20 lowercase letters, from
-# `npx supabase branches list`), so this cannot be live before then. Until it is, the persistent
-# staging branch receives NONE of the Auth settings above, including the hook. Values here replace
-# the ones above for that branch only; lists are replaced whole, not merged.
+# `npx supabase branches list`), so this cannot be live before then. Until it is, Supabase skips the
+# configure step for the persistent staging branch, so it gets none of the Auth settings above,
+# including the hook. Values here replace the ones above for that branch only; lists are replaced
+# whole, not merged.
 #
 # [remotes.staging]
 # project_id = "<staging-branch-project-ref>"
