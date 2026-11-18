@@ -102,7 +102,7 @@ export function WorkOrderMediaPanel({
               onChange={(e) => onPhotoFilesChange(takePhotoFiles(e.target.files, remainingPhotoSlots))}
             />
             <p className="text-xs text-muted-foreground">
-              Up to {remainingPhotoSlots} more (max {MAX_MAINTENANCE_PHOTOS} total).
+              Up to {remainingPhotoSlots} more.
             </p>
             {photoPreviews.length > 0 && (
               <div className="grid grid-cols-3 gap-2">

@@ -490,8 +490,19 @@ export class RestApi {
       given
         .map((g) => {
           const v = args[g];
-          values.push(v === null || v === undefined ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
-          return `${q(g)} => $${values.length}::${sig.argTypes[sig.argNames.indexOf(g)]}`;
+          const type = sig.argTypes[sig.argNames.indexOf(g)];
+          // PostgREST turns a JSON array into a Postgres array for array-typed arguments.
+          const asArray = Array.isArray(v) && type.endsWith("[]");
+          values.push(
+            v === null || v === undefined
+              ? null
+              : asArray
+                ? pgArrayLiteral(v as unknown[])
+                : typeof v === "object"
+                  ? JSON.stringify(v)
+                  : String(v),
+          );
+          return `${q(g)} => $${values.length}::${type}`;
         })
         .join(", ") +
       `)`;
@@ -516,6 +527,16 @@ export class RestApi {
     }
     return { status: 200, body };
   }
+}
+
+/** `["a", "b c"]` → `{"a","b c"}` (one-dimensional). */
+function pgArrayLiteral(items: unknown[]): string {
+  const cell = (item: unknown) => {
+    if (item === null || item === undefined) return "NULL";
+    const escaped = String(item).split("\\").join("\\\\").split('"').join('\\"');
+    return `"${escaped}"`;
+  };
+  return `{${items.map(cell).join(",")}}`;
 }
 
 function intParam(raw: string | null, name: string): number | null {

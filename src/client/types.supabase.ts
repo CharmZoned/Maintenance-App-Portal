@@ -194,6 +194,9 @@ export interface Database {
           job_title: string | null;
           gets_request_alerts: boolean;
           is_test_data: boolean;
+          company_name: string | null;
+          phone: string | null;
+          services: string[];
         };
         Insert: {
           id?: number;
@@ -204,6 +207,9 @@ export interface Database {
           job_title?: string | null;
           gets_request_alerts?: boolean;
           is_test_data?: boolean;
+          company_name?: string | null;
+          phone?: string | null;
+          services?: string[];
         };
         Update: Partial<Database["public"]["Tables"]["Staff"]["Insert"]>;
         Relationships: [];
@@ -360,6 +366,14 @@ export interface Database {
           location: string | null;
           permission_to_enter: boolean;
           client_submission_id: string | null;
+          offered_at: string | null;
+          offered_by_user_id: string | null;
+          accepted_at: string | null;
+          released_at: string | null;
+          released_by_staff_id: number | null;
+          tenant_fix_response: string | null;
+          tenant_fix_responded_at: string | null;
+          tenant_fix_note: string | null;
         };
         Insert: {
           id?: number;
@@ -386,8 +400,66 @@ export interface Database {
           location?: string | null;
           permission_to_enter?: boolean;
           client_submission_id?: string | null;
+          offered_at?: string | null;
+          offered_by_user_id?: string | null;
+          accepted_at?: string | null;
+          released_at?: string | null;
+          released_by_staff_id?: number | null;
+          tenant_fix_response?: string | null;
+          tenant_fix_responded_at?: string | null;
+          tenant_fix_note?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["MaintenanceRequests"]["Insert"]>;
+        Relationships: [];
+      };
+      OfficeMessages: {
+        Row: {
+          id: number;
+          created_at: string;
+          thread_user_id: string;
+          author_user_id: string | null;
+          author_role: Database["public"]["Enums"]["app_role"];
+          body: string;
+        };
+        Insert: {
+          id?: number;
+          created_at?: string;
+          thread_user_id: string;
+          author_user_id?: string | null;
+          author_role: Database["public"]["Enums"]["app_role"];
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["OfficeMessages"]["Insert"]>;
+        Relationships: [];
+      };
+      OfficeThreadReads: {
+        Row: {
+          user_id: string;
+          thread_user_id: string;
+          last_read_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          thread_user_id: string;
+          last_read_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["OfficeThreadReads"]["Insert"]>;
+        Relationships: [];
+      };
+      MaintenanceThreadReads: {
+        Row: {
+          user_id: string;
+          maintenance_request_id: number;
+          thread: string;
+          last_read_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          maintenance_request_id: number;
+          thread: string;
+          last_read_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceThreadReads"]["Insert"]>;
         Relationships: [];
       };
       MaintenanceRequestStaffNotes: {
@@ -669,6 +741,36 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      offer_maintenance_request: {
+        Args: { p_request_id: number; p_scheduled_for: string; p_cost: number };
+        Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
+      };
+      withdraw_maintenance_offer: {
+        Args: { p_request_id: number };
+        Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
+      };
+      accept_maintenance_request: {
+        Args: { p_request_id: number };
+        Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
+      };
+      release_maintenance_request: {
+        Args: { p_request_id: number; p_reason: string };
+        Returns: undefined;
+      };
+      confirm_maintenance_request_fixed: {
+        Args: { p_request_id: number; p_fixed: boolean; p_note?: string | null };
+        Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
+      };
+      update_staff_profile: {
+        Args: {
+          p_first_name: string;
+          p_last_name: string;
+          p_company_name?: string | null;
+          p_phone?: string | null;
+          p_services?: string[];
+        };
+        Returns: Database["public"]["Tables"]["Staff"]["Row"];
+      };
       record_payment: {
         Args: {
           p_charge_id: number;

@@ -416,6 +416,12 @@ describe("[R4] Maintenance requests", () => {
       );
       expect(held).toMatchObject({ status: "on_hold", hold_reason: "Waiting on a part" });
 
+      await expect(
+        data.updateWorkOrder(id, { status: "closed", resolution_notes: "Replaced the washer." }, { previousStatus: "on_hold" }),
+        "a worker cannot complete a job without a photo of the work",
+      ).rejects.toThrow(/photo of the finished work/);
+      await data.uploadMaintenancePhoto(id, pngFile("new-washer.png"));
+
       const closed = await data.updateWorkOrder(
         id,
         { status: "closed", resolution_notes: "Replaced the washer." },
@@ -430,6 +436,7 @@ describe("[R4] Maintenance requests", () => {
       await assign(id);
       await signInApp("worker");
       await expect(data.updateWorkOrder(id, { status: "on_hold" })).rejects.toThrow(/requests_hold_details/);
+      await data.uploadMaintenancePhoto(id, pngFile("work.png"));
       await expect(data.updateWorkOrder(id, { status: "closed" })).rejects.toThrow(/requests_closed_details/);
     });
 
@@ -470,6 +477,7 @@ describe("[R4] Maintenance requests", () => {
       );
       await signInApp("worker");
       await data.updateWorkOrder(wo.id, { status: "in_progress" }, { previousStatus: "scheduled" });
+      await data.uploadMaintenancePhoto(wo.id, pngFile("fixed.png"));
       await data.updateWorkOrder(wo.id, { status: "closed", resolution_notes: "Fixed." }, { previousStatus: "in_progress" });
 
       await signInApp("tenant");

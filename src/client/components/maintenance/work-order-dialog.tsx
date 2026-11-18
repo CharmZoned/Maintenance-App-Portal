@@ -24,7 +24,7 @@ import {
   type WorkOrderStaffFormValues,
 } from "./work-order-staff-fields";
 import { WorkOrderTenantDetail } from "./work-order-tenant-detail";
-import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
+import { MAX_MAINTENANCE_PHOTOS, photoSlotsLeft, takePhotoFiles } from "./work-order-status";
 
 interface WorkOrderDialogProps {
   open: boolean;
@@ -464,7 +464,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   async function uploadMorePhotos() {
     if (!workOrder || !photoFiles.length) return;
     const id = workOrder.id;
-    const remaining = Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length);
+    const remaining = photoSlotsLeft(photos, app.canEditWorkOrders && !app.isAdmin);
     try {
       await Promise.all(
         photoFiles.slice(0, remaining).map((file) => app.uploadMaintenancePhoto(id, file)),
@@ -545,7 +545,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 comments={comments}
                 photoFiles={photoFiles}
                 photoPreviews={photoPreviews}
-                remainingPhotoSlots={Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length)}
+                remainingPhotoSlots={photoSlotsLeft(photos, app.canEditWorkOrders && !app.isAdmin)}
                 onPhotoFilesChange={setPhotoFiles}
                 onUploadPhotos={() => void uploadMorePhotos()}
                 commentBody={commentBody}

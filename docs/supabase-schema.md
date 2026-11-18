@@ -140,6 +140,29 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 **LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).  
 **WS-E:** internal `notes` moved off the request row (see StaffNotes below). `landlord_owns_unit` / `landlord_can_see_*` use hardened `current_landlord_id()`. `can_upload_maintenance_photo` codified in repo migrations.
 
+### Worker job pool (`20261118190000_worker_job_pool.sql`)
+
+Owner decisions 2026-11-18. **Not applied to live yet** — apply after review, per [`ops/schema-migrations.md`](./ops/schema-migrations.md).
+
+- **Workers = Staff.** Maintenance staff and vendors are the same thing. `Staff` gains `company_name`, `phone`, `services text[]` (same values as request `category`; empty = takes every category). `Vendors` and `MaintenanceRequests.vendor_id` are deprecated and left in place until the portal stops reading them.
+- **Available is derived, not a status:** `status = 'Open' AND offered_at IS NOT NULL AND assigned_staff_id IS NULL`. New request columns: `offered_at`, `offered_by_user_id`, `accepted_at`, `released_at`, `released_by_staff_id`, `tenant_fix_response` (`confirmed` | `not_fixed`), `tenant_fix_responded_at`, `tenant_fix_note`. CHECK `requests_offered_details`: a pooled job always has `scheduled_for` and `cost`.
+- **Only an admin sets date/time (`scheduled_for`) and price (`cost`).** `private.protect_maintenance_request` blocks non-admin changes to price, schedule, pool and tenant-confirmation columns.
+- **RPCs** (all `SECURITY DEFINER`, `authenticated` only):
+
+| RPC | Who | What |
+|---|---|---|
+| `offer_maintenance_request(p_request_id, p_scheduled_for, p_cost)` | admin | Sets date/time + price and pushes an Open, unassigned request to the pool |
+| `withdraw_maintenance_offer(p_request_id)` | admin | Takes a pooled job back before anyone accepts |
+| `accept_maintenance_request(p_request_id)` | approved worker | First accept wins: assigns the caller, status → `Scheduled`. No decline exists |
+| `release_maintenance_request(p_request_id, p_reason)` | assigned worker | Unassigns, status → `Open`, **not** re-offered. Reason is written as an `internal` comment (tenant never sees it) |
+| `confirm_maintenance_request_fixed(p_request_id, p_fixed, p_note)` | reporting tenant | Only on `Closed`. Reopening clears the answer |
+| `update_staff_profile(p_first_name, p_last_name, p_company_name, p_phone, p_services)` | any approved staff login | Own Staff row only; email not editable |
+
+- **What a worker sees before accepting:** the request row (problem, price, date/time), its photos (table + storage), and the unit/property address — via `private.job_available_to_me` / `job_available_for_unit` / `job_available_for_property`. Comments, status history, staff notes and the tenant record still require assignment (`private.can_select_maintenance_request` is unchanged).
+- **Completion photo:** a `maintenance` login cannot set `Closed` until the request has a photo with `uploaded_by_role = 'maintenance'`. Photo cap is now 5 worker photos + 5 from everyone else (was 5 total).
+- **Chat:** job chat stays on `MaintenanceRequestComments` (`tenant_visible` = tenant + worker + office; `internal` = worker + office). New `OfficeMessages` is one direct thread per non-admin user with the office (all admins), keyed by `thread_user_id`; in Realtime. `OfficeThreadReads` and `MaintenanceThreadReads` hold per-user last-read times for unread dots.
+- Tests: `tests/workflows/wf3-worker-job-pool.test.ts` (WF3).
+
 ### `MaintenanceRequestStaffNotes`
 
 Internal staff notes for a work order (WS-E). PK `maintenance_request_id` → `MaintenanceRequests` ON DELETE CASCADE. Columns: `notes`, `updated_at`.

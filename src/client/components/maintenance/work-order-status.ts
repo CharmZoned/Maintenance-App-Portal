@@ -18,6 +18,19 @@ export const ADMIN_STATUSES: { value: WorkOrderStatus; label: string }[] = [
 /** Cap shared by create / edit / media upload file pickers (matches DB trigger). */
 export const MAX_MAINTENANCE_PHOTOS = 5;
 
+/**
+ * The DB keeps two caps of MAX_MAINTENANCE_PHOTOS per request: photos uploaded by
+ * the worker, and photos from everyone else. A tenant's photos must not use up
+ * the room a worker needs for the required completion photo.
+ */
+export function photoSlotsLeft(
+  photos: { uploaded_by_role: string | null }[],
+  uploaderIsWorker: boolean,
+): number {
+  const used = photos.filter((p) => (p.uploaded_by_role === "maintenance") === uploaderIsWorker).length;
+  return Math.max(0, MAX_MAINTENANCE_PHOTOS - used);
+}
+
 /** Take up to `remaining` files (default full cap). Use remaining slots when adding after existing photos. */
 export function takePhotoFiles(
   files: FileList | File[] | null | undefined,

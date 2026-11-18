@@ -325,6 +325,8 @@ export function WorkOrderStaffFields({
             type="number"
             value={cost}
             onChange={(e) => onChange({ cost: e.target.value })}
+            // Only an admin sets the price (protect_maintenance_request).
+            disabled={!isAdmin}
           />
         </div>
       </div>

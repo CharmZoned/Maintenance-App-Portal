@@ -19,6 +19,11 @@
       "id": "WF2",
       "title": "New account onboarding",
       "summary": "A new resident signs up, verifies their email, waits for approval, and gets into the portal once an admin approves them."
+    },
+    {
+      "id": "WF3",
+      "title": "Worker job pool",
+      "summary": "An admin sets the date, time and price and pushes a job; a worker accepts it (first accept wins), can release it back, completes it with a photo, and the tenant confirms the fix. Includes the direct chat with the office."
     }
   ]
 }

@@ -36,7 +36,7 @@ import type {
 } from "@/types";
 import { WorkOrderDialog } from "./work-order-dialog";
 import { TenantRequestDetailPanel } from "./tenant-request-detail-panel";
-import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
+import { photoSlotsLeft, takePhotoFiles } from "./work-order-status";
 
 type CompanionKind = "complete" | "hold" | null;
 
@@ -284,8 +284,7 @@ export function RequestDetailPage({
 
   async function onAddPhotos(files: FileList | null) {
     if (!order || app.isLandlord || !files?.length) return;
-    const remaining = Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length);
-    const picked = takePhotoFiles(files, remaining);
+    const picked = takePhotoFiles(files, photoSlotsLeft(photos, isWorker));
     if (picked.length === 0) return;
     setPhotoBusy(true);
     try {
@@ -463,7 +462,7 @@ export function RequestDetailPage({
 
           <section className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              {!app.isLandlord && photos.length < MAX_MAINTENANCE_PHOTOS ? (
+              {!app.isLandlord && photoSlotsLeft(photos, isWorker) > 0 ? (
                 <label className="inline-flex">
                   <input
                     type="file"
@@ -482,7 +481,7 @@ export function RequestDetailPage({
                 </label>
               ) : null}
               <span className="text-xs text-muted-foreground">
-                {photos.length}/{MAX_MAINTENANCE_PHOTOS} photos
+                {photos.length} {photos.length === 1 ? "photo" : "photos"}
               </span>
             </div>
             <div className="flex flex-wrap gap-2">
