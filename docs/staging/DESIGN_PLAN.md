@@ -1,0 +1,236 @@
+# Staging environment — design plan
+
+**Status:** Draft for owner review · 2026-11-18
+**Scope:** A real staging environment (UI + database) with one-click role sign-in, and a
+controlled path from staging to production for both the UI and the database.
+**Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). Three are settled, the
+rest need an owner answer — see [Decisions needed](#decisions-needed).
+
+Nothing in this plan has been executed. No database, branch, or hosting change was made
+while writing it.
+
+---
+
+## 1. What you asked for
+
+1. A proper staging site backed by the staging database.
+2. On the staging login page, four buttons — Admin, Landlord, Tenant, Maintenance — that
+   drop you straight into that role's screen with no passwords to remember.
+3. Make changes on staging, test and approve them, then push to production — UI and
+   database together.
+
+## 2. Where things stand today
+
+Verified against the repo (`master` @ `90a0239`) and the live Supabase org on 2026-11-18.
+
+| Area | Finding | Why it matters |
+|---|---|---|
+| UI hosting | **The portal is not deployed anywhere.** Hosting is parked in `docs/deferred-work.md` (roadmap #3). | "Push the UI to prod" has no target yet. This plan creates staging *and* production hosting. |
+| Environments in code | The app reads only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. It has no idea which environment it is in. | Needed for the staging banner and the one-click buttons. |
+| Production DB | Supabase project `bgjkjtfgrfiszbzatriq`, Pro plan, GitHub integration on, production follows git `master`. All 59 repo migrations are recorded with matching versions. | The history repair described in `docs/ops/schema-migrations.md` §E appears to be done; that doc is stale. |
+| Staging DB | A Supabase branch named `staging` **already exists** (`ffczsojnowxthntnliac`) but is broken: last run `MIGRATIONS_FAILED`, not persistent, not linked to a git branch. It is missing `inquiry_email_controls` and `visibility_helpers_require_approved` (a security migration), and records four migrations under different version numbers than the repo. It holds seven `phase4-*@example.test` accounts that have never signed in. | The docs say staging does not exist. It does, and it does not match production. See [ADR-0003](../adr/0003-staging-database.md). |
+| Supabase config | There is **no `supabase/config.toml`** in the repo. | Auth settings — including the `custom_access_token_hook` that RLS policies depend on for payments and tenant-PII masking — exist only as hand-made dashboard settings on production. A fresh environment does not get them. |
+| Edge Functions | Three functions in `supabase/functions/` (Stripe intent, Stripe webhook, receipt). **None are deployed** on production. | Fine while Stripe is on hold; staging needs test keys when that changes. |
+| Git | `master` is the default branch and receives every PR. A stale `main` branch sits 42 commits behind. CI runs on PRs to `master` only. | A `staging` branch needs CI and protection too. `main` is a trap for agents. |
+| Repo visibility | **The GitHub repo is public.** | No password, hash, or key may be committed — this shapes how demo logins are seeded. See [ADR-0010](../adr/0010-repository-visibility.md). |
+| Local demo | `pnpm dev:local` already runs the portal on an in-process emulator with a seeded world and one login per role (`tests/emulator/seed.ts`). | The staging seed and the one-click buttons can reuse this instead of inventing a second demo world. |
+| Shared DB | The marketing website repo writes to the same production database and has applied its own migrations there. | That is what caused the migration-history drift. See [ADR-0009](../adr/0009-schema-ownership.md). |
+
+## 3. Target design
+
+### 3.1 Environments
+
+| | Local | Staging | Production |
+|---|---|---|---|
+| Git branch | any | `staging` (new default branch) | `master` |
+| UI | `localhost:5198` via `pnpm dev:local` | Vercel, staging domain, behind a login gate | Vercel, production domain, public |
+| Database | In-process emulator | Supabase persistent branch `staging` | Supabase `bgjkjtfgrfiszbzatriq` |
+| Data | Seeded demo world | Seeded demo world, resettable | Real |
+| One-click role sign-in | Yes | Yes | **Never** — not in the bundle, accounts do not exist |
+| Deploys when | You run it | A PR merges into `staging` | The release PR merges into `master` |
+| Stripe / email | None | Test keys, sandboxed mail | Live |
+
+### 3.2 How a change travels
+
+```mermaid
+flowchart LR
+  A[Feature branch<br/>agent or human] -->|PR| B[staging branch]
+  B --> C[Staging DB<br/>migrations applied]
+  B --> D[Staging site<br/>Vercel]
+  C --> E{You test with<br/>the 4 role buttons}
+  D --> E
+  E -->|approve| F[Release PR<br/>staging to master]
+  F --> G[Production DB<br/>same migrations]
+  F --> H[Production site<br/>same commit]
+```
+
+1. All work targets `staging`. CI (typecheck, build, tests) and the Supabase migration
+   check must pass before merge.
+2. Merging to `staging` applies new migrations to the staging database and deploys the
+   staging site. Both happen automatically.
+3. You open the staging site, click a role, and test.
+4. When satisfied, you approve one **Release** pull request from `staging` into `master`.
+   That is the "push to prod" button. It applies the same migration files to production
+   and deploys the same commit to the production site.
+
+What moves to production is **code, schema, and configuration — never data.** Staging
+rows (demo tenants, test payments) stay in staging. If production needs a specific row
+(a setting, a lookup value), it ships as a migration so it is reviewed and repeatable.
+
+Details: [ADR-0001](../adr/0001-environments-and-promotion.md),
+[ADR-0004](../adr/0004-database-promotion.md).
+
+### 3.3 The staging experience
+
+**Login page (staging and local only)**
+
+A "Staging quick sign-in" card sits above the normal form:
+
+| Button | Signs in as | Lands on |
+|---|---|---|
+| Admin | Ada Admin — operations manager | Dashboard |
+| Landlord | Lena Owner — Maple Court | Landlord home |
+| Tenant | Tina Renter — Unit 1A | Tenant home |
+| Maintenance | Sam Fixit — technician | My jobs |
+
+One click signs in and routes to that role's home. The regular email/password form stays
+underneath so real sign-up, password reset, and the approval queue can still be tested.
+
+**Everywhere on staging**
+
+- A fixed ribbon: `STAGING · test data only · build <sha>` so staging is never mistaken
+  for production.
+- A role switcher in the ribbon ("Viewing as Tenant ▾") to jump between the four roles
+  without visiting the login page.
+- Browser tab title prefixed `[STAGING]`, a different favicon, and `noindex`.
+- `/login?as=tenant` signs in directly — a bookmark per role, and a stable entry point
+  for automated browser tests and agents.
+
+**How the buttons work, and why production is safe**
+
+The buttons call the normal Supabase password sign-in with the demo account for that role.
+The demo password is injected into the staging build as an environment variable and lives
+nowhere in the repo. Four independent guards keep this out of production:
+
+1. **Not built.** The quick sign-in module is only imported when the build is not a
+   production build, so it is absent from the production bundle. CI builds a production
+   bundle and fails if the quick sign-in marker appears in it.
+2. **Not configured.** The demo password variable exists only in Vercel's staging and
+   preview environments.
+3. **Refuses at runtime.** The module hard-refuses to render if the Supabase URL is the
+   production project.
+4. **No accounts.** The demo users exist only in the staging database. The seed script
+   refuses to run against the production project ref.
+
+The staging site itself sits behind a login gate, so the buttons are reachable only by
+you and people you invite. Details: [ADR-0005](../adr/0005-staging-access-gate.md),
+[ADR-0006](../adr/0006-one-click-role-sign-in.md).
+
+### 3.4 Staging data
+
+One demo world, defined once, used by tests, `pnpm dev:local`, and staging: two landlords,
+two properties, units, tenants, leases, rent charges and payments, maintenance requests in
+every status, documents, and one account per role (plus a pending account for the approval
+queue). A "Reset staging data" action wipes and re-seeds on demand, so testers can make a
+mess freely. Production data is never copied to staging.
+Details: [ADR-0007](../adr/0007-staging-data-and-seeding.md).
+
+### 3.5 Configuration as code
+
+Add `supabase/config.toml` so every environment is built from the repo rather than from
+dashboard clicks: the access-token hook, auth redirect URLs per environment, storage
+buckets, Edge Function declarations, and a `[remotes.staging]` block for staging-only
+settings. Production auth settings are not overwritten by this — Supabase's production
+deploy applies migrations, declared functions, and declared buckets only.
+
+## 4. Decisions needed
+
+Settled on 2026-11-18:
+
+| # | Decision | Outcome |
+|---|---|---|
+| [0001](../adr/0001-environments-and-promotion.md) | Release flow | `staging` branch → release PR → `master` |
+| [0002](../adr/0002-ui-hosting.md) | UI hosting | Vercel |
+| [0005](../adr/0005-staging-access-gate.md) | Who can reach staging | You plus named testers (mechanism still open) |
+
+Open — each ADR has options, trade-offs, and a recommendation:
+
+| # | Question | Recommendation | Cost / risk if wrong |
+|---|---|---|---|
+| [0003](../adr/0003-staging-database.md) | Fix the broken staging database how? | Wipe and rebuild as a persistent branch | Destroys the `phase4-*` test data; ~$10/month |
+| [0004](../adr/0004-database-promotion.md) | Apply migrations to production automatically on release, or by hand? | Automatically, gated by release-PR approval | A bad migration reaches production as soon as you approve |
+| [0005](../adr/0005-staging-access-gate.md) | Which gate mechanism, which Vercel plan? | Vercel Authentication on a Pro team; testers as free Viewer seats | $20/month per deploying seat |
+| [0006](../adr/0006-one-click-role-sign-in.md) | How do the buttons authenticate? | Demo password as a staging-only build variable, behind the gate | Depends on the gate staying on |
+| [0007](../adr/0007-staging-data-and-seeding.md) | Where does staging data come from? | Scripted synthetic seed, reset on demand | Staging will not show real-world data oddities |
+| [0008](../adr/0008-pr-previews.md) | Should every PR get its own preview site? | Yes, pointed at the staging database | Schema-changing PRs cannot be previewed until merged to staging |
+| [0009](../adr/0009-schema-ownership.md) | Which repo owns the shared database schema? | This repo only | Drift returns if the website keeps applying its own migrations |
+| [0010](../adr/0010-repository-visibility.md) | Should this repo stay public? | Make it private | Schema, RLS logic, and project refs are world-readable today |
+
+Smaller items that need an answer but not an ADR:
+
+- **Domains.** Production and staging hostnames for the portal (for example
+  `portal.<domain>` and `staging-portal.<domain>`), and who controls DNS.
+- **Stale `main` branch.** Delete it? It is 42 commits behind `master` and unused.
+- **Backups before releases.** Production has daily backups on Pro. Point-in-time
+  recovery is a paid add-on; recommended only once real rent payments flow through.
+- **Staging email.** Leave staging on Supabase's built-in rate-limited mailer, or route it
+  to a mail sandbox so sign-up and reset flows can be tested without limits.
+- **Stripe on staging.** Deploy the three Edge Functions to staging with Stripe test keys
+  now, or wait until the Stripe hold lifts.
+
+## 5. Rollout plan
+
+Each phase is independently shippable and leaves production untouched until Phase 4.
+
+| Phase | Work | Owner action needed | Size |
+|---|---|---|---|
+| **0 — Decide** | Answer the open ADRs; confirm domains. | Decisions above | — |
+| **1 — Repo foundations** | Create `staging` branch from `master`; make it the default; extend CI to it; add `supabase/config.toml`; add `VITE_APP_ENV` and an `env.ts` module; add `vercel.json` (SPA fallback); update the stale ops docs. | Change default branch and branch protection in GitHub settings | S |
+| **2 — Staging database** | Rebuild the staging branch as persistent and linked to git `staging`; confirm all migrations apply from zero; confirm the access-token hook is on; add the seed script and the "Reset staging data" workflow. | Go-ahead to wipe; add secrets to GitHub | M |
+| **3 — Staging site** | Vercel project; staging environment variables; login gate; staging domain. Build the quick sign-in card, ribbon, role switcher, `?as=` deep link, and the production-bundle guard test. | Create/upgrade Vercel team; invite testers; DNS record | M |
+| **4 — Production site** | Production domain and environment; Supabase Auth site URL and redirect list; enable production deploys on the Supabase integration; release-PR template; rehearse one full release end to end. | DNS record; approve first release PR | S |
+| **5 — Hardening** | Browser smoke test against staging after each deploy; scheduled migration drift check (repo vs. both databases); release tags; staging environment for the marketing website. | — | M |
+
+**Definition of done for the whole effort**
+
+- Opening the staging URL in a private window hits the login gate.
+- After the gate, clicking each of the four buttons lands on that role's home in under
+  three seconds, with the staging ribbon visible.
+- A migration merged to `staging` appears in the staging database without manual steps.
+- Merging a release PR updates both the production site and the production database, and
+  nothing else does.
+- A production build contains no quick sign-in code, and the demo accounts do not exist in
+  production.
+
+## 6. Risks
+
+| Risk | Mitigation |
+|---|---|
+| Quick sign-in leaks into production | Four independent guards (§3.3); CI test on the production bundle |
+| Staging gate is switched off or misconfigured, exposing the demo password | Private-window check is part of the definition of done and the post-deploy smoke test; staging holds only synthetic data; password rotates by re-running the seed |
+| A migration works on staging but fails on production because the data differs | Supabase migration check on the release PR runs against a branch of production's schema; migrations stay additive; data-touching migrations get a dry run and a backup first |
+| UI and database deploy at slightly different moments during a release | Expand-then-contract rule: a migration must work with the previous UI; removals ship one release later |
+| `staging` and `master` drift apart | `master` accepts merges only from `staging`; release PRs use merge commits, never squash |
+| Fork pull requests on a public repo trigger builds with staging secrets | Demo variables scoped to the `staging` branch and team-authored previews only; Vercel requires approval for fork deploys |
+| Website repo applies migrations to production again | ADR-0009; drift-check workflow in Phase 5 flags it within a day |
+| Branch compute is not covered by the Supabase spend cap | One persistent branch only (~$10/month); ephemeral PR branches stay off unless ADR-0008 changes |
+
+## 7. Sources
+
+Checked on 2026-11-18. Items marked *verify* could not be confirmed from first-party docs
+and must be checked during setup.
+
+- Supabase branching, persistent branches, `[remotes]` config, deploy-to-production
+  behaviour, seeding, branch pricing ($0.01344/hour micro):
+  <https://supabase.com/docs/guides/deployment/branching>,
+  <https://supabase.com/docs/guides/deployment/branching/configuration>,
+  <https://supabase.com/docs/guides/deployment/branching/github-integration>,
+  <https://supabase.com/docs/guides/platform/manage-your-usage/branching>
+- Vercel deployment protection and pricing (Vercel Authentication free on all plans;
+  Password Protection $20/month per project on Pro):
+  <https://vercel.com/docs/deployment-protection/usage-and-pricing>
+- Vercel custom environments (one included per project on Pro):
+  <https://vercel.com/changelog/additional-custom-environments-can-now-be-purchased>
+- Vercel Pro viewer seats (unlimited, free, read-only): <https://vercel.com/docs/plans/pro-plan>
+- *Verify:* that a Viewer seat passes Vercel Authentication on a custom-environment
+  domain, and that the staging custom domain is covered by Standard Protection.
