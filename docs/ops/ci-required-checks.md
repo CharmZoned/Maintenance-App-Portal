@@ -4,8 +4,9 @@
 
 Workflow: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 
-On every PR into `staging` or `master`, and every push to `staging` or `master`,
-GitHub Actions runs two jobs.
+The workflow runs on every PR into `staging` or `master`, and every push to `staging`
+or `master`. It has two jobs: `typecheck / build / test` runs every time;
+`release source` runs only on a pull request into `master`.
 
 **`typecheck / build / test`** (unchanged):
 
@@ -18,7 +19,8 @@ GitHub Actions runs two jobs.
 - Fails any pull request into `master` whose source is not the `staging` branch of
   this repository. `master` only receives the release PR from `staging`
   ([ADR-0001](../adr/0001-environments-and-promotion.md)).
-- On every other pull request it is skipped, which counts as passing.
+- On every other pull request, and on pushes, it is skipped, which counts as passing.
+- It does not stop a direct push to `master`. Branch protection does that (below).
 
 The workflow **no longer skips docs-only changes** (the old `paths-ignore` filter for
 Markdown / `docs/**` is removed). A required status check that never runs leaves a PR

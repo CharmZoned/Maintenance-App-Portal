@@ -48,13 +48,19 @@ A function holding the service-role key issues a session for the chosen demo use
 **Option A**, with four independent production guards:
 
 1. **Not built.** Quick sign-in lives in its own module, loaded with a dynamic import
-   inside an `import.meta.env.VITE_APP_ENV !== "production"` branch, so the bundler drops
-   it from production builds. A CI step builds with production settings and fails if the
-   marker string `data-quick-signin` appears in `dist/`.
+   inside a branch that is taken only when `import.meta.env.VITE_APP_ENV` is literally
+   `"staging"` or `"local"`. The gate names the allowed values rather than excluding
+   `"production"`, because an unset variable must count as production (as
+   `resolveAppEnv` treats it) and the default build leaves it unset. The bundler then
+   drops the module from any build that does not opt in. A CI step runs the default
+   build and fails if the marker string `data-quick-signin` appears in `dist/`.
 2. **Not configured.** `VITE_DEMO_PASSWORD` is set only on Vercel's staging and preview
    environments.
-3. **Refuses at runtime.** The module returns nothing if `VITE_SUPABASE_URL` contains the
-   production project ref.
+3. **Refuses at runtime.** The module renders nothing unless `STAGING_TOOLS_ALLOWED`
+   (`src/client/lib/env.ts`) is true. That requires a staging or local build **and** a
+   backend positively known not to be production: the local emulator, or a hosted
+   Supabase project whose ref is not production's. A missing URL or an unrecognised
+   host is refused.
 4. **No accounts.** Demo users use a reserved, undeliverable domain and are created only
    by the staging seed, which aborts if pointed at the production ref.
 
@@ -74,7 +80,7 @@ A function holding the service-role key issues a session for the chosen demo use
 
 | File | Change |
 |---|---|
-| `src/client/lib/env.ts` (new) | `APP_ENV`, `isProduction`, production-ref guard |
+| `src/client/lib/env.ts` (added in Phase 1) | `APP_ENV`, `isProduction`, `STAGING_TOOLS_ALLOWED` |
 | `src/client/components/auth/quick-signin.tsx` (new) | The card; staging/local only |
 | `src/client/components/auth/login-page.tsx` | Lazy-mount the card; handle `?as=` |
 | `src/client/components/chrome/staging-ribbon.tsx` (new) | Ribbon and role switcher |

@@ -161,7 +161,7 @@ If a secondary env must match listings DDL, capture those two into a dedicated r
 
 > **Do not run.** Production already matches the repo (verified 2026-11-18). Kept for the record only.
 
-Requires `supabase` CLI logged in (env `SUPABASE_ACCESS_TOKEN` only — **never** commit, paste into chat, or put in repo `.env`). Project must be linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed. **Gate:** explicit ops go-ahead (staging optional — do not block repair on the paused `staging` create).
+Requires `supabase` CLI logged in (env `SUPABASE_ACCESS_TOKEN` only — **never** commit, paste into chat, or put in repo `.env`). Project must be linked to `bgjkjtfgrfiszbzatriq`. **History only** — no SQL files executed. **Gate (historical — no longer applies; there is no go-ahead to give, this sequence is closed):** explicit ops go-ahead (staging optional — do not block repair on the paused `staging` create).
 
 **Atomicity:** Run step 1 then step 2 as **one** ops action (`&&` below). After step 1 alone, §C repo prefixes are unmarked — `supabase db push` would treat already-applied Phase 1–5 / lga15 SQL as pending and **re-run** it.
 

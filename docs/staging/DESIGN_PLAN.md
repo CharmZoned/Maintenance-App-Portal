@@ -6,8 +6,8 @@ controlled path from staging to production for both the UI and the database.
 **Decisions:** recorded as ADRs in [`docs/adr/`](../adr/README.md). All ten are
 settled — see [Decisions needed](#decisions-needed).
 
-Nothing in this plan has been executed. No database, branch, or hosting change was made
-while writing it.
+Progress is tracked in [`BUILD_PLAN.md`](BUILD_PLAN.md). As of 2026-11-18, Phase 1 (repo
+foundations) is built; no database or hosting change has been made yet.
 
 ---
 
@@ -112,13 +112,13 @@ The buttons call the normal Supabase password sign-in with the demo account for 
 The demo password is injected into the staging build as an environment variable and lives
 nowhere in the repo. Four independent guards keep this out of production:
 
-1. **Not built.** The quick sign-in module is only imported when the build is not a
-   production build, so it is absent from the production bundle. CI builds a production
+1. **Not built.** The quick sign-in module is only imported when the build is explicitly
+   marked staging or local, so it is absent from the default (production) bundle. CI builds a production
    bundle and fails if the quick sign-in marker appears in it.
 2. **Not configured.** The demo password variable exists only in Vercel's staging and
    preview environments.
-3. **Refuses at runtime.** The module hard-refuses to render if the Supabase URL is the
-   production project.
+3. **Refuses at runtime.** The module renders only when the backend is positively known
+   not to be production; a missing or unrecognised address is refused.
 4. **No accounts.** The demo users exist only in the staging database. The seed script
    refuses to run against the production project ref.
 

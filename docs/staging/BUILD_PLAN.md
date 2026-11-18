@@ -4,7 +4,8 @@
 **Design and reasoning:** [`DESIGN_PLAN.md`](DESIGN_PLAN.md) · **Decisions:** [`docs/adr/`](../adr/README.md)
 
 This is the ordered list of work to turn the approved design into a running staging
-environment and a staging → production release path. Nothing here has been started.
+environment and a staging → production release path. Tasks marked ✅ are built; a phase
+is complete only when its checks pass. Do not redo a ✅ task.
 
 ## How to read this
 
