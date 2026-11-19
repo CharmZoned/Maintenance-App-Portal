@@ -1,13 +1,13 @@
 name: CI
 
-# Runs on every change to staging and master, including docs-only changes.
+# Runs on every change to staging and main, including docs-only changes.
 # These jobs are required status checks; a required check that is skipped by a
 # path filter never reports, which leaves the pull request unmergeable.
 on:
   pull_request:
-    branches: [staging, master]
+    branches: [staging, main]
   push:
-    branches: [staging, master]
+    branches: [staging, main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -47,22 +47,22 @@ jobs:
       - name: Test
         run: pnpm test
 
-  # Production (master) only ever receives the release pull request from staging.
+  # Production (main) only ever receives the release pull request from staging.
   # See docs/adr/0001-environments-and-promotion.md.
   release-source:
     name: release source
-    if: github.event_name == 'pull_request' && github.base_ref == 'master'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Only staging may merge into master
+      - name: Only staging may merge into main
         env:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
         run: |
           if [ "$HEAD_REPO" != "$BASE_REPO" ] || [ "$HEAD_REF" != "staging" ]; then
-            echo "::error::Pull requests into master must come from this repository's staging branch (got ${HEAD_REPO}:${HEAD_REF}). Target staging instead."
+            echo "::error::Pull requests into main must come from this repository's staging branch (got ${HEAD_REPO}:${HEAD_REF}). Target staging instead."
             exit 1
           fi
           echo "Release pull request from staging - OK."

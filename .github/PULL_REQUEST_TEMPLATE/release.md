@@ -1,5 +1,5 @@
 <!--
-Release pull request: staging -> master. Merging this ships to production.
+Release pull request: staging -> main. Merging this ships to production.
 Open it with ?template=release.md on the compare URL.
 Merge with a MERGE COMMIT — never squash or rebase.
 -->

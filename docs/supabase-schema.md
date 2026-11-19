@@ -143,7 +143,7 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 
 ### Worker job pool (`20261118190000_worker_job_pool.sql`)
 
-Owner decisions 2026-11-18/19. **Not applied to live yet.** Ships through a PR into `staging`, then the release PR to `master`, per [`ops/schema-migrations.md`](./ops/schema-migrations.md).
+Owner decisions 2026-11-18/19. **Not applied to live yet.** Ships through a PR into `staging`, then the release PR to `main`, per [`ops/schema-migrations.md`](./ops/schema-migrations.md).
 
 - **Workers = Staff.** Maintenance staff and vendors are the same thing. `Staff` gains `company_name`, `phone`, `services text[]` (same values as request `category`). **An empty `services` list matches no jobs** — never "all jobs" — so a new or blank profile sees nothing until services are set. `Vendors` and `MaintenanceRequests.vendor_id` are deprecated and left in place until the portal stops reading them.
 - **Available is derived, not a status:** `status = 'Open' AND offered_at IS NOT NULL AND assigned_staff_id IS NULL`. New request columns: `offered_at`, `offered_by_user_id`, `accepted_at`, `released_at`, `released_by_staff_id`, `tenant_fix_response` (`confirmed` | `not_fixed`), `tenant_fix_responded_at`, `tenant_fix_note`. CHECK `requests_offered_details`: a pooled job always has `scheduled_for`.
