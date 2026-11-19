@@ -212,14 +212,18 @@ export function useAdminDashboard(user: {
       setClock(now);
       const sources = sourcesRef.current;
       if (!sameDay && sources) {
-        // Re-word relative dates ("Tomorrow", "In 4 days") for the new day.
+        // Re-word relative dates ("Tomorrow", "In 4 days") for the new day right
+        // away, from what is already loaded…
         setState((current) =>
           current.status === "ready" ? buildDashboardState(sources, viewerRef.current, now) : current,
         );
+        // …then re-read in the background: the rent-charge window follows the
+        // month, and a day's worth of activity may have happened elsewhere.
+        if (hasContentRef.current) void reload();
       }
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [reload]);
 
   const intro = useMemo(
     () => buildDashboardIntro({ displayName: user.displayName, email: user.email }, clock),

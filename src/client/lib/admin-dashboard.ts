@@ -168,6 +168,15 @@ export function money(amount: number): string {
 }
 
 /**
+ * What a completed request cost, for "Spend" and the activity feed: the price
+ * the landlord is billed (`landlord_price`), not what the worker is paid.
+ * The dashboard reports on the landlords' portfolio, so it shows their cost.
+ */
+export function requestCost(wo: Pick<WorkOrder, "landlord_price">): number | null {
+  return wo.landlord_price;
+}
+
+/**
  * "#MR-001000". The database already numbers requests `MR-000000`
  * (`request_number`), so this only adds the "#"; a row without a number falls
  * back to its id rather than a made-up reference.
@@ -1338,7 +1347,7 @@ function buildActivity(ctx: Ctx): ActivityModel {
         icon: "check",
         title: joinParts([
           `${wo.title} completed`,
-          wo.worker_price != null ? money(wo.worker_price) : null,
+          requestCost(wo) != null ? money(requestCost(wo)!) : null,
           worker ? personRef(worker) : null,
         ]),
         context: joinParts([place, requestRef(wo), whenLabel(moment, today)]),
@@ -1592,10 +1601,11 @@ function buildMaintenance(ctx: Ctx): MaintenanceSnapshotModel {
     const day = momentOf(wo.completed_at)?.day;
     if (!day || day > today) continue;
     if (periodOf(day) === ctx.period) completedThisMonth += 1;
-    if (day.slice(0, 4) !== year || wo.worker_price == null) continue;
+    const cost = requestCost(wo);
+    if (day.slice(0, 4) !== year || cost == null) continue;
     pricedThisYear += 1;
-    spendYear += wo.worker_price;
-    if (periodOf(day) === ctx.period) spendMonth += wo.worker_price;
+    spendYear += cost;
+    if (periodOf(day) === ctx.period) spendMonth += cost;
   }
 
   const requests: RequestSummary[] = open
@@ -1632,8 +1642,9 @@ function buildMaintenance(ctx: Ctx): MaintenanceSnapshotModel {
       // "Completed" is this month's, so the number stays meaningful as history grows.
       `On hold ${counts["On hold"]} · Completed ${completedThisMonth} this month`,
     ],
-    // Spend is what workers were paid (worker price) on requests completed in
-    // the period. TODO(data-gap): a request completed without a recorded price
+    // Spend is what landlords were billed (see `requestCost`) on requests
+    // completed in the period. TODO(data-gap): a request completed without a
+    // recorded landlord price
     // adds nothing, so with no priced request this year the line is left out
     // rather than shown as $0.
     spendLine: pricedThisYear > 0 ? `Spend · ${money(spendMonth)} this month · ${money(spendYear)} this year` : null,

@@ -228,11 +228,13 @@ function sampleWorld(): AdminDashboardSources {
       vendor_id: 7,
       vendor_name: "Harbor Electric",
       completed_at: at(2026, 11, 13, 15),
-      worker_price: 180,
+      // Spend and activity show what the landlord is billed, not the worker's pay.
+      worker_price: 120,
+      landlord_price: 180,
     }),
-    wo({ id: 900, title: "Gutter repair", status: "closed", assigned_staff_id: 1, completed_at: at(2026, 3, 2, 11), worker_price: 1060 }),
+    wo({ id: 900, title: "Gutter repair", status: "closed", assigned_staff_id: 1, completed_at: at(2026, 3, 2, 11), worker_price: 800, landlord_price: 1060 }),
     // Completed last year: counts for nothing this year.
-    wo({ id: 800, title: "Old job", status: "closed", assigned_staff_id: 1, completed_at: at(2025, 12, 30, 11), worker_price: 999 }),
+    wo({ id: 800, title: "Old job", status: "closed", assigned_staff_id: 1, completed_at: at(2025, 12, 30, 11), worker_price: 700, landlord_price: 999 }),
   ];
   const leases = [
     lease({ id: 1, unit_id: 11, primary_tenant_id: 1, start_date: "2026-02-01", end_date: "2027-01-31", unit_name: "1A", property_id: 1, property_name: "Maple Court", tenant_first_name: "Tina", tenant_last_name: "Renter" }),
