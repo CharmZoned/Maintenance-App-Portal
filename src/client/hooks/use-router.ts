@@ -23,6 +23,7 @@ export type Route =
   | { name: "applications" }
   | { name: "users" }
   | { name: "settings" }
+  | { name: "listings" }
   | { name: "not-found" };
 
 export function splitLocation(to: string): { pathname: string; search: string } {
@@ -66,6 +67,7 @@ export function parseRoute(path: string): Route {
   if (path === "/applications") return { name: "applications" };
   if (path === "/users") return { name: "users" };
   if (path === "/settings") return { name: "settings" };
+  if (path === "/listings") return { name: "listings" };
   return { name: "not-found" };
 }
 

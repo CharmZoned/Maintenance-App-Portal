@@ -13,6 +13,11 @@ describe("parseRoute", () => {
     expect(parseRoute("/payments/ledger")).toEqual({ name: "payments-ledger" });
     expect(parseRoute("/payments/other")).toEqual({ name: "not-found" });
   });
+
+  it("maps the admin website listings route", () => {
+    expect(parseRoute("/listings")).toEqual({ name: "listings" });
+    expect(parseRoute("/listings/3")).toEqual({ name: "not-found" });
+  });
 });
 
 describe("pathnameOf / splitLocation", () => {

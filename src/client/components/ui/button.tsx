@@ -34,6 +34,9 @@ const buttonVariants = cva(
         /** Shell header primary — 12px horizontal padding per Figma. */
         header: "h-7 px-3",
         icon: "h-7 w-7 px-0",
+        /** 44px touch target — admin workspace buttons (Figma 001 - Admin Pages). */
+        touch: "h-11 px-4 leading-[1.375rem]",
+        "touch-icon": "h-11 w-11 px-0 [&_svg]:size-5",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

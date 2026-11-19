@@ -30,7 +30,13 @@ import { BlockedPage } from "./components/auth/blocked-page";
 import { StubPage } from "./components/stub-page";
 import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
-import { PortalNav, MobileTabBar, ShellChromeProvider } from "./components/chrome";
+import {
+  AdminWorkspace,
+  MobileTabBar,
+  PortalNav,
+  ShellChromeProvider,
+  useAdminNavCounts,
+} from "./components/chrome";
 import { FoundationGalleryPage } from "./components/foundation/foundation-gallery-page";
 import { PeoplePage } from "./components/people/people-page";
 import { MessagesPage } from "./components/messages/messages-page";
@@ -38,7 +44,13 @@ import { NotificationsHost } from "./components/messages/notifications-host";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
 import { PaymentsPage } from "./components/payments";
-import { navItemsForAudience } from "./lib/portal-nav";
+import {
+  displayNameFromEmail,
+  navItemsForAudience,
+  PORTAL_BRAND,
+  roleLabel,
+  withNavCounts,
+} from "./lib/portal-nav";
 import {
   isLandlordAllowedRoute,
   ROLE_HOME,
@@ -49,9 +61,20 @@ import {
 function activeFor(route: Route): string {
   if (route.name === "property") return "properties";
   if (route.name === "request") return "maintenance";
-  if (route.name === "tenant" || route.name === "landlords" || route.name === "users") {
+  if (
+    route.name === "tenant" ||
+    route.name === "tenants" ||
+    route.name === "landlords" ||
+    route.name === "users"
+  ) {
     return "people";
   }
+  // Staff-only screens without a rail entry of their own: leases belong with the
+  // rent roll, applications come in through the website listings, and the
+  // calendar now lives on the dashboard. (Other shells have no such nav ids.)
+  if (route.name === "leases") return "rent";
+  if (route.name === "applications") return "listings";
+  if (route.name === "calendar") return "dashboard";
   if (route.name === "account") return "account";
   // Payments are Home CTAs in Figma — keep Home nav highlight.
   if (route.name === "payments" || route.name === "payments-ledger") return "home";
@@ -83,6 +106,12 @@ export function App() {
   const { path, search, route, navigate, replace } = useRouter();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifUnread, setNotifUnread] = useState(false);
+  // Admin rail badges (staff shell only) — refreshed on every route change.
+  const navCounts = useAdminNavCounts({
+    enabled: ready && !isTenant && !isLandlord && !isMaintenance,
+    isAdmin,
+    refreshKey: path,
+  });
 
   useEffect(() => {
     if (ready) reportLocation(path);
@@ -272,225 +301,256 @@ export function App() {
     );
   }
 
-  const navItems = navItemsForAudience(audience);
-  const useMobileTabs = audience !== "staff";
+  const isStaffShell = audience === "staff";
+  const navItems = isStaffShell
+    ? withNavCounts(navItemsForAudience(audience, { isAdmin }), navCounts)
+    : navItemsForAudience(audience);
   const metaFullName = auth.gate.user.user_metadata?.full_name;
+  const displayName =
+    typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null;
   const chrome = {
     email: auth.gate.user.email ?? "",
     role: auth.gate.role.role,
-    displayName:
-      typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null,
+    displayName,
     unread: notifUnread,
     onNotifications: () => setNotificationsOpen((v) => !v),
     onAccount: () => navigate("/account"),
     onSignOut: () => void auth.logout(),
   };
 
+  const main = (
+    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      {/* Pages keep their own list loaders — do not blank the shell while lookups finish. */}
+      <PortalErrorBoundary>
+        {isTenant ? (
+          <>
+            {route.name === "home" && <TenantHomePage navigate={navigate} />}
+            {route.name === "maintenance" && (
+              <MaintenancePage search={search} replace={replace} navigate={navigate} />
+            )}
+            {route.name === "request" && (
+              <RequestDetailPage id={route.id} navigate={navigate} />
+            )}
+            {route.name === "messages" && (
+              <MessagesPage search={search} navigate={navigate} replace={replace} />
+            )}
+            {route.name === "documents" && <TenantDocumentsPage />}
+            {route.name === "payments" && (
+              <PaymentsPage mode="pay" navigate={navigate} />
+            )}
+            {route.name === "payments-ledger" && (
+              <PaymentsPage mode="ledger" navigate={navigate} />
+            )}
+            {route.name === "account" && (
+              <AccountPage
+                userId={auth.gate.user.id}
+                email={auth.gate.user.email ?? ""}
+                role={auth.gate.role.role}
+                onSignOut={() => void auth.logout()}
+              />
+            )}
+            {route.name !== "home" &&
+              route.name !== "maintenance" &&
+              route.name !== "request" &&
+              route.name !== "messages" &&
+              route.name !== "documents" &&
+              route.name !== "payments" &&
+              route.name !== "payments-ledger" &&
+              route.name !== "account" && (
+                <Placeholder
+                  title="Tenant portal"
+                  message="Use Requests to submit and track maintenance."
+                />
+              )}
+          </>
+        ) : isLandlord ? (
+          <>
+            {route.name === "home" && <LandlordHomePage navigate={navigate} />}
+            {route.name === "properties" && <PropertiesList navigate={navigate} />}
+            {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+            {route.name === "maintenance" && (
+              <MaintenancePage search={search} replace={replace} navigate={navigate} />
+            )}
+            {route.name === "request" && (
+              <RequestDetailPage id={route.id} navigate={navigate} />
+            )}
+            {route.name === "messages" && (
+              <MessagesPage search={search} navigate={navigate} replace={replace} />
+            )}
+            {route.name === "documents" && <LandlordDocumentsPage />}
+            {route.name === "account" && (
+              <AccountPage
+                userId={auth.gate.user.id}
+                email={auth.gate.user.email ?? ""}
+                role={auth.gate.role.role}
+                onSignOut={() => void auth.logout()}
+              />
+            )}
+            {!isLandlordAllowedRoute(route) && (
+              <Placeholder
+                title="Landlord portal"
+                message="View your properties, maintenance, and documents. Editing lands in later screen PRs."
+              />
+            )}
+          </>
+        ) : isMaintenance ? (
+          <>
+            {route.name === "maintenance" && (
+              <MyJobsPage search={search} replace={replace} />
+            )}
+            {route.name === "request" && (
+              <RequestDetailPage id={route.id} navigate={navigate} />
+            )}
+            {route.name === "messages" && (
+              <MessagesPage search={search} navigate={navigate} replace={replace} />
+            )}
+            {route.name === "calendar" && <CalendarPage navigate={navigate} />}
+            {route.name === "account" && (
+              <AccountPage
+                userId={auth.gate.user.id}
+                email={auth.gate.user.email ?? ""}
+                role={auth.gate.role.role}
+                onSignOut={() => void auth.logout()}
+              />
+            )}
+            {route.name !== "maintenance" &&
+              route.name !== "request" &&
+              route.name !== "messages" &&
+              route.name !== "calendar" &&
+              route.name !== "account" && (
+                <Placeholder title="My jobs" message="Use My jobs or Messages from the menu." />
+              )}
+          </>
+        ) : (
+          <>
+            {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
+            {route.name === "properties" && <PropertiesList navigate={navigate} />}
+            {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+            {route.name === "people" && (
+              <PeoplePage search={search} navigate={navigate} replace={replace} />
+            )}
+            {route.name === "messages" && (
+              <MessagesPage search={search} navigate={navigate} replace={replace} />
+            )}
+            {route.name === "documents" && (
+              <StubPage
+                title="Documents"
+                meta="Portfolio files"
+                message="Admin documents land in a later Lists screen PR."
+              />
+            )}
+            {route.name === "listings" && (
+              <StubPage
+                title="Website listings"
+                meta="Homes advertised on the website"
+                message="Listing management isn’t built yet, so there is nothing to show or change here."
+              />
+            )}
+            {route.name === "account" && (
+              <AccountPage
+                userId={auth.gate.user.id}
+                email={auth.gate.user.email ?? ""}
+                role={auth.gate.role.role}
+                onSignOut={() => void auth.logout()}
+              />
+            )}
+            {route.name === "foundation" && isAdmin && <FoundationGalleryPage />}
+            {route.name === "landlords" && <LandlordsPage />}
+            {route.name === "tenants" && <TenantsList navigate={navigate} />}
+            {route.name === "tenant" && <TenantPage id={route.id} navigate={navigate} />}
+            {route.name === "leases" && (
+              <LeasesPage navigate={navigate} search={search} replace={replace} />
+            )}
+            {route.name === "rent" && <RentPage search={search} replace={replace} />}
+            {route.name === "maintenance" && (
+              <MaintenancePage search={search} replace={replace} navigate={navigate} />
+            )}
+            {route.name === "request" && (
+              <RequestDetailPage id={route.id} navigate={navigate} />
+            )}
+            {route.name === "calendar" && <CalendarPage navigate={navigate} />}
+            {route.name === "applications" &&
+              (isAdmin ? (
+                <ApplicationsPage search={search} replace={replace} />
+              ) : (
+                <Placeholder
+                  title="Admins only"
+                  message="Rental applications include applicant income and other PII — admins only."
+                />
+              ))}
+            {route.name === "users" &&
+              (isAdmin ? (
+                <UsersPage />
+              ) : (
+                <Placeholder
+                  title="Admins only"
+                  message="The Users approval queue is restricted to admins."
+                />
+              ))}
+            {route.name === "settings" &&
+              (isAdmin ? (
+                <SettingsPage />
+              ) : (
+                <Placeholder
+                  title="Admins only"
+                  message="Rent policy and portal settings are restricted to admins."
+                />
+              ))}
+            {route.name === "not-found" && (
+              <Placeholder title="Not found" message="That page doesn't exist." />
+            )}
+          </>
+        )}
+      </PortalErrorBoundary>
+      <NotificationsHost
+        open={notificationsOpen}
+        onOpenChange={setNotificationsOpen}
+        onUnreadChange={setNotifUnread}
+        onNavigate={(to) => {
+          setNotificationsOpen(false);
+          navigate(to);
+        }}
+      />
+      {isStaffShell ? null : (
+        <MobileTabBar
+          items={navItems}
+          active={activeFor(route)}
+          onNavigate={(href) => navigate(href)}
+        />
+      )}
+    </main>
+  );
+
   return (
     <AppContext.Provider value={state}>
       <ShellChromeProvider value={chrome}>
         <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row">
-          <div className={useMobileTabs ? "hidden shrink-0 md:flex" : "flex shrink-0"}>
-            <PortalNav
+          {isStaffShell ? (
+            <AdminWorkspace
               items={navItems}
               active={activeFor(route)}
               homeHref={homePath}
+              userName={displayName ?? displayNameFromEmail(chrome.email)}
+              userMeta={`${roleLabel(chrome.role)} · ${PORTAL_BRAND}`}
               onNavigate={(href) => navigate(href)}
-            />
-          </div>
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-            {/* Pages keep their own list loaders — do not blank the shell while lookups finish. */}
-            <PortalErrorBoundary>
-              {isTenant ? (
-                <>
-                  {route.name === "home" && <TenantHomePage navigate={navigate} />}
-                  {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} navigate={navigate} />
-                  )}
-                  {route.name === "request" && (
-                    <RequestDetailPage id={route.id} navigate={navigate} />
-                  )}
-                  {route.name === "messages" && (
-                    <MessagesPage search={search} navigate={navigate} replace={replace} />
-                  )}
-                  {route.name === "documents" && <TenantDocumentsPage />}
-                  {route.name === "payments" && (
-                    <PaymentsPage mode="pay" navigate={navigate} />
-                  )}
-                  {route.name === "payments-ledger" && (
-                    <PaymentsPage mode="ledger" navigate={navigate} />
-                  )}
-                  {route.name === "account" && (
-                    <AccountPage
-                      userId={auth.gate.user.id}
-                      email={auth.gate.user.email ?? ""}
-                      role={auth.gate.role.role}
-                      onSignOut={() => void auth.logout()}
-                    />
-                  )}
-                  {route.name !== "home" &&
-                    route.name !== "maintenance" &&
-                    route.name !== "request" &&
-                    route.name !== "messages" &&
-                    route.name !== "documents" &&
-                    route.name !== "payments" &&
-                    route.name !== "payments-ledger" &&
-                    route.name !== "account" && (
-                      <Placeholder
-                        title="Tenant portal"
-                        message="Use Requests to submit and track maintenance."
-                      />
-                    )}
-                </>
-              ) : isLandlord ? (
-                <>
-                  {route.name === "home" && <LandlordHomePage navigate={navigate} />}
-                  {route.name === "properties" && <PropertiesList navigate={navigate} />}
-                  {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
-                  {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} navigate={navigate} />
-                  )}
-                  {route.name === "request" && (
-                    <RequestDetailPage id={route.id} navigate={navigate} />
-                  )}
-                  {route.name === "messages" && (
-                    <MessagesPage search={search} navigate={navigate} replace={replace} />
-                  )}
-                  {route.name === "documents" && <LandlordDocumentsPage />}
-                  {route.name === "account" && (
-                    <AccountPage
-                      userId={auth.gate.user.id}
-                      email={auth.gate.user.email ?? ""}
-                      role={auth.gate.role.role}
-                      onSignOut={() => void auth.logout()}
-                    />
-                  )}
-                  {!isLandlordAllowedRoute(route) && (
-                    <Placeholder
-                      title="Landlord portal"
-                      message="View your properties, maintenance, and documents. Editing lands in later screen PRs."
-                    />
-                  )}
-                </>
-              ) : isMaintenance ? (
-                <>
-                  {route.name === "maintenance" && (
-                    <MyJobsPage search={search} replace={replace} />
-                  )}
-                  {route.name === "request" && (
-                    <RequestDetailPage id={route.id} navigate={navigate} />
-                  )}
-                  {route.name === "messages" && (
-                    <MessagesPage search={search} navigate={navigate} replace={replace} />
-                  )}
-                  {route.name === "calendar" && <CalendarPage navigate={navigate} />}
-                  {route.name === "account" && (
-                    <AccountPage
-                      userId={auth.gate.user.id}
-                      email={auth.gate.user.email ?? ""}
-                      role={auth.gate.role.role}
-                      onSignOut={() => void auth.logout()}
-                    />
-                  )}
-                  {route.name !== "maintenance" &&
-                    route.name !== "request" &&
-                    route.name !== "messages" &&
-                    route.name !== "calendar" &&
-                    route.name !== "account" && (
-                      <Placeholder title="My jobs" message="Use My jobs or Messages from the menu." />
-                    )}
-                </>
-              ) : (
-                <>
-                  {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
-                  {route.name === "properties" && <PropertiesList navigate={navigate} />}
-                  {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
-                  {route.name === "people" && (
-                    <PeoplePage search={search} navigate={navigate} replace={replace} />
-                  )}
-                  {route.name === "messages" && (
-                    <MessagesPage search={search} navigate={navigate} replace={replace} />
-                  )}
-                  {route.name === "documents" && (
-                    <StubPage
-                      title="Documents"
-                      meta="Portfolio files"
-                      message="Admin documents land in a later Lists screen PR."
-                    />
-                  )}
-                  {route.name === "account" && (
-                    <AccountPage
-                      userId={auth.gate.user.id}
-                      email={auth.gate.user.email ?? ""}
-                      role={auth.gate.role.role}
-                      onSignOut={() => void auth.logout()}
-                    />
-                  )}
-                  {route.name === "foundation" && isAdmin && <FoundationGalleryPage />}
-                  {route.name === "landlords" && <LandlordsPage />}
-                  {route.name === "tenants" && <TenantsList navigate={navigate} />}
-                  {route.name === "tenant" && <TenantPage id={route.id} navigate={navigate} />}
-                  {route.name === "leases" && (
-                    <LeasesPage navigate={navigate} search={search} replace={replace} />
-                  )}
-                  {route.name === "rent" && <RentPage search={search} replace={replace} />}
-                  {route.name === "maintenance" && (
-                    <MaintenancePage search={search} replace={replace} navigate={navigate} />
-                  )}
-                  {route.name === "request" && (
-                    <RequestDetailPage id={route.id} navigate={navigate} />
-                  )}
-                  {route.name === "calendar" && <CalendarPage navigate={navigate} />}
-                  {route.name === "applications" &&
-                    (isAdmin ? (
-                      <ApplicationsPage search={search} replace={replace} />
-                    ) : (
-                      <Placeholder
-                        title="Admins only"
-                        message="Rental applications include applicant income and other PII — admins only."
-                      />
-                    ))}
-                  {route.name === "users" &&
-                    (isAdmin ? (
-                      <UsersPage />
-                    ) : (
-                      <Placeholder
-                        title="Admins only"
-                        message="The Users approval queue is restricted to admins."
-                      />
-                    ))}
-                  {route.name === "settings" &&
-                    (isAdmin ? (
-                      <SettingsPage />
-                    ) : (
-                      <Placeholder
-                        title="Admins only"
-                        message="Rent policy and portal settings are restricted to admins."
-                      />
-                    ))}
-                  {route.name === "not-found" && (
-                    <Placeholder title="Not found" message="That page doesn't exist." />
-                  )}
-                </>
-              )}
-            </PortalErrorBoundary>
-            <NotificationsHost
-              open={notificationsOpen}
-              onOpenChange={setNotificationsOpen}
-              onUnreadChange={setNotifUnread}
-              onNavigate={(to) => {
-                setNotificationsOpen(false);
-                navigate(to);
-              }}
-            />
-            {useMobileTabs ? (
-              <MobileTabBar
-                items={navItems}
-                active={activeFor(route)}
-                onNavigate={(href) => navigate(href)}
-              />
-            ) : null}
-          </main>
+              onAccount={chrome.onAccount}
+              onSignOut={chrome.onSignOut}
+            >
+              {main}
+            </AdminWorkspace>
+          ) : (
+            <>
+              <div className="hidden shrink-0 md:flex">
+                <PortalNav
+                  items={navItems}
+                  active={activeFor(route)}
+                  homeHref={homePath}
+                  onNavigate={(href) => navigate(href)}
+                />
+              </div>
+              {main}
+            </>
+          )}
           <ErrorBanner />
           <NoticeBanner />
         </div>

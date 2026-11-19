@@ -1,3 +1,4 @@
+import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/chrome/notification-bell";
 import { AccountMenu } from "@/components/chrome/account-menu";
@@ -30,6 +31,18 @@ export function PageShell({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border px-6">
+        {chrome?.onOpenNav ? (
+          // Admin workspace only: below `lg` the rail is a drawer, opened from here.
+          <button
+            type="button"
+            onClick={chrome.onOpenNav}
+            aria-label="Open navigation menu"
+            aria-haspopup="dialog"
+            className="-ml-2 flex size-9 shrink-0 items-center justify-center rounded-sm text-foreground hover:bg-muted lg:hidden"
+          >
+            <Menu className="size-4" strokeWidth={1.75} aria-hidden />
+          </button>
+        ) : null}
         <div className="min-w-0 flex-1 leading-none">
           <h1 className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
           {meta ? (
