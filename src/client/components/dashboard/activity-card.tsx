@@ -41,11 +41,11 @@ function ActivityDay({
 }) {
   const headingId = React.useId();
   return (
-    <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
+    <section className="flex min-w-0 flex-col gap-4">
       <h3 id={headingId} className="lg-label uppercase text-muted-foreground">
         {group.label}
       </h3>
-      <ul className="flex flex-col gap-4">
+      <ul aria-labelledby={headingId} className="flex flex-col gap-4">
         {group.items.map((item) => (
           <li key={item.id} className="min-w-0">
             <ActivityRow item={item} onNavigate={onNavigate} />
@@ -70,7 +70,8 @@ function ActivityRow({
   const content = (
     <>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
-        <AdminIcon name={item.icon} className="size-4" />
+        {/* 2px stroke at 16px, as drawn (Lucide's 2 is relative to its 24px grid). */}
+        <AdminIcon name={item.icon} className="size-4 [stroke-width:3]" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span id={titleId} className="lg-body break-words text-foreground">

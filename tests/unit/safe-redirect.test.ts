@@ -157,6 +157,14 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
     expect(clampPathForAudience("/calendar", "maintenance")).toBe("/calendar");
   });
 
+  test("website listings is a staff-only destination", () => {
+    expect(safeInternalPath("/listings", ORIGIN)).toBe("/listings");
+    expect(clampPathForAudience("/listings", "staff")).toBe("/listings");
+    expect(clampPathForAudience("/listings", "tenant")).toBe(ROLE_HOME.tenant);
+    expect(clampPathForAudience("/listings", "landlord")).toBe(ROLE_HOME.landlord);
+    expect(clampPathForAudience("/listings", "maintenance")).toBe(ROLE_HOME.maintenance);
+  });
+
   test("ready landing applies redirect then role clamp in one step", () => {
     expect(
       resolveReadyLanding({

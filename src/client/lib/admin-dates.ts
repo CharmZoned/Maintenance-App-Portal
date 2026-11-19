@@ -117,3 +117,38 @@ export function greetingForHour(hour: number): string {
   if (hour < 18) return "Good afternoon";
   return "Good evening";
 }
+
+/** "Fri 20 Nov" — weekday, day and month without the year. */
+export function formatWeekdayDayMonth(day: string): string {
+  const d = parseDay(day);
+  return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+}
+
+/** "16 Nov" */
+export function formatDayMonth(day: string): string {
+  const d = parseDay(day);
+  return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+}
+
+/** "Fri" */
+export function weekdayShort(day: string): string {
+  return WEEKDAYS_SHORT[parseDay(day).getDay()];
+}
+
+/** "Friday" */
+export function weekdayLong(day: string): string {
+  return WEEKDAYS_LONG[parseDay(day).getDay()];
+}
+
+/** "November" for a zero-based month. */
+export function monthName(monthIndex: number): string {
+  return MONTHS_LONG[monthIndex];
+}
+
+/** "9:15 am" / "6:12 pm" — local clock time, never locale-dependent. */
+export function formatClock(date: Date): string {
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const hour12 = hours % 12 === 0 ? 12 : hours % 12;
+  return `${hour12}:${minutes} ${hours < 12 ? "am" : "pm"}`;
+}

@@ -9,6 +9,11 @@ export type ShellChromeValue = {
   onNotifications?: () => void;
   onAccount?: () => void;
   onSignOut: () => void;
+  /**
+   * Opens the navigation drawer. Set only inside the admin workspace, where the
+   * rail is hidden below `lg` — page headers show a menu button when present.
+   */
+  onOpenNav?: () => void;
 };
 
 const ShellChromeContext = createContext<ShellChromeValue | null>(null);

@@ -2,6 +2,7 @@ import type {
   AdminDashboardModel,
   AdminDashboardState,
   DashboardIntroModel,
+  RentModel,
 } from "@/components/dashboard/admin-dashboard-model";
 
 /**
@@ -319,25 +320,32 @@ export const fixtureModel: AdminDashboardModel = {
   },
 };
 
+/** Figma "All clear" · Rent this month. */
+const fixtureAllClearRent: RentModel = {
+  scopeLine: "",
+  headline: "$11,300 of $11,300 collected",
+  progress: null,
+  lines: ["100% collected · $0 outstanding", "$0 awaiting verification · No late tenants"],
+  noteLines: ["Raj Patel, tenant · $725 Zelle verified", "Today, Mon 16 Nov 2026"],
+  href: "/rent",
+};
+
 /** Figma "All clear": nothing needs the office, rent fully collected, every home listed. */
 export const fixtureAllClearModel: AdminDashboardModel = {
   ...fixtureModel,
+  // No summary line under the heading in the all-clear frame (the card ignores it when empty).
   attention: {
-    summaryLine: "0 items · Nothing needs your office right now.",
+    summaryLine: "",
     resolvedLine: "Resolved today · Mon 16 Nov 2026",
     items: [],
   },
-  rent: {
-    scopeLine: "November 2026 · All 4 properties",
-    headline: "$11,300 of $11,300 collected",
-    progress: { percent: 100, label: "100% collected", caption: "$0 outstanding" },
-    lines: ["Collected $11,300", "Outstanding $0", "Awaiting verification $0"],
-    href: "/rent",
-  },
+  // The all-clear frame drops the scope line and the progress bar.
+  rent: fixtureAllClearRent,
+  // No summary line in the all-clear frame; two plain sentences replace the inquiry link.
   listings: {
-    summaryLine: "Homes on your public marketing site",
+    summaryLine: "",
     headline: "7 live · 1 draft · 0 not listed",
-    inquiryLine: null,
+    inquiryLine: "Birch House Unit 1 is now live.\nNo new inquiries need a reply.",
     noteLines: [],
     href: "/listings",
   },
@@ -349,12 +357,12 @@ export const fixtureStates = {
   loading: { status: "loading" },
   empty: {
     status: "empty",
-    statsLines: ["No properties · No units · No requests", "$0 expected · 0 unread messages"],
-    contactLines: ["Ada Admin · Admin · Landlord Gopher", "help@landlordgopher.example"],
+    statsLines: ["No properties · No units · No requests", "$0 expected · 0 live homes"],
+    contactLines: ["Ada Admin · Admin · Landlord Gopher", "help@landlordgopher.example · (410) 555-0134"],
   },
   error: {
     status: "error",
-    message: "I couldn’t retrieve your portfolio. Your saved work is safe.",
+    message: "I couldn’t retrieve your portfolio. Your saved records have not changed. Try again to get the latest data.",
     lastAttemptLine: "Last attempt · Just now, Mon 16 Nov 2026",
   },
 } satisfies Record<string, AdminDashboardState>;

@@ -1,22 +1,48 @@
 import type { PortalAudience } from "./safe-redirect";
 
-/** One primary-nav row for the Phase 0 Landlord Gopher chrome. */
+/**
+ * Icon for a nav row, by name (the admin rail draws them with Lucide; the names
+ * are a subset of the dashboard's `AdminIconName`).
+ */
+export type PortalNavIcon =
+  | "home"
+  | "wrench"
+  | "building"
+  | "dollar"
+  | "user"
+  | "message"
+  | "file"
+  | "globe"
+  | "settings";
+
+/** One primary-nav row for the Landlord Gopher chrome. */
 export type PortalNavItem = {
   id: string;
   label: string;
   href: string;
-  /** Live count badge (brand pill). Omit or 0 = hidden. */
+  /** Live count badge. Omit or 0 = hidden. Never a placeholder number. */
   count?: number;
+  /** What the count measures, read after the number: "open" → "Maintenance, 3 open". */
+  countLabel?: string;
+  /** Leading icon — used by the admin workspace rail and drawer. */
+  icon?: PortalNavIcon;
 };
 
 export const PORTAL_BRAND = "Landlord Gopher";
 
 /**
- * Role shells from Figma `01 Chrome` (Phase 0).
- * Retired nav (leases, rent, calendar, landlords, tenants, users, applications,
- * settings) stays reachable by direct URL for staff — not listed here.
+ * Role shells. Tenant / landlord / maintenance follow Figma `01 Chrome`
+ * (Phase 0); staff follows the admin workspace rail (Figma "001 - Admin Pages").
+ * Leases, calendar, landlords, tenants, users and applications stay reachable
+ * by direct URL for staff — they are not listed here.
+ *
+ * `isAdmin` only matters for the staff shell: destinations that are restricted
+ * to admins (Settings) are left out when it is false. It defaults to true.
  */
-export function navItemsForAudience(audience: PortalAudience): PortalNavItem[] {
+export function navItemsForAudience(
+  audience: PortalAudience,
+  opts?: { isAdmin?: boolean },
+): PortalNavItem[] {
   switch (audience) {
     case "tenant":
       return [
@@ -39,16 +65,58 @@ export function navItemsForAudience(audience: PortalAudience): PortalNavItem[] {
         { id: "messages", label: "Messages", href: "/messages" },
       ];
     case "staff":
-    default:
-      return [
-        { id: "dashboard", label: "Dashboard", href: "/dashboard" },
-        { id: "maintenance", label: "Maintenance", href: "/maintenance" },
-        { id: "properties", label: "Properties", href: "/properties" },
-        { id: "people", label: "People", href: "/people" },
-        { id: "messages", label: "Messages", href: "/messages" },
-        { id: "documents", label: "Documents", href: "/documents" },
+    default: {
+      const isAdmin = opts?.isAdmin ?? true;
+      const items: Array<PortalNavItem & { adminOnly?: boolean }> = [
+        { id: "dashboard", label: "Dashboard", href: "/dashboard", icon: "home" },
+        {
+          id: "maintenance",
+          label: "Maintenance",
+          href: "/maintenance",
+          icon: "wrench",
+          countLabel: "open",
+        },
+        { id: "properties", label: "Properties", href: "/properties", icon: "building" },
+        { id: "rent", label: "Rent", href: "/rent", icon: "dollar" },
+        {
+          id: "people",
+          label: "People",
+          href: "/people",
+          icon: "user",
+          countLabel: "awaiting approval",
+        },
+        {
+          id: "messages",
+          label: "Messages",
+          href: "/messages",
+          icon: "message",
+          countLabel: "unread",
+        },
+        { id: "documents", label: "Documents", href: "/documents", icon: "file" },
+        { id: "listings", label: "Website listings", href: "/listings", icon: "globe" },
+        { id: "settings", label: "Settings", href: "/settings", icon: "settings", adminOnly: true },
       ];
+      return items
+        .filter((item) => isAdmin || !item.adminOnly)
+        .map(({ adminOnly: _adminOnly, ...item }) => item);
+    }
   }
+}
+
+/**
+ * Copy of `items` with live counts applied by item id. A missing, zero or
+ * non-finite count leaves the item without a badge.
+ */
+export function withNavCounts(
+  items: PortalNavItem[],
+  counts: Partial<Record<string, number | null | undefined>>,
+): PortalNavItem[] {
+  return items.map((item) => {
+    const count = counts[item.id];
+    return typeof count === "number" && Number.isFinite(count) && count > 0
+      ? { ...item, count }
+      : item;
+  });
 }
 
 export function roleLabel(role: string): string {

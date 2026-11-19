@@ -85,7 +85,8 @@ function AttentionAction({
         )}
       >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-warning-tint text-foreground">
-          <AdminIcon name={item.icon} />
+          {/* 2px stroke at 20px, as drawn (Lucide's 2 is relative to its 24px grid). */}
+          <AdminIcon name={item.icon} className="[stroke-width:2.4]" />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id={titleId} className="lg-body-medium break-words text-foreground">
@@ -97,13 +98,13 @@ function AttentionAction({
         </span>
         <ChevronRight
           aria-hidden
-          strokeWidth={2}
+          strokeWidth={2.4}
           className="size-5 shrink-0 text-foreground transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none"
         />
       </a>
       <AdminButton
         asChild
-        className="max-w-full min-w-36 self-start px-8 @lg:w-34 @lg:min-w-0 @lg:self-center @lg:px-2"
+        className="max-w-full min-w-36 self-start px-8 @lg:min-w-34 @lg:self-center @lg:px-4"
       >
         <a
           {...navProps(item.actionHref ?? item.href, onNavigate)}

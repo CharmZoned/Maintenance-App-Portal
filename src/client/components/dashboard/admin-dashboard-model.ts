@@ -127,7 +127,7 @@ export interface ActivityModel {
 }
 
 export interface RentModel {
-  /** "November 2026 · All 4 properties" */
+  /** "November 2026 · All 4 properties"; empty hides the line. */
   scopeLine: string;
   /** "$10,575 of $11,300 collected" */
   headline: string;
@@ -142,6 +142,8 @@ export interface RentModel {
   } | null;
   /** "Collected $10,575", "Outstanding $725 · 1 tenant 15 days late", … */
   lines: string[];
+  /** Latest rent event in the caption style: ["Raj Patel, tenant · $725 Zelle verified", "Today, Mon 16 Nov 2026"]. */
+  noteLines?: string[];
   /** "Open rent" target. */
   href: string;
 }
@@ -193,11 +195,15 @@ export interface MessagesModel {
 }
 
 export interface ListingsModel {
-  /** "Homes on your public marketing site" */
+  /** "Homes on your public marketing site"; empty hides the line. */
   summaryLine: string;
   /** "6 live · 1 draft · 1 vacant not listed" */
   headline: string;
-  /** "3 new inquiries → Contact prospective renters"; null when there are none. */
+  /**
+   * "3 new inquiries → Contact prospective renters"; null when there is nothing
+   * to say. A link when `inquiryHref` is set, otherwise plain text; line
+   * breaks are kept.
+   */
   inquiryLine: string | null;
   inquiryHref?: string;
   /** ["Birch House · Unit 1", "Vacant, ready and not marketed"] */

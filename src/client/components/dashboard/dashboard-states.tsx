@@ -1,24 +1,142 @@
-/** STUBS — replaced by the intro/KPI agent. Props are the contract. */
+import { cn } from "@/lib/utils";
+import { AdminButton } from "./dashboard-primitives";
 
-/** Data-shaped skeletons (Figma "Loading"): six KPI tiles, then card placeholders. */
-export function DashboardLoading() {
-  return <div data-stub="loading" aria-busy="true">Loading…</div>;
+const STATE_CARD =
+  "flex min-w-0 flex-col items-start gap-4 rounded-md border border-border bg-card p-4";
+
+/**
+ * AD / Dashboard skeleton tile — data-shaped bones: a label bar, a value
+ * block and a detail bar. Pulses only when motion is allowed.
+ */
+function SkeletonTile({ className }: { className?: string }) {
+  const bone = "rounded-xs bg-muted motion-safe:animate-pulse";
+  return (
+    <div className={cn("flex h-[140px] min-w-0 flex-col gap-3 rounded-md bg-card p-4", className)}>
+      <div className={cn(bone, "h-3 w-full")} />
+      <div className={cn(bone, "h-8 w-[90px] max-w-full")} />
+      <div className={cn(bone, "h-3 w-full")} />
+    </div>
+  );
 }
 
-/** No properties yet (Figma "Empty"): "Start your portfolio" + "Getting started". */
-export function DashboardEmpty(_props: {
+/**
+ * Data-shaped skeletons (Figma "Loading" · "KPI placeholders" + "Dashboard
+ * skeletons"): six KPI tiles, then six card placeholders. Never loading text
+ * on screen — the label is for assistive technology only.
+ */
+export function DashboardLoading() {
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label="Loading dashboard"
+      className="flex min-w-0 flex-col gap-6"
+    >
+      <span className="sr-only">Loading dashboard</span>
+      <div
+        aria-hidden
+        className="grid grid-cols-2 gap-x-3 gap-y-6 md:grid-cols-3 md:gap-3 xl:grid-cols-6"
+      >
+        {Array.from({ length: 6 }, (_, index) => (
+          <SkeletonTile key={index} />
+        ))}
+      </div>
+      <div aria-hidden className="flex flex-col gap-4">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className="rounded-md border border-border bg-card p-4">
+            <SkeletonTile />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * No properties yet (Figma "Empty" · "Start your portfolio" + "Getting
+ * started"): the one next step, then the three setup steps and who to ask.
+ */
+export function DashboardEmpty({
+  statsLines,
+  contactLines,
+  onAddProperty,
+}: {
   statsLines: string[];
   contactLines: string[];
   onAddProperty: () => void;
 }) {
-  return <div data-stub="empty">Empty</div>;
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      <section aria-labelledby="dashboard-empty-title" className={STATE_CARD}>
+        <h2 id="dashboard-empty-title" className="lg-heading break-words text-foreground">
+          Your command center starts here
+        </h2>
+        <p className="lg-body break-words text-foreground">
+          Add your first property, assign a landlord, then invite tenants. Rent, requests and
+          conversations will appear here.
+        </p>
+        <AdminButton variant="default" className="min-w-40" onClick={onAddProperty}>
+          Add property
+        </AdminButton>
+        {statsLines.length > 0 ? (
+          <div className="lg-caption min-w-0 max-w-full text-muted-foreground">
+            {statsLines.map((line) => (
+              <p key={line} className="break-words">
+                {line}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section aria-label="Getting started" className={STATE_CARD}>
+        <ol className="lg-section flex list-inside list-decimal flex-col gap-4 text-foreground">
+          <li className="break-words">Add a property</li>
+          <li className="break-words">Add units and assign a landlord</li>
+          <li className="break-words">Invite people and set up rent</li>
+        </ol>
+        {contactLines.length > 0 ? (
+          <div className="lg-body min-w-0 max-w-full text-foreground">
+            {contactLines.map((line) => (
+              <p key={line} className="break-words">
+                {line}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
 }
 
-/** Load failed (Figma "Error"): "Dashboard unavailable" + Retry + last attempt line. */
-export function DashboardError(_props: {
+/**
+ * Load failed (Figma "Error" · "Error with retry"): "Dashboard unavailable",
+ * what happened, Retry, and when the last attempt was. Announced as an alert.
+ */
+export function DashboardError({
+  message,
+  lastAttemptLine,
+  onRetry,
+}: {
   message: string;
   lastAttemptLine: string;
   onRetry: () => void;
 }) {
-  return <div data-stub="error">Error</div>;
+  // The design leads the sentence with "Error ·" so the state never relies on
+  // colour alone; keep a message that already carries it as is.
+  const sentence = /^error\b/i.test(message) ? message : `Error · ${message}`;
+  return (
+    <section role="alert" aria-labelledby="dashboard-error-title" className={STATE_CARD}>
+      <h2 id="dashboard-error-title" className="lg-heading break-words text-destructive">
+        Dashboard unavailable
+      </h2>
+      <p className="lg-body break-words text-foreground">{sentence}</p>
+      <AdminButton variant="default" className="min-w-36" onClick={onRetry}>
+        Retry
+      </AdminButton>
+      {lastAttemptLine ? (
+        <p className="lg-caption break-words text-muted-foreground">{lastAttemptLine}</p>
+      ) : null}
+    </section>
+  );
 }

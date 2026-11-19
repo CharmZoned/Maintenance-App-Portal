@@ -2634,3 +2634,261 @@ export async function deletePropertyDocument(id: number): Promise<void> {
     throw new Error("Storage object removed but document metadata could not be deleted.");
   }
 }
+
+// ── Admin dashboard readers (read-only) ───────────────────────────
+// Slim reads for lib/admin-dashboard.ts. Each one is a secondary source: the
+// dashboard hook catches a failure and degrades just the card that needed it.
+
+/** Charges for several periods in one read (dashboard calendar: last, this and next month). */
+export async function listChargesForPeriods(periods: string[]): Promise<RentCharge[]> {
+  if (periods.length === 0) return [];
+  const charges = await selectAllPages<Tables<"RentCharges">>((from, to) =>
+    supabase
+      .from("RentCharges")
+      .select("*")
+      .in("period", periods)
+      .order("due_date", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  const leaseExtras = await loadChargeLeaseExtras([...new Set(charges.map((c) => c.lease_id))]);
+  return charges.map((c) => mapCharge(c, leaseExtras.get(c.lease_id)));
+}
+
+/** Charges by id, enriched like listCharges (unit / property / tenant display fields). */
+async function loadChargesByIds(chargeIds: number[]): Promise<Map<number, RentCharge>> {
+  const out = new Map<number, RentCharge>();
+  const ids = [...new Set(chargeIds)];
+  if (ids.length === 0) return out;
+  const rows: Tables<"RentCharges">[] = [];
+  for (let i = 0; i < ids.length; i += IN_FILTER_CHUNK) {
+    const { data, error } = await supabase
+      .from("RentCharges")
+      .select("*")
+      .in("id", ids.slice(i, i + IN_FILTER_CHUNK));
+    if (error) throwSb(error);
+    rows.push(...(data ?? []));
+  }
+  const leaseExtras = await loadChargeLeaseExtras([...new Set(rows.map((c) => c.lease_id))]);
+  for (const row of rows) out.set(row.id, mapCharge(row, leaseExtras.get(row.lease_id)));
+  return out;
+}
+
+/** Whether a unit is published on the public website (`Units.currently_being_marketed`). */
+export interface UnitMarketingFlag {
+  unit_id: number;
+  marketed: boolean;
+}
+
+export async function listUnitMarketingFlags(): Promise<UnitMarketingFlag[]> {
+  const rows = await selectAllPages<{ id: number; currently_being_marketed: boolean }>((from, to) =>
+    supabase
+      .from("Units")
+      .select("id, currently_being_marketed")
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  return rows.map((u) => ({ unit_id: u.id, marketed: Boolean(u.currently_being_marketed) }));
+}
+
+/**
+ * A payment a tenant says they sent by Zelle that the office has not confirmed
+ * yet (`PaymentIntents.status = 'zelle_reported'`). Oldest report first.
+ */
+export interface PaymentAwaitingVerification {
+  id: number;
+  charge_id: number;
+  tenant_id: number;
+  amount: number;
+  method: string;
+  /** When the tenant reported the payment (the intent's last update). */
+  reported_at: string;
+  /** The rent charge it pays, with unit / property / tenant display fields; null when unreadable. */
+  charge: RentCharge | null;
+}
+
+export async function listPaymentsAwaitingVerification(): Promise<PaymentAwaitingVerification[]> {
+  const { data, error } = await supabase
+    .from("PaymentIntents")
+    .select("id, charge_id, tenant_id, amount, method, updated_at")
+    .eq("status", "zelle_reported")
+    .order("updated_at", { ascending: true })
+    .limit(100);
+  if (error) throwSb(error);
+  const rows = data ?? [];
+  const charges = await loadChargesByIds(rows.map((r) => r.charge_id));
+  return rows.map((r) => ({
+    id: r.id,
+    charge_id: r.charge_id,
+    tenant_id: r.tenant_id,
+    amount: Number(r.amount),
+    method: r.method,
+    reported_at: r.updated_at,
+    charge: charges.get(r.charge_id) ?? null,
+  }));
+}
+
+/** One row of MaintenanceRequestStatusHistory, newest first across all requests. */
+export interface RecentStatusEvent {
+  id: number;
+  maintenance_request_id: number;
+  /** null = the request was created. */
+  from_status: WorkOrderStatus | null;
+  to_status: WorkOrderStatus;
+  changed_by_user_id: string | null;
+  changed_by_role: AppRole | null;
+  note: string | null;
+  created_at: string;
+}
+
+export async function listRecentMaintenanceStatusEvents(limit = 40): Promise<RecentStatusEvent[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequestStatusHistory")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    maintenance_request_id: row.maintenance_request_id,
+    from_status: row.from_status == null ? null : workOrderStatusFromDb(row.from_status),
+    to_status: workOrderStatusFromDb(row.to_status),
+    changed_by_user_id: row.changed_by_user_id,
+    changed_by_role: row.changed_by_role,
+    note: row.note,
+    created_at: row.created_at,
+  }));
+}
+
+/** A request comment with its author's account id, newest first across all requests. */
+export interface RecentMaintenanceComment extends MaintenanceComment {
+  author_user_id: string | null;
+}
+
+export async function listRecentMaintenanceComments(limit = 40): Promise<RecentMaintenanceComment[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequestComments")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    maintenance_request_id: row.maintenance_request_id,
+    body: row.body,
+    visibility: (row.visibility as CommentVisibility) || "tenant_visible",
+    author_role: row.author_role,
+    author_staff_id: row.author_staff_id,
+    author_tenant_id: row.author_tenant_id,
+    author_user_id: row.author_user_id,
+    created_at: row.created_at,
+  }));
+}
+
+/** A recorded payment with the charge it was applied to, newest first. */
+export interface RecentPayment extends Payment {
+  charge: RentCharge | null;
+}
+
+export async function listRecentPayments(limit = 20): Promise<RecentPayment[]> {
+  const { data, error } = await supabase
+    .from("Payments")
+    .select("*")
+    .order("paid_at", { ascending: false })
+    .limit(limit);
+  if (error) throwSb(error);
+  const rows = data ?? [];
+  const charges = await loadChargesByIds(rows.map((r) => r.charge_id));
+  return rows.map((row) => ({ ...mapPayment(row), charge: charges.get(row.charge_id) ?? null }));
+}
+
+/** Who added a document and where it belongs, newest first (no storage access). */
+export interface RecentDocumentUpload {
+  id: number;
+  created_at: string;
+  title: string;
+  file_name: string;
+  property_id: number;
+  unit_id: number | null;
+  uploaded_by_user_id: string | null;
+  uploaded_by_role: AppRole | null;
+  uploaded_by_tenant_id: number | null;
+}
+
+export async function listRecentDocumentUploads(limit = 20): Promise<RecentDocumentUpload[]> {
+  const { data, error } = await supabase
+    .from("PropertyDocuments")
+    .select(
+      "id, created_at, title, file_name, property_id, unit_id, uploaded_by_user_id, uploaded_by_role, uploaded_by_tenant_id",
+    )
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    created_at: row.created_at,
+    title: row.title,
+    file_name: row.file_name,
+    property_id: row.property_id,
+    unit_id: row.unit_id,
+    uploaded_by_user_id: row.uploaded_by_user_id,
+    uploaded_by_role: row.uploaded_by_role,
+    uploaded_by_tenant_id: row.uploaded_by_tenant_id,
+  }));
+}
+
+/**
+ * One direct thread between a portal user and the office (OfficeMessages),
+ * summarised by its latest message. `unread` compares the thread user's latest
+ * message with the signed-in admin's own OfficeThreadReads row.
+ */
+export interface OfficeThreadSummary {
+  thread_user_id: string;
+  last_message_at: string;
+  last_message_body: string;
+  last_author_role: AppRole;
+  last_author_user_id: string | null;
+  unread: boolean;
+}
+
+/**
+ * Latest office threads, newest first. Reads the most recent `messageLimit`
+ * messages, so a thread whose last message is older than that window is not
+ * listed (and not counted as unread).
+ */
+export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThreadSummary[]> {
+  const [messages, reads] = await Promise.all([
+    supabase
+      .from("OfficeMessages")
+      .select("id, created_at, thread_user_id, author_user_id, author_role, body")
+      .order("created_at", { ascending: false })
+      .limit(messageLimit),
+    // RLS returns only the caller's own read rows.
+    supabase.from("OfficeThreadReads").select("thread_user_id, last_read_at"),
+  ]);
+  if (messages.error) throwSb(messages.error);
+  if (reads.error) throwSb(reads.error);
+
+  const lastRead = new Map((reads.data ?? []).map((r) => [r.thread_user_id, Date.parse(r.last_read_at)]));
+  const threads = new Map<string, OfficeThreadSummary>();
+  for (const m of messages.data ?? []) {
+    let thread = threads.get(m.thread_user_id);
+    if (!thread) {
+      // Rows arrive newest first, so the first row seen is the thread's latest message.
+      thread = {
+        thread_user_id: m.thread_user_id,
+        last_message_at: m.created_at,
+        last_message_body: m.body,
+        last_author_role: m.author_role,
+        last_author_user_id: m.author_user_id,
+        unread: false,
+      };
+      threads.set(m.thread_user_id, thread);
+    }
+    if (m.author_role !== "admin") {
+      const readAt = lastRead.get(m.thread_user_id);
+      if (readAt == null || Date.parse(m.created_at) > readAt) thread.unread = true;
+    }
+  }
+  return [...threads.values()];
+}
