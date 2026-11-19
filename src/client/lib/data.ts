@@ -1305,13 +1305,55 @@ async function upsertStaffNotes(requestId: number, notes: string | null): Promis
   if (error) throwSb(error);
 }
 
+type RequestPriceTable = "MaintenanceRequestWorkerPrices" | "MaintenanceRequestLandlordPrices";
+
+/**
+ * Worker price and landlord price live in separate tables so each audience
+ * reads only its own. RLS returns no rows for a price the caller may not see.
+ */
+async function loadPricesByRequestIds(
+  requestIds: number[],
+): Promise<{ worker: Map<number, number>; landlord: Map<number, number> }> {
+  const worker = new Map<number, number>();
+  const landlord = new Map<number, number>();
+  if (requestIds.length === 0) return { worker, landlord };
+  const read = async (table: RequestPriceTable, into: Map<number, number>) => {
+    const { data, error } = await supabase
+      .from(table)
+      .select("maintenance_request_id, amount")
+      .in("maintenance_request_id", requestIds);
+    if (error) throwSb(error);
+    for (const row of data ?? []) into.set(row.maintenance_request_id, Number(row.amount));
+  };
+  await Promise.all([
+    read("MaintenanceRequestWorkerPrices", worker),
+    read("MaintenanceRequestLandlordPrices", landlord),
+  ]);
+  return { worker, landlord };
+}
+
+/** Admin-only (RLS). null removes the price. */
+async function setRequestPrice(table: RequestPriceTable, requestId: number, amount: number | null): Promise<void> {
+  if (amount == null) {
+    const { error } = await supabase.from(table).delete().eq("maintenance_request_id", requestId);
+    if (error) throwSb(error);
+    return;
+  }
+  const { error } = await supabase.from(table).upsert({
+    maintenance_request_id: requestId,
+    amount,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throwSb(error);
+}
+
 export async function listWorkOrders(params?: {
   status?: string;
   property_id?: number;
   /** Home widgets: non-closed statuses only (accurate open counts without Closed rows). */
   open_only?: boolean;
   limit?: number;
-  /** Skip MaintenanceRequestStaffNotes batch (unused on tenant/landlord Home). */
+  /** Skip the staff-notes and price batches (unused on tenant/landlord Home). */
   skip_staff_notes?: boolean;
 }): Promise<WorkOrder[]> {
   let q = supabase.from("MaintenanceRequests").select("*").order("created_at", { ascending: false });
@@ -1331,7 +1373,7 @@ export async function listWorkOrders(params?: {
   const requestIds = (rows ?? []).map((r) => r.id);
   const skipNotes = Boolean(params?.skip_staff_notes);
 
-  const [{ data: props }, { data: units }, { data: tenants }, { data: vendors }, notesMap] =
+  const [{ data: props }, { data: units }, { data: tenants }, { data: vendors }, notesMap, prices] =
     await Promise.all([
       propIds.length
         ? supabase.from("Properties").select("id, property_name, color").in("id", propIds)
@@ -1348,6 +1390,7 @@ export async function listWorkOrders(params?: {
       skipNotes
         ? Promise.resolve(new Map<number, string | null>())
         : loadStaffNotesByRequestIds(requestIds),
+      loadPricesByRequestIds(skipNotes ? [] : requestIds),
     ]);
 
   const propMap = new Map((props ?? []).map((p) => [p.id, p]));
@@ -1369,6 +1412,8 @@ export async function listWorkOrders(params?: {
       vendor_name: v?.name,
       vendor_color: v?.color,
       notes: notesMap.get(r.id) ?? null,
+      worker_price: prices.worker.get(r.id) ?? null,
+      landlord_price: prices.landlord.get(r.id) ?? null,
     });
   });
 }
@@ -1389,7 +1434,6 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
       submitted_by_tenant_id: input.tenant_id ?? null,
       assigned_staff_id: null,
       scheduled_for: null,
-      cost: input.cost ?? null,
       permission_to_enter: input.permission_to_enter ?? false,
       resolution_notes: null,
       hold_reason: null,
@@ -1404,8 +1448,21 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
   if (initialNotes) {
     await upsertStaffNotes(data!.id, initialNotes);
   }
+  if (input.worker_price != null) {
+    await setRequestPrice("MaintenanceRequestWorkerPrices", data!.id, input.worker_price);
+  }
+  if (input.landlord_price != null) {
+    await setRequestPrice("MaintenanceRequestLandlordPrices", data!.id, input.landlord_price);
+  }
   const list = await listWorkOrders();
-  return list.find((w) => w.id === data!.id) ?? mapWorkOrder(data!, { notes: initialNotes });
+  return (
+    list.find((w) => w.id === data!.id) ??
+    mapWorkOrder(data!, {
+      notes: initialNotes,
+      worker_price: input.worker_price ?? null,
+      landlord_price: input.landlord_price ?? null,
+    })
+  );
 }
 
 /** Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment. */
@@ -1524,7 +1581,6 @@ export async function updateWorkOrder(
         : patch.scheduled_at
       : null;
   }
-  if (patch.cost !== undefined) row.cost = patch.cost;
   if (patch.resolution_notes !== undefined) row.resolution_notes = patch.resolution_notes;
   if (patch.hold_reason !== undefined) row.hold_reason = patch.hold_reason;
   if (patch.next_follow_up_date !== undefined) row.next_follow_up_date = patch.next_follow_up_date;
@@ -1542,6 +1598,13 @@ export async function updateWorkOrder(
   if (patch.notes !== undefined) {
     await upsertStaffNotes(id, patch.notes);
   }
+  // Prices are admin-only; callers for other roles must leave these undefined.
+  if (patch.worker_price !== undefined) {
+    await setRequestPrice("MaintenanceRequestWorkerPrices", id, patch.worker_price);
+  }
+  if (patch.landlord_price !== undefined) {
+    await setRequestPrice("MaintenanceRequestLandlordPrices", id, patch.landlord_price);
+  }
   const list = await listWorkOrders();
   const found = list.find((w) => w.id === id);
   if (found) return found;
@@ -1551,8 +1614,12 @@ export async function updateWorkOrder(
     .eq("id", id)
     .single();
   if (fbErr) throwSb(fbErr);
-  const notesMap = await loadStaffNotesByRequestIds([id]);
-  return mapWorkOrder(fallback!, { notes: notesMap.get(id) ?? null });
+  const [notesMap, prices] = await Promise.all([loadStaffNotesByRequestIds([id]), loadPricesByRequestIds([id])]);
+  return mapWorkOrder(fallback!, {
+    notes: notesMap.get(id) ?? null,
+    worker_price: prices.worker.get(id) ?? null,
+    landlord_price: prices.landlord.get(id) ?? null,
+  });
 }
 
 function formatPropertyAddress(prop: {

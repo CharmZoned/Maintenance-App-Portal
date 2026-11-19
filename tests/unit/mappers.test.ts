@@ -32,7 +32,6 @@ const mr = (over: Partial<Tables<"MaintenanceRequests">> = {}) =>
     assigned_staff_id: null,
     scheduled_for: null,
     closed_at: null,
-    cost: null,
     resolution_notes: null,
     hold_reason: null,
     next_follow_up_date: null,
@@ -88,14 +87,15 @@ describe("[R4] work order field mapping (database ↔ screen)", () => {
 
   test("renames database columns to the names the screens use", () => {
     const wo = mapWorkOrder(
-      mr({ scheduled_for: "2026-11-20T12:00:00+00:00", closed_at: "2026-11-21T09:00:00+00:00", cost: 120 }),
-      { tenant_first_name: "Tina", unit_name: "1A" },
+      mr({ scheduled_for: "2026-11-20T12:00:00+00:00", closed_at: "2026-11-21T09:00:00+00:00" }),
+      { tenant_first_name: "Tina", unit_name: "1A", worker_price: 120 },
     );
     expect(wo).toMatchObject({
       tenant_id: 3,
       scheduled_at: "2026-11-20T12:00:00+00:00",
       completed_at: "2026-11-21T09:00:00+00:00",
-      cost: 120,
+      worker_price: 120,
+      landlord_price: null,
       permission_to_enter: true,
       tenant_first_name: "Tina",
       unit_name: "1A",

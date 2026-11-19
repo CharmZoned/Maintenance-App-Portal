@@ -6,7 +6,12 @@
 --     every existing RLS helper already key off Staff). Staff gains company,
 --     phone and services. public."Vendors" and MaintenanceRequests.vendor_id
 --     stay in place, unused by this flow, until the portal stops reading them.
---   * Only an admin sets the date/time (scheduled_for) and the price (cost).
+--   * Only an admin sets the date/time (scheduled_for) and the prices.
+--   * There are two prices, because Landlord Gopher keeps the difference:
+--     what the worker is paid, and what the landlord is billed. The worker
+--     never sees the landlord price, the landlord never sees the worker price,
+--     and the tenant sees neither. They live in two side tables with their own
+--     row rules; the old single MaintenanceRequests.cost column is removed.
 --   * Admin pushes a job to the pool (offered_at). Workers whose services match
 --     the category see it. There is no decline: a worker accepts it or leaves it.
 --     First accept wins. Admin can still assign one worker directly.
@@ -69,11 +74,12 @@ ALTER TABLE public."MaintenanceRequests"
   DROP CONSTRAINT IF EXISTS requests_tenant_fix_response_check,
   DROP CONSTRAINT IF EXISTS requests_tenant_fix_details;
 ALTER TABLE public."MaintenanceRequests"
-  -- A job waiting in the pool always carries the date/time and price the admin set.
+  -- A job waiting in the pool always carries the date/time the admin set.
+  -- (Its worker price is guarded by keep_pooled_worker_price below.)
   ADD CONSTRAINT requests_offered_details CHECK (
     offered_at IS NULL
     OR assigned_staff_id IS NOT NULL
-    OR (scheduled_for IS NOT NULL AND cost IS NOT NULL AND cost >= 0)
+    OR scheduled_for IS NOT NULL
   ),
   ADD CONSTRAINT requests_tenant_fix_response_check CHECK (
     tenant_fix_response IS NULL OR tenant_fix_response IN ('confirmed', 'not_fixed')
@@ -95,9 +101,6 @@ COMMENT ON COLUMN public."MaintenanceRequests".released_at IS
   'When a worker last released this job back to the admin. Needs reassigning while unassigned and not re-offered.';
 COMMENT ON COLUMN public."MaintenanceRequests".tenant_fix_response IS
   'Tenant answer after completion: confirmed | not_fixed. Cleared when the request is reopened.';
-COMMENT ON COLUMN public."MaintenanceRequests".cost IS
-  'Price of the job, set by an admin only. Shown to workers on the offer.';
-
 CREATE INDEX IF NOT EXISTS maintenance_requests_pool_idx
   ON public."MaintenanceRequests" (scheduled_for)
   WHERE offered_at IS NOT NULL AND assigned_staff_id IS NULL AND status = 'Open';
@@ -105,6 +108,75 @@ CREATE INDEX IF NOT EXISTS maintenance_requests_released_by_idx
   ON public."MaintenanceRequests" (released_by_staff_id);
 CREATE INDEX IF NOT EXISTS maintenance_requests_offered_by_idx
   ON public."MaintenanceRequests" (offered_by_user_id);
+
+-- ── Two prices, in two side tables ──────────────────────────────────
+-- Row rules cannot hide one column of a row from one audience, so each price
+-- gets its own table (same approach as MaintenanceRequestStaffNotes).
+
+CREATE TABLE IF NOT EXISTS public."MaintenanceRequestWorkerPrices" (
+  maintenance_request_id bigint PRIMARY KEY
+    REFERENCES public."MaintenanceRequests"(id) ON DELETE CASCADE,
+  amount numeric(10, 2) NOT NULL CHECK (amount >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public."MaintenanceRequestLandlordPrices" (
+  maintenance_request_id bigint PRIMARY KEY
+    REFERENCES public."MaintenanceRequests"(id) ON DELETE CASCADE,
+  amount numeric(10, 2) NOT NULL CHECK (amount >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE public."MaintenanceRequestWorkerPrices" IS
+  'What Landlord Gopher pays the worker for the job. Admin writes. Read by admin, the assigned worker, and workers looking at the job in the pool. Never the landlord or tenant.';
+COMMENT ON TABLE public."MaintenanceRequestLandlordPrices" IS
+  'What Landlord Gopher bills the landlord for the job. Admin writes. Read by admin and the owning landlord. Never the worker or tenant.';
+
+-- The tenant insert rule named the cost column; restate it without, and keep a
+-- tenant from submitting a request that is already offered, accepted, released
+-- or confirmed.
+DROP POLICY IF EXISTS maintenance_requests_insert_tenant ON public."MaintenanceRequests";
+CREATE POLICY maintenance_requests_insert_tenant ON public."MaintenanceRequests"
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    ((SELECT private.current_role()) = 'tenant'::public.app_role)
+    AND (submitted_by_tenant_id = (SELECT private.current_tenant_id()))
+    AND (unit_id = (SELECT private.current_tenant_unit_id()))
+    AND (NOT (property_id IS DISTINCT FROM (SELECT private.current_tenant_property_id())))
+    AND (status = 'Open'::text)
+    AND (assigned_staff_id IS NULL)
+    AND (started_at IS NULL)
+    AND (closed_at IS NULL)
+    AND (scheduled_for IS NULL)
+    AND (hold_reason IS NULL)
+    AND (next_follow_up_date IS NULL)
+    AND (resolution_notes IS NULL)
+    AND (vendor_id IS NULL)
+    AND (offered_at IS NULL)
+    AND (offered_by_user_id IS NULL)
+    AND (accepted_at IS NULL)
+    AND (released_at IS NULL)
+    AND (released_by_staff_id IS NULL)
+    AND (tenant_fix_response IS NULL)
+    AND (is_test_data = false)
+  );
+
+-- The old single cost column was readable by everyone who could see the
+-- request. Landlords could already read it, so it carries over as the landlord
+-- price (no audience gains anything), then the column goes.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'MaintenanceRequests' AND column_name = 'cost'
+  ) THEN
+    INSERT INTO public."MaintenanceRequestLandlordPrices" (maintenance_request_id, amount)
+    SELECT id, cost FROM public."MaintenanceRequests" WHERE cost IS NOT NULL AND cost >= 0
+    ON CONFLICT (maintenance_request_id) DO NOTHING;
+    ALTER TABLE public."MaintenanceRequests" DROP COLUMN cost;
+  END IF;
+END
+$$;
 
 -- ── Helpers ─────────────────────────────────────────────────────────
 
@@ -138,7 +210,27 @@ AS $function$
          AND request.offered_at IS NOT NULL
          AND request.assigned_staff_id IS NULL
          AND (me.services = '{}'::text[] OR request.category = ANY (me.services))
+         AND EXISTS (
+           SELECT 1 FROM public."MaintenanceRequestWorkerPrices" AS price
+           WHERE price.maintenance_request_id = request.id
+         )
      )
+$function$;
+
+-- The landlord owns the unit this request is for.
+CREATE OR REPLACE FUNCTION private.landlord_owns_request(target_request bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO ''
+AS $function$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public."MaintenanceRequests" AS request
+    WHERE request.id = target_request
+      AND private.landlord_owns_unit(request.unit_id)
+  )
 $function$;
 
 CREATE OR REPLACE FUNCTION private.job_available_for_unit(target_unit bigint)
@@ -184,10 +276,106 @@ REVOKE ALL ON FUNCTION private.is_approved_worker() FROM public, anon;
 REVOKE ALL ON FUNCTION private.job_available_to_me(bigint) FROM public, anon;
 REVOKE ALL ON FUNCTION private.job_available_for_unit(bigint) FROM public, anon;
 REVOKE ALL ON FUNCTION private.job_available_for_property(bigint) FROM public, anon;
+REVOKE ALL ON FUNCTION private.landlord_owns_request(bigint) FROM public, anon;
 GRANT EXECUTE ON FUNCTION private.is_approved_worker() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION private.job_available_to_me(bigint) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION private.job_available_for_unit(bigint) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION private.job_available_for_property(bigint) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION private.landlord_owns_request(bigint) TO authenticated, service_role;
+
+-- ── Who reads which price ───────────────────────────────────────────
+
+ALTER TABLE public."MaintenanceRequestWorkerPrices" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."MaintenanceRequestWorkerPrices" FORCE ROW LEVEL SECURITY;
+ALTER TABLE public."MaintenanceRequestLandlordPrices" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public."MaintenanceRequestLandlordPrices" FORCE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS worker_prices_select ON public."MaintenanceRequestWorkerPrices";
+CREATE POLICY worker_prices_select ON public."MaintenanceRequestWorkerPrices"
+  FOR SELECT TO authenticated
+  USING (
+    -- admin, or the worker assigned to the job
+    (SELECT private.can_update_maintenance_request(maintenance_request_id))
+    -- or a worker looking at it in the pool
+    OR (SELECT private.job_available_to_me(maintenance_request_id))
+  );
+
+DROP POLICY IF EXISTS worker_prices_admin_insert ON public."MaintenanceRequestWorkerPrices";
+CREATE POLICY worker_prices_admin_insert ON public."MaintenanceRequestWorkerPrices"
+  FOR INSERT TO authenticated
+  WITH CHECK ((SELECT private.is_admin()));
+
+DROP POLICY IF EXISTS worker_prices_admin_update ON public."MaintenanceRequestWorkerPrices";
+CREATE POLICY worker_prices_admin_update ON public."MaintenanceRequestWorkerPrices"
+  FOR UPDATE TO authenticated
+  USING ((SELECT private.is_admin()))
+  WITH CHECK ((SELECT private.is_admin()));
+
+DROP POLICY IF EXISTS worker_prices_admin_delete ON public."MaintenanceRequestWorkerPrices";
+CREATE POLICY worker_prices_admin_delete ON public."MaintenanceRequestWorkerPrices"
+  FOR DELETE TO authenticated
+  USING ((SELECT private.is_admin()));
+
+DROP POLICY IF EXISTS landlord_prices_select ON public."MaintenanceRequestLandlordPrices";
+CREATE POLICY landlord_prices_select ON public."MaintenanceRequestLandlordPrices"
+  FOR SELECT TO authenticated
+  USING (
+    (SELECT private.is_admin())
+    OR (SELECT private.landlord_owns_request(maintenance_request_id))
+  );
+
+DROP POLICY IF EXISTS landlord_prices_admin_insert ON public."MaintenanceRequestLandlordPrices";
+CREATE POLICY landlord_prices_admin_insert ON public."MaintenanceRequestLandlordPrices"
+  FOR INSERT TO authenticated
+  WITH CHECK ((SELECT private.is_admin()));
+
+DROP POLICY IF EXISTS landlord_prices_admin_update ON public."MaintenanceRequestLandlordPrices";
+CREATE POLICY landlord_prices_admin_update ON public."MaintenanceRequestLandlordPrices"
+  FOR UPDATE TO authenticated
+  USING ((SELECT private.is_admin()))
+  WITH CHECK ((SELECT private.is_admin()));
+
+DROP POLICY IF EXISTS landlord_prices_admin_delete ON public."MaintenanceRequestLandlordPrices";
+CREATE POLICY landlord_prices_admin_delete ON public."MaintenanceRequestLandlordPrices"
+  FOR DELETE TO authenticated
+  USING ((SELECT private.is_admin()));
+
+REVOKE ALL ON public."MaintenanceRequestWorkerPrices" FROM anon;
+REVOKE ALL ON public."MaintenanceRequestWorkerPrices" FROM authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public."MaintenanceRequestWorkerPrices" TO authenticated;
+GRANT ALL ON public."MaintenanceRequestWorkerPrices" TO service_role;
+REVOKE ALL ON public."MaintenanceRequestLandlordPrices" FROM anon;
+REVOKE ALL ON public."MaintenanceRequestLandlordPrices" FROM authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public."MaintenanceRequestLandlordPrices" TO authenticated;
+GRANT ALL ON public."MaintenanceRequestLandlordPrices" TO service_role;
+
+-- A job cannot sit in the pool without the price workers are shown.
+CREATE OR REPLACE FUNCTION private.keep_pooled_worker_price()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO ''
+AS $function$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM public."MaintenanceRequests" AS request
+    WHERE request.id = OLD.maintenance_request_id
+      AND request.status = 'Open'
+      AND request.offered_at IS NOT NULL
+      AND request.assigned_staff_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Withdraw the job from workers before removing its price';
+  END IF;
+  RETURN OLD;
+END;
+$function$;
+
+DROP TRIGGER IF EXISTS worker_prices_keep_pooled ON public."MaintenanceRequestWorkerPrices";
+CREATE TRIGGER worker_prices_keep_pooled
+  BEFORE DELETE ON public."MaintenanceRequestWorkerPrices"
+  FOR EACH ROW
+  EXECUTE FUNCTION private.keep_pooled_worker_price();
 
 -- ── Workers browsing the pool: request row, photos, address ─────────
 -- Comments, status history and staff notes keep using
@@ -251,8 +439,8 @@ CREATE POLICY properties_select ON public."Properties"
   );
 
 -- ── Field protection ────────────────────────────────────────────────
--- Non-admins cannot set price, schedule, pool or confirmation fields by a plain
--- UPDATE. The three RPCs below set a transaction-local flag naming the one
+-- Non-admins cannot set schedule, pool or confirmation fields by a plain
+-- UPDATE (prices are in their own admin-write tables). The three RPCs below set a transaction-local flag naming the one
 -- transition they perform; the trigger re-checks the shape of that transition,
 -- so the flag cannot widen anything else.
 
@@ -287,7 +475,6 @@ BEGIN
     AND NEW.assigned_staff_id = private.current_staff_id()
     AND NEW.status = 'Scheduled'
     AND NEW.scheduled_for IS NOT DISTINCT FROM OLD.scheduled_for
-    AND NEW.cost IS NOT DISTINCT FROM OLD.cost
   THEN
     RETURN NEW;
   END IF;
@@ -301,7 +488,6 @@ BEGIN
     AND NEW.status = 'Open'
     AND NEW.offered_at IS NULL
     AND NEW.scheduled_for IS NOT DISTINCT FROM OLD.scheduled_for
-    AND NEW.cost IS NOT DISTINCT FROM OLD.cost
   THEN
     RETURN NEW;
   END IF;
@@ -314,7 +500,6 @@ BEGIN
     AND NEW.status = 'Closed'
     AND NEW.assigned_staff_id IS NOT DISTINCT FROM OLD.assigned_staff_id
     AND NEW.scheduled_for IS NOT DISTINCT FROM OLD.scheduled_for
-    AND NEW.cost IS NOT DISTINCT FROM OLD.cost
     AND NEW.offered_at IS NOT DISTINCT FROM OLD.offered_at
   THEN
     RETURN NEW;
@@ -340,10 +525,6 @@ BEGIN
     AND NEW.assigned_staff_id IS DISTINCT FROM OLD.assigned_staff_id
   THEN
     RAISE EXCEPTION 'Assigned staff cannot be changed from this account';
-  END IF;
-
-  IF NEW.cost IS DISTINCT FROM OLD.cost THEN
-    RAISE EXCEPTION 'Only admins can set the price of a job';
   END IF;
 
   IF NEW.offered_at IS DISTINCT FROM OLD.offered_at
@@ -391,7 +572,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION private.protect_maintenance_request() IS
-  'Non-admins cannot rewrite submission fields, price, schedule, pool or tenant-confirmation fields; maintenance cannot reassign and needs a work photo to complete. accept/release/tenant_fix RPCs pass through shape-checked.';
+  'Non-admins cannot rewrite submission fields, schedule, pool or tenant-confirmation fields; maintenance cannot reassign and needs a work photo to complete. accept/release/tenant_fix RPCs pass through shape-checked.';
 
 -- Reopening a completed request clears the tenant's answer (any role, any path).
 CREATE OR REPLACE FUNCTION private.reset_tenant_fix_on_reopen()
@@ -506,11 +687,13 @@ $function$;
 
 -- ── Workflow RPCs ───────────────────────────────────────────────────
 
--- Admin: set date/time and price, and push the job to the worker pool.
+-- Admin: set date/time and prices, and push the job to the worker pool.
+-- p_landlord_price NULL leaves the landlord price as it is.
 CREATE OR REPLACE FUNCTION public.offer_maintenance_request(
   p_request_id bigint,
   p_scheduled_for timestamptz,
-  p_cost numeric
+  p_worker_price numeric,
+  p_landlord_price numeric DEFAULT NULL
 )
 RETURNS public."MaintenanceRequests"
 LANGUAGE plpgsql
@@ -526,8 +709,11 @@ BEGIN
   IF p_scheduled_for IS NULL THEN
     RAISE EXCEPTION 'Set the date and time before offering this job';
   END IF;
-  IF p_cost IS NULL OR p_cost < 0 THEN
-    RAISE EXCEPTION 'Set the price before offering this job';
+  IF p_worker_price IS NULL OR p_worker_price < 0 THEN
+    RAISE EXCEPTION 'Set the worker price before offering this job';
+  END IF;
+  IF p_landlord_price IS NOT NULL AND p_landlord_price < 0 THEN
+    RAISE EXCEPTION 'The landlord price cannot be negative';
   END IF;
 
   SELECT * INTO v_request
@@ -541,9 +727,20 @@ BEGIN
     RAISE EXCEPTION 'Only a new, unassigned request can be offered to workers';
   END IF;
 
+  INSERT INTO public."MaintenanceRequestWorkerPrices" (maintenance_request_id, amount)
+  VALUES (p_request_id, p_worker_price)
+  ON CONFLICT (maintenance_request_id)
+  DO UPDATE SET amount = EXCLUDED.amount, updated_at = now();
+
+  IF p_landlord_price IS NOT NULL THEN
+    INSERT INTO public."MaintenanceRequestLandlordPrices" (maintenance_request_id, amount)
+    VALUES (p_request_id, p_landlord_price)
+    ON CONFLICT (maintenance_request_id)
+    DO UPDATE SET amount = EXCLUDED.amount, updated_at = now();
+  END IF;
+
   UPDATE public."MaintenanceRequests"
   SET scheduled_for = p_scheduled_for,
-      cost = p_cost,
       offered_at = now(),
       offered_by_user_id = auth.uid(),
       accepted_at = NULL
@@ -834,13 +1031,13 @@ BEGIN
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.offer_maintenance_request(bigint, timestamptz, numeric) FROM public, anon;
+REVOKE ALL ON FUNCTION public.offer_maintenance_request(bigint, timestamptz, numeric, numeric) FROM public, anon;
 REVOKE ALL ON FUNCTION public.withdraw_maintenance_offer(bigint) FROM public, anon;
 REVOKE ALL ON FUNCTION public.accept_maintenance_request(bigint) FROM public, anon;
 REVOKE ALL ON FUNCTION public.release_maintenance_request(bigint, text) FROM public, anon;
 REVOKE ALL ON FUNCTION public.confirm_maintenance_request_fixed(bigint, boolean, text) FROM public, anon;
 REVOKE ALL ON FUNCTION public.update_staff_profile(text, text, text, text, text[]) FROM public, anon;
-GRANT EXECUTE ON FUNCTION public.offer_maintenance_request(bigint, timestamptz, numeric) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.offer_maintenance_request(bigint, timestamptz, numeric, numeric) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.withdraw_maintenance_offer(bigint) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.accept_maintenance_request(bigint) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.release_maintenance_request(bigint, text) TO authenticated, service_role;

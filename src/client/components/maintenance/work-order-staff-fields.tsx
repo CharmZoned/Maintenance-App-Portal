@@ -31,7 +31,10 @@ export type WorkOrderStaffFormValues = {
   followUpDate: string;
   resolutionNotes: string;
   permissionToEnter: boolean;
-  cost: string;
+  /** What the worker is paid. Admin edits; the worker sees it read-only. */
+  workerPrice: string;
+  /** What the landlord is billed. Admin only: never shown to the worker. */
+  landlordPrice: string;
   notes: string;
 };
 
@@ -77,7 +80,8 @@ export function WorkOrderStaffFields({
     followUpDate,
     resolutionNotes,
     permissionToEnter,
-    cost,
+    workerPrice,
+    landlordPrice,
     notes,
   } = values;
 
@@ -318,17 +322,32 @@ export function WorkOrderStaffFields({
             <Input type="date" value={scheduledAt} disabled />
           </div>
         )}
-        <div className={isAdmin ? "col-span-2 sm:col-span-1" : ""}>
-          <Label htmlFor="wo-cost">Cost</Label>
+        <div>
+          <Label htmlFor="wo-worker-price">{isAdmin ? "Worker price" : "Price"}</Label>
           <Input
-            id="wo-cost"
+            id="wo-worker-price"
             type="number"
-            value={cost}
-            onChange={(e) => onChange({ cost: e.target.value })}
-            // Only an admin sets the price (protect_maintenance_request).
+            min="0"
+            step="0.01"
+            value={workerPrice}
+            onChange={(e) => onChange({ workerPrice: e.target.value })}
+            // Only an admin sets prices (admin-write price tables).
             disabled={!isAdmin}
           />
         </div>
+        {isAdmin && (
+          <div>
+            <Label htmlFor="wo-landlord-price">Landlord price</Label>
+            <Input
+              id="wo-landlord-price"
+              type="number"
+              min="0"
+              step="0.01"
+              value={landlordPrice}
+              onChange={(e) => onChange({ landlordPrice: e.target.value })}
+            />
+          </div>
+        )}
       </div>
 
       <div>

@@ -362,7 +362,6 @@ export interface Database {
           is_test_data: boolean;
           property_id: number | null;
           vendor_id: number | null;
-          cost: number | null;
           location: string | null;
           permission_to_enter: boolean;
           client_submission_id: string | null;
@@ -396,7 +395,6 @@ export interface Database {
           is_test_data?: boolean;
           property_id?: number | null;
           vendor_id?: number | null;
-          cost?: number | null;
           location?: string | null;
           permission_to_enter?: boolean;
           client_submission_id?: string | null;
@@ -410,6 +408,34 @@ export interface Database {
           tenant_fix_note?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["MaintenanceRequests"]["Insert"]>;
+        Relationships: [];
+      };
+      MaintenanceRequestWorkerPrices: {
+        Row: {
+          maintenance_request_id: number;
+          amount: number;
+          updated_at: string;
+        };
+        Insert: {
+          maintenance_request_id: number;
+          amount: number;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceRequestWorkerPrices"]["Insert"]>;
+        Relationships: [];
+      };
+      MaintenanceRequestLandlordPrices: {
+        Row: {
+          maintenance_request_id: number;
+          amount: number;
+          updated_at: string;
+        };
+        Insert: {
+          maintenance_request_id: number;
+          amount: number;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["MaintenanceRequestLandlordPrices"]["Insert"]>;
         Relationships: [];
       };
       OfficeMessages: {
@@ -742,7 +768,12 @@ export interface Database {
     Views: Record<string, never>;
     Functions: {
       offer_maintenance_request: {
-        Args: { p_request_id: number; p_scheduled_for: string; p_cost: number };
+        Args: {
+          p_request_id: number;
+          p_scheduled_for: string;
+          p_worker_price: number;
+          p_landlord_price?: number | null;
+        };
         Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
       };
       withdraw_maintenance_offer: {

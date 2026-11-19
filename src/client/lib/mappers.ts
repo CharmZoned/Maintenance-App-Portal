@@ -405,6 +405,9 @@ export function mapWorkOrder(
     vendor_color?: string | null;
     /** From MaintenanceRequestStaffNotes; omit/null when caller is not staff/admin. */
     notes?: string | null;
+    /** From the two price side tables; each is null unless the caller may read it. */
+    worker_price?: number | null;
+    landlord_price?: number | null;
   },
 ): WorkOrder {
   return {
@@ -423,7 +426,8 @@ export function mapWorkOrder(
     assigned_staff_id: row.assigned_staff_id,
     scheduled_at: row.scheduled_for,
     completed_at: row.closed_at,
-    cost: row.cost != null ? Number(row.cost) : null,
+    worker_price: extras?.worker_price ?? null,
+    landlord_price: extras?.landlord_price ?? null,
     notes: extras?.notes ?? null,
     resolution_notes: row.resolution_notes,
     hold_reason: row.hold_reason,

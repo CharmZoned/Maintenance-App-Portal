@@ -1,7 +1,7 @@
 /**
  * WF3 — Worker job pool
  *
- *   Tenant reports a problem  →  admin sets the date, time and price and pushes
+ *   Tenant reports a problem  →  admin sets the date, time and prices and pushes
  *   the job  →  workers whose services match see it  →  the first to accept
  *   gets it (there is no decline: the others just leave it)  →  the worker can
  *   release it back to the admin, or do the work and complete it with a photo
@@ -11,6 +11,10 @@
  * sees the problem, photos, address, price and date, but not the conversation,
  * the history or the tenant's record, and a worker can never change the price
  * or the date.
+ *
+ * There are two prices, because Landlord Gopher keeps the difference: what the
+ * worker is paid and what the landlord is billed. Each side sees only its own;
+ * the tenant sees neither.
  *
  * Maintenance staff and vendors are the same thing: a Staff row with a company,
  * phone and services. Sam Fixit takes plumbing; Riley Wrench takes electrical.
@@ -33,7 +37,6 @@ type Request = {
   status: string;
   assigned_staff_id: number | null;
   scheduled_for: string | null;
-  cost: number | null;
   offered_at: string | null;
   accepted_at: string | null;
   released_at: string | null;
@@ -58,17 +61,30 @@ async function newRequest(title: string, category = "Plumbing"): Promise<number>
   return Number(row.id);
 }
 
-async function push(requestId: number, cost = 140, when = inDays(1, 14)): Promise<Request> {
+async function push(requestId: number, workerPrice = 140, when = inDays(1, 14), landlordPrice = 190): Promise<Request> {
   return expectOk(
-    await admin.rpc("offer_maintenance_request", { p_request_id: requestId, p_scheduled_for: when, p_cost: cost }),
+    await admin.rpc("offer_maintenance_request", {
+      p_request_id: requestId,
+      p_scheduled_for: when,
+      p_worker_price: workerPrice,
+      p_landlord_price: landlordPrice,
+    }),
     "admin pushes the job",
   ) as Request;
 }
 
+/** The price(s) a login can read for a request: [worker price, landlord price]. */
+async function pricesSeenBy(client: SupabaseClient, requestId: number): Promise<[number | null, number | null]> {
+  const read = async (table: string) => {
+    const { data } = await client.from(table).select("amount").eq("maintenance_request_id", requestId);
+    return data?.length ? Number(data[0].amount) : null;
+  };
+  return [await read("MaintenanceRequestWorkerPrices"), await read("MaintenanceRequestLandlordPrices")];
+}
+
 async function row(requestId: number): Promise<Request> {
   const [r] = await sql<Request>(`select * from public."MaintenanceRequests" where id = $1`, [requestId]);
-  // Superuser SQL returns numeric as text; the REST API returns a number.
-  return { ...r, cost: r.cost === null ? null : Number(r.cost) };
+  return r;
 }
 
 const visibleIds = async (client: SupabaseClient): Promise<number[]> =>
@@ -120,30 +136,32 @@ describe("[WF3] Worker job pool", () => {
     const noDate = await admin.rpc("offer_maintenance_request", {
       p_request_id: requestId,
       p_scheduled_for: null,
-      p_cost: 140,
+      p_worker_price: 140,
     });
     expect(noDate.error?.message).toMatch(/date and time/);
     const noPrice = await admin.rpc("offer_maintenance_request", {
       p_request_id: requestId,
       p_scheduled_for: when,
-      p_cost: null,
+      p_worker_price: null,
     });
-    expect(noPrice.error?.message).toMatch(/price/);
+    expect(noPrice.error?.message).toMatch(/worker price/);
 
     for (const client of [sam, tenant, landlord]) {
       const res = await client.rpc("offer_maintenance_request", {
         p_request_id: requestId,
         p_scheduled_for: when,
-        p_cost: 1,
+        p_worker_price: 1,
       });
       expect(res.error?.message).toMatch(/Only admins/);
     }
     expect((await row(requestId)).offered_at).toBeNull();
   });
 
-  test("Admin · sets the date, time and price and pushes the job to workers", async () => {
-    const offered = await push(requestId, 140, when);
-    expect(offered).toMatchObject({ status: "Open", assigned_staff_id: null, cost: 140 });
+  test("Admin · sets the date, time and both prices and pushes the job to workers", async () => {
+    const offered = await push(requestId, 140, when, 190);
+    expect(offered).toMatchObject({ status: "Open", assigned_staff_id: null });
+    expect(offered, "the request row itself carries no money").not.toHaveProperty("cost");
+    expect(await pricesSeenBy(admin, requestId)).toEqual([140, 190]);
     expect(new Date(offered.scheduled_for!).toISOString()).toBe(when);
     expect(offered.offered_at).toBeTruthy();
   });
@@ -151,10 +169,11 @@ describe("[WF3] Worker job pool", () => {
   test("Worker · sees the problem, photo, address, price and date before accepting", async () => {
     const { data: jobs } = await sam
       .from("MaintenanceRequests")
-      .select("id, title, description, category, cost, scheduled_for, unit_id, property_id")
+      .select("id, title, description, category, scheduled_for, unit_id, property_id")
       .eq("id", requestId);
     expect(jobs).toHaveLength(1);
-    expect(jobs![0]).toMatchObject({ title: "Kitchen faucet leaking", category: "Plumbing", cost: 140 });
+    expect(jobs![0]).toMatchObject({ title: "Kitchen faucet leaking", category: "Plumbing" });
+    expect(await pricesSeenBy(sam, requestId), "the worker sees their price, never the landlord's").toEqual([140, null]);
     expect(new Date(jobs![0].scheduled_for).toISOString()).toBe(when);
 
     const { data: property } = await sam
@@ -203,9 +222,12 @@ describe("[WF3] Worker job pool", () => {
   test("Worker · cannot grab the job, or change its price or date, by editing the request", async () => {
     const mr = () => sam.from("MaintenanceRequests");
     expectDenied(await mr().update({ assigned_staff_id: world.staff.worker.id }).eq("id", requestId).select());
-    expectDenied(await mr().update({ cost: 900 }).eq("id", requestId).select());
     expectDenied(await mr().update({ scheduled_for: inDays(5, 9) }).eq("id", requestId).select());
-    expect(await row(requestId)).toMatchObject({ assigned_staff_id: null, cost: 140, status: "Open" });
+    expectDenied(
+      await sam.from("MaintenanceRequestWorkerPrices").update({ amount: 900 }).eq("maintenance_request_id", requestId).select(),
+    );
+    expect(await row(requestId)).toMatchObject({ assigned_staff_id: null, status: "Open" });
+    expect(await pricesSeenBy(admin, requestId)).toEqual([140, 190]);
   });
 
   test("Tenant and landlord · cannot accept jobs", async () => {
@@ -220,7 +242,8 @@ describe("[WF3] Worker job pool", () => {
       await sam.rpc("accept_maintenance_request", { p_request_id: requestId }),
       "Sam accepts",
     ) as Request;
-    expect(accepted).toMatchObject({ status: "Scheduled", assigned_staff_id: world.staff.worker.id, cost: 140 });
+    expect(accepted).toMatchObject({ status: "Scheduled", assigned_staff_id: world.staff.worker.id });
+    expect(await pricesSeenBy(sam, requestId)).toEqual([140, null]);
     expect(new Date(accepted.scheduled_for!).toISOString()).toBe(when);
     expect(accepted.accepted_at).toBeTruthy();
   });
@@ -253,11 +276,44 @@ describe("[WF3] Worker job pool", () => {
   });
 
   test("Worker · still cannot change the price or the date after accepting", async () => {
-    const mr = () => sam.from("MaintenanceRequests");
-    const price = await mr().update({ cost: 900 }).eq("id", requestId).select();
-    expect(price.error?.message).toMatch(/Only admins can set the price/);
-    const date = await mr().update({ scheduled_for: inDays(5, 9) }).eq("id", requestId).select();
+    const prices = () => sam.from("MaintenanceRequestWorkerPrices");
+    expectDenied(await prices().update({ amount: 900 }).eq("maintenance_request_id", requestId).select());
+    expectDenied(await prices().delete().eq("maintenance_request_id", requestId).select());
+    expectDenied(
+      await sam.from("MaintenanceRequestLandlordPrices").insert({ maintenance_request_id: requestId, amount: 1 }).select(),
+    );
+    const date = await sam
+      .from("MaintenanceRequests")
+      .update({ scheduled_for: inDays(5, 9) })
+      .eq("id", requestId)
+      .select();
     expect(date.error?.message).toMatch(/Only admins/);
+    expect(await pricesSeenBy(admin, requestId)).toEqual([140, 190]);
+  });
+
+  test("Everyone · sees only their own price: worker pay, landlord bill, tenant neither", async () => {
+    expect(await pricesSeenBy(sam, requestId), "assigned worker").toEqual([140, null]);
+    expect(await pricesSeenBy(landlord, requestId), "owning landlord").toEqual([null, 190]);
+    expect(await pricesSeenBy(tenant, requestId), "reporting tenant").toEqual([null, null]);
+    expect(await pricesSeenBy(riley, requestId), "a worker who did not get the job").toEqual([null, null]);
+
+    // The same holds through the app's own data layer.
+    const seen = async (persona: "admin" | "worker" | "landlord" | "tenant") => {
+      await signInApp(persona);
+      const wo = (await data.listWorkOrders()).find((w) => w.id === requestId)!;
+      return [wo.worker_price, wo.landlord_price];
+    };
+    expect(await seen("admin")).toEqual([140, 190]);
+    expect(await seen("worker")).toEqual([140, null]);
+    expect(await seen("landlord")).toEqual([null, 190]);
+    expect(await seen("tenant")).toEqual([null, null]);
+  });
+
+  test("Admin · changes either price from the work order", async () => {
+    await signInApp("admin");
+    const saved = await data.updateWorkOrder(requestId, { worker_price: 150, landlord_price: 210 });
+    expect(saved).toMatchObject({ worker_price: 150, landlord_price: 210 });
+    expect(await pricesSeenBy(sam, requestId)).toEqual([150, null]);
   });
 
   test("Worker · cannot complete the job without a photo of the finished work", async () => {
@@ -360,13 +416,14 @@ describe("[WF3] Worker job pool", () => {
         assigned_staff_id: null,
         offered_at: null,
         accepted_at: null,
-        cost: 120,
         released_by_staff_id: world.staff.worker.id,
       });
       expect(released.released_at).toBeTruthy();
       expect(released.scheduled_for, "the admin's date is kept for whoever takes it next").toBeTruthy();
 
+      expect(await pricesSeenBy(admin, releaseId), "prices are kept for whoever takes it next").toEqual([120, 190]);
       expect(await visibleIds(sam), "the releasing worker no longer sees it").not.toContain(releaseId);
+      expect(await pricesSeenBy(sam, releaseId), "or its price").toEqual([null, null]);
       expect(await visibleIds(riley), "and it is not offered to anyone else").not.toContain(releaseId);
     });
 
@@ -431,8 +488,10 @@ describe("[WF3] Worker job pool", () => {
     test("a pushed job cannot lose its date or price while it waits", async () => {
       const id = await newRequest("Keeps its terms");
       await push(id, 60);
-      const res = await admin.from("MaintenanceRequests").update({ cost: null }).eq("id", id).select();
-      expect(res.error?.message).toMatch(/requests_offered_details/);
+      const noDate = await admin.from("MaintenanceRequests").update({ scheduled_for: null }).eq("id", id).select();
+      expect(noDate.error?.message).toMatch(/requests_offered_details/);
+      const noPrice = await admin.from("MaintenanceRequestWorkerPrices").delete().eq("maintenance_request_id", id).select();
+      expect(noPrice.error?.message).toMatch(/Withdraw the job/);
     });
 
     test("a worker waiting for approval sees no jobs and cannot accept", async () => {
