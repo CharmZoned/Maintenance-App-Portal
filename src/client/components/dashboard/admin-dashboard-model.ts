@@ -242,7 +242,7 @@ export type AdminDashboardState =
   | { status: "loading" }
   | {
       status: "error";
-      /** "I couldn’t retrieve your portfolio. Your saved work is safe." */
+      /** "I couldn’t retrieve your portfolio. Your saved records have not changed. Try again to get the latest data." (the card adds the "Error · " prefix) */
       message: string;
       /** "Last attempt · Just now, Mon 16 Nov 2026" */
       lastAttemptLine: string;
@@ -250,9 +250,9 @@ export type AdminDashboardState =
   | {
       /** No properties yet. */
       status: "empty";
-      /** ["No properties · No units · No requests", "$0 expected · 0 unread messages"] */
+      /** ["No properties · No units · No requests", "$0 expected · 0 live homes"] */
       statsLines: string[];
-      /** ["Ada Admin · Admin · Landlord Gopher", "help@landlordgopher.example"] */
+      /** ["Ada Admin · Admin · Landlord Gopher", "help@landlordgopher.example · (410) 555-0134"] */
       contactLines: string[];
     }
   | { status: "ready"; model: AdminDashboardModel };

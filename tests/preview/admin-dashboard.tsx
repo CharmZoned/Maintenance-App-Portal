@@ -36,7 +36,7 @@ function Preview() {
     requested in fixtureStates ? (requested as FixtureStateName) : "default";
   const notice: DashboardNoticeModel | null =
     requested === "success"
-      ? { tone: "success", message: "Success · Dashboard refreshed. Everything is up to date." }
+      ? { tone: "success", message: "Success · Dashboard refreshed. Portfolio is up to date as of just now, Mon 16 Nov 2026." }
       : null;
 
   const items = navItemsForAudience("staff").map((item) => ({

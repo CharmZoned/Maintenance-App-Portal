@@ -442,8 +442,8 @@ export function App() {
             {route.name === "listings" && (
               <StubPage
                 title="Website listings"
-                meta="Homes advertised on the public site"
-                message="Listing management isn’t built yet. Vacant homes still have to be published on the website by hand."
+                meta="Homes advertised on the website"
+                message="Listing management isn’t built yet, so there is nothing to show or change here."
               />
             )}
             {route.name === "account" && (
