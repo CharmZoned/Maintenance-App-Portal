@@ -71,7 +71,7 @@ function ActivityRow({
     <>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-foreground">
         {/* 2px stroke at 16px, as drawn (Lucide's 2 is relative to its 24px grid). */}
-        <AdminIcon name={item.icon} className="size-4 [stroke-width:3]" />
+        <AdminIcon name={item.icon} size={16} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span id={titleId} className="lg-body break-words text-foreground">

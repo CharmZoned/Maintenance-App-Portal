@@ -336,6 +336,8 @@ export const fixtureAllClearModel: AdminDashboardModel = {
   // No summary line under the heading in the all-clear frame (the card ignores it when empty).
   attention: {
     summaryLine: "",
+    clearedLine:
+      "Payments verified, people approved and homes marketed. The team owns every open request.",
     resolvedLine: "Resolved today · Mon 16 Nov 2026",
     items: [],
   },
@@ -351,8 +353,21 @@ export const fixtureAllClearModel: AdminDashboardModel = {
   },
 };
 
+/**
+ * Figma "Filtered empty": the calendar is narrowed to "Follow-up due" in a
+ * month that has none, so the grid gives way to the "No matching events" block.
+ */
+export const fixtureFilteredEmptyModel: AdminDashboardModel = {
+  ...fixtureModel,
+  calendar: {
+    ...fixtureModel.calendar,
+    events: fixtureModel.calendar.events.filter((event) => event.kind !== "follow_up"),
+  },
+};
+
 export const fixtureStates = {
   default: { status: "ready", model: fixtureModel },
+  "filtered-empty": { status: "ready", model: fixtureFilteredEmptyModel },
   "all-clear": { status: "ready", model: fixtureAllClearModel },
   loading: { status: "loading" },
   empty: {

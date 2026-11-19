@@ -177,7 +177,7 @@ function SignedInFooter({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`Signed in as ${userName}, ${userMeta}. Account options`}
+          aria-label={`Account menu for ${userName}, ${userMeta}`}
           // The negative margin keeps the text on the rail's 16px edge while the
           // hover surface and the focus ring get room around it.
           className={cn(
@@ -197,7 +197,9 @@ function SignedInFooter({
           <div className="lg-body-medium text-foreground">{userName}</div>
           <div className="lg-caption text-muted-foreground">{userMeta}</div>
           {userEmail ? (
-            <div className="lg-caption truncate text-muted-foreground">{userEmail}</div>
+            <div className="lg-caption text-muted-foreground [overflow-wrap:anywhere]">
+              {userEmail}
+            </div>
           ) : null}
         </div>
         <DropdownMenuSeparator className="my-0 bg-border" />

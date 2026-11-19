@@ -12,10 +12,16 @@ import { AdminSidebar, type AdminSidebarProps } from "./admin-sidebar";
 export function AdminNavDrawer({
   open,
   onOpenChange,
+  onCloseFocus,
   ...sidebar
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Called when the drawer has closed, to put focus back where it came from
+   * (there is no Radix trigger — the menu button lives in the page header).
+   */
+  onCloseFocus?: () => void;
 } & Omit<AdminSidebarProps, "className" | "columnClassName">) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -23,6 +29,10 @@ export function AdminNavDrawer({
         <DialogPrimitive.Overlay className="lg-admin fixed inset-0 z-50 bg-muted/80 transition-opacity duration-200 starting:opacity-0 motion-reduce:transition-none" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onCloseFocus?.();
+          }}
           className="lg-admin fixed inset-y-0 left-0 z-50 flex w-80 max-w-[calc(100vw-2.5rem)] transition-transform duration-200 ease-out starting:-translate-x-full motion-reduce:transition-none"
         >
           <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>

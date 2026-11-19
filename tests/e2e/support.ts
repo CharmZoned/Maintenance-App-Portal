@@ -62,7 +62,8 @@ export async function signIn(page: Page, who: PersonaKey | { email: string; pass
 }
 
 export async function signOut(page: Page): Promise<void> {
-  await page.getByRole("button", { name: /Account menu/i }).click();
+  // The admin workspace has an account menu in the rail and, on older pages, one in the header too.
+  await page.getByRole("button", { name: /Account menu/i }).first().click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 }

@@ -7,6 +7,8 @@ import type { Page } from "@playwright/test";
 import { choose, expect, outbox, PASSWORD, resetWorld, selectUnder, shot, signIn, signOut, sql, test, type World } from "./support";
 
 const nav = (page: Page) => page.getByRole("navigation", { name: "Primary" });
+/** The admin dashboard's page heading is its greeting. */
+const GREETING = /^Good (morning|afternoon|evening)/;
 const navLinks = async (page: Page) => (await nav(page).getByRole("link").allInnerTexts()).map((t) => t.trim());
 
 test.describe("[R8] Admin web portal — who sees what", () => {
@@ -23,19 +25,25 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Login page");
   });
 
-  test("an admin sees the dashboard and Phase 0 primary nav", async ({ page }, testInfo) => {
+  test("an admin sees the dashboard and the admin workspace nav", async ({ page }, testInfo) => {
     await signIn(page, "admin");
-    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-    await expect(page.getByText("Needs attention · portfolio overview")).toBeVisible();
-    await expect(page.getByText("Unassigned requests").first()).toBeVisible();
-    await expect(page.getByText("Open requests").first()).toBeVisible();
-    expect(await navLinks(page)).toEqual([
+    await expect(page.getByText("Admin workspace / Dashboard")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: GREETING })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible();
+    const kpis = page.getByRole("list", { name: "Portfolio KPIs" });
+    await expect(kpis.getByText("Open requests")).toBeVisible();
+    await expect(kpis.getByText("Approvals waiting")).toBeVisible();
+    // Count badges append to a link's text ("People 1 …"), so compare the label line only.
+    expect((await navLinks(page)).map((text) => text.split("\n")[0])).toEqual([
       "Dashboard",
       "Maintenance",
       "Properties",
+      "Rent",
       "People",
       "Messages",
       "Documents",
+      "Website listings",
+      "Settings",
     ]);
     await expect(page.getByRole("link", { name: "Landlord Gopher" })).toBeVisible();
     await shot(page, testInfo, "Admin dashboard");
@@ -116,8 +124,8 @@ test.describe("[R1] Accounts and login — screens", () => {
   test("a signed-in user stays signed in after a refresh, and can sign out", async ({ page }) => {
     await signIn(page, "admin");
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-    await page.getByRole("button", { name: /Account menu/i }).click();
+    await expect(page.getByRole("heading", { level: 1, name: GREETING })).toBeVisible();
+    await page.getByRole("button", { name: /Account menu/i }).first().click();
     await expect(page.getByText("admin@test.local")).toBeVisible();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
     await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();

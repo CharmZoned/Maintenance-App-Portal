@@ -82,7 +82,8 @@ function Preview() {
                 quickAddOpen: requested === "quick-add",
                 calendarHiddenKinds:
                   requested === "filtered-empty"
-                    ? ["visit", "follow_up", "rent_due", "lease_start", "lease_end", "move_in"]
+                    ? // Everything but "Follow-up due" hidden = only that filter chip pressed.
+                      ["visit", "rent_due", "lease_start", "lease_end", "move_in"]
                     : undefined,
                 calendarSelectedDay: "2026-11-17",
               }}

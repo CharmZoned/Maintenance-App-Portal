@@ -73,16 +73,32 @@ export function navProps(href: string, onNavigate: (href: string) => void) {
   };
 }
 
-/** Lucide icon by admin name — 20px with a 2px stroke unless sized by className. */
+/**
+ * Lucide icon by admin name. The design draws every icon with a 2px stroke at
+ * its output size (20px, or 16px inside small icon boxes), so the stroke is
+ * absolute rather than scaled down from Lucide's 24px grid — pass `size`
+ * instead of a `size-*` class.
+ */
 export function AdminIcon({
   name,
+  size = 20,
   className,
 }: {
   name: AdminIconName;
+  /** Rendered size in px. */
+  size?: number;
   className?: string;
 }) {
   const Icon = ICONS[name];
-  return <Icon aria-hidden strokeWidth={2} className={cn("size-5 shrink-0", className)} />;
+  return (
+    <Icon
+      aria-hidden
+      size={size}
+      strokeWidth={2}
+      absoluteStrokeWidth
+      className={cn("shrink-0", className)}
+    />
+  );
 }
 
 /**
@@ -187,7 +203,9 @@ export function DashboardNotice({
         className,
       )}
     >
-      {icon ?? <t.Icon aria-hidden strokeWidth={2} className="mt-px size-5 shrink-0" />}
+      {icon ?? (
+        <t.Icon aria-hidden size={20} strokeWidth={2} absoluteStrokeWidth className="mt-px shrink-0" />
+      )}
       <div className="lg-body-medium min-w-0 flex-1">{children}</div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

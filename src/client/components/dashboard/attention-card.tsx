@@ -32,14 +32,14 @@ export function AttentionCard({
 }) {
   if (attention.items.length === 0) {
     // Figma "All clear" frame: heading only (no summary line), the notice,
-    // one sentence of reassurance and the "Resolved today" caption.
+    // what was checked (worded by the data layer, so it only claims what the
+    // portal knows) and the "Resolved today" caption.
     return (
       <DashboardCard title="Needs your attention" className={className}>
         <DashboardNotice tone="success">All clear · Nothing needs your attention.</DashboardNotice>
-        <p className="lg-body text-foreground">
-          Payments verified, people approved and homes marketed. The team owns every open
-          request.
-        </p>
+        {attention.clearedLine ? (
+          <p className="lg-body text-foreground">{attention.clearedLine}</p>
+        ) : null}
         {attention.resolvedLine ? (
           <p className="lg-caption text-muted-foreground">{attention.resolvedLine}</p>
         ) : null}
@@ -86,7 +86,7 @@ function AttentionAction({
       >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-warning-tint text-foreground">
           {/* 2px stroke at 20px, as drawn (Lucide's 2 is relative to its 24px grid). */}
-          <AdminIcon name={item.icon} className="[stroke-width:2.4]" />
+          <AdminIcon name={item.icon} />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id={titleId} className="lg-body-medium break-words text-foreground">

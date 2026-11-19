@@ -67,6 +67,12 @@ export interface AttentionModel {
   summaryLine: string;
   /** Ranked most urgent first. Empty = all clear. */
   items: AttentionItem[];
+  /**
+   * All-clear only: what was checked, in one or two sentences — "Payments
+   * verified, people approved and homes marketed. The team owns every open
+   * request." Only claim what the data shows.
+   */
+  clearedLine?: string;
   /** All-clear footer: "Resolved today · Mon 16 Nov 2026". */
   resolvedLine: string;
 }

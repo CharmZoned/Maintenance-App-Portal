@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import type { PortalNavItem } from "@/lib/portal-nav";
 import { AdminNavDrawer } from "./admin-nav-drawer";
@@ -58,7 +58,19 @@ export function AdminWorkspace({
     if (railVisible) setDrawerOpen(false);
   }, [railVisible]);
 
-  const openNav = useCallback(() => setDrawerOpen(true), []);
+  // The control that opened the drawer (a page header's menu button), so focus
+  // can go back to it on close.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const openNav = useCallback(() => {
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDrawerOpen(true);
+  }, []);
+  const restoreFocus = useCallback(() => {
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener?.isConnected) opener.focus();
+  }, []);
   const account = onAccount ?? chrome?.onAccount;
   const signOut = onSignOut ?? chrome?.onSignOut;
 
@@ -100,6 +112,7 @@ export function AdminWorkspace({
         {...rail}
         open={drawerOpen && !railVisible}
         onOpenChange={setDrawerOpen}
+        onCloseFocus={restoreFocus}
         onNavigate={navigateFromDrawer}
         onAccount={
           account
