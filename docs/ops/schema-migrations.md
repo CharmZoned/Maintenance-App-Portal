@@ -51,7 +51,7 @@ Do not leave a permanent “name matches, version differs” gap without a defer
 
 Production is a single shared project for portal + website (`bgjkjtfgrfiszbzatriq`). That makes live-only experiments costly, which is why a working staging database is being built.
 
-> **Update 2026-11-19:** the broken branch described below (`ffczsojnowxthntnliac`) has been **deleted**. No staging database exists until Phase 2 of the build plan creates the new one. Also found: 24 of production's 59 migration records hold no SQL, so a staging branch must be rebuilt from the files in `supabase/migrations/`, not from production's records. Two migrations (`20261118190000`, `20261119090000`) are on `staging` and not yet applied to production — that is expected; they ship with the first release.
+> **Update 2026-11-19:** the broken branch described below (`ffczsojnowxthntnliac`) has been **deleted**. A new staging branch was created the same day: **project ref `gzwcegtwzzhtstgzphaw`**. It is empty (no migrations applied) until the "Rebuild staging database" workflow has been run, and must not be used for testing before then; see the owner steps in [`docs/staging/BUILD_PLAN.md`](../staging/BUILD_PLAN.md). Also found: 24 of production's 59 migration records hold no SQL, so a staging branch must be rebuilt from the files in `supabase/migrations/`, not from production's records. Two migrations (`20261118190000`, `20261119090000`) are on `staging` and not yet applied to production — that is expected; they ship with the first release.
 
 ### Current state (verified 2026-11-18)
 
