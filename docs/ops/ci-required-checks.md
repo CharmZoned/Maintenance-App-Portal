@@ -27,6 +27,8 @@ Markdown / `docs/**` is removed). A required status check that never runs leaves
 unmergeable, so required checks must always report.
 
 Job names shown in the Checks UI: **`typecheck / build / test`** and **`release source`**.
+> **2026-11-19:** `Supabase Preview` currently reports "skipped" on every pull request, which counts as passing. It validates nothing until **Automatic branching** is turned on in the Supabase GitHub integration. Requiring it is harmless; do not rely on it.
+
 A third check, **`Supabase Preview`**, is reported by the Supabase GitHub integration, not
 by this workflow.
 

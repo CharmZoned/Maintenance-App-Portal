@@ -50,6 +50,16 @@ Option 1, with these rules:
 - **Reference data ships as a migration.** If production needs a row, it is an idempotent
   `insert … on conflict do nothing` in a migration, reviewed like any other change.
 
+## Amendment — 2026-11-19
+
+The rule "the migration check is required" does not do what this ADR assumed. The
+`Supabase Preview` check reports "skipped" on every pull request because automatic
+branching is off in the Supabase GitHub integration, and a skipped check passes. The
+decision stands, with the gate restated: a migration is proven by running on the staging
+database after merge to `staging`, and by a check against production's live data before
+each release. Turning on automatic branching would make the pull-request check real; that
+remains an owner option ([ADR-0008](0008-pr-previews.md)).
+
 ## Consequences
 
 - "Push to prod" is one action for both UI and database: approve the release PR.

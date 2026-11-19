@@ -200,7 +200,7 @@ Each phase is independently shippable and leaves production untouched until Phas
 |---|---|
 | Quick sign-in leaks into production | Four independent guards (§3.3); CI test on the production bundle |
 | Staging gate is switched off or misconfigured, exposing the demo password | Private-window check is part of the definition of done and the post-deploy smoke test; staging holds only synthetic data; password rotates by re-running the seed |
-| A migration works on staging but fails on production because the data differs | Supabase migration check on the release PR runs against a branch of production's schema; migrations stay additive; data-touching migrations get a dry run and a backup first |
+| A migration works on staging but fails on production because the data differs | Every waiting migration is checked against production's live data before the release PR (the `Supabase Preview` check is skipped today and validates nothing — see the build plan's revisions); migrations stay additive; data-touching migrations get a dry run and a backup first |
 | UI and database deploy at slightly different moments during a release | Expand-then-contract rule: a migration must work with the previous UI; removals ship one release later |
 | `staging` and `master` drift apart | `master` accepts merges only from `staging`; release PRs use merge commits, never squash |
 | Fork pull requests trigger builds with staging secrets while the repo is still public | Demo variables scoped to the `staging` branch and team-authored previews only; Vercel requires approval for fork deploys |
