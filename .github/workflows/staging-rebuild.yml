@@ -1,0 +1,98 @@
+name: Rebuild staging database
+
+# Drops everything in the STAGING Supabase database and re-applies every file in
+# supabase/migrations/ from zero, then checks the result against the repo
+# (docs/staging/BUILD_PLAN.md task 2.3). Started by hand only:
+# Actions -> "Rebuild staging database" -> Run workflow -> branch `staging`.
+#
+# Use it once after the staging database is created, and again whenever staging
+# has drifted from the repo. It removes ALL staging data and logins; run
+# "Reset staging data" afterwards to load the demo world again.
+#
+# It cannot touch production: scripts/staging/rebuild.ts refuses unless the
+# database is not the production one AND matches the ref typed below.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   STAGING_DB_URL       staging SESSION POOLER connection string (port 5432);
+#                        GitHub runners are IPv4-only, the direct host is IPv6
+#   STAGING_DB_CA_CERT   optional: Supabase CA certificate (PEM), used by the verify step
+on:
+  workflow_dispatch:
+    inputs:
+      staging_project_ref:
+        description: "Type the STAGING Supabase project ref to confirm (20 lowercase letters). The staging database will be dropped and rebuilt."
+        required: true
+        type: string
+
+# Shares a group with "Reset staging data" so a rebuild and a reset never overlap.
+concurrency:
+  group: staging-reset
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Pinned so a new CLI release cannot change what a rebuild does.
+  SUPABASE_CLI_VERSION: "3.2.0"
+
+jobs:
+  rebuild:
+    name: Rebuild staging database
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Must pass before anything is dropped. Also masks the database password
+      # in the output of the steps below.
+      - name: Refuse unless the target is staging
+        env:
+          CONFIRM_STAGING_REF: ${{ inputs.staging_project_ref }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: pnpm exec tsx scripts/staging/rebuild.ts check
+
+      - name: Drop and re-apply every migration
+        env:
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+        run: npx --yes "supabase@${SUPABASE_CLI_VERSION}" db reset --remote="$STAGING_DB_URL" --no-seed --yes
+
+      - name: Verify the database matches the repo
+        env:
+          CONFIRM_STAGING_REF: ${{ inputs.staging_project_ref }}
+          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
+          STAGING_DB_CA_CERT: ${{ secrets.STAGING_DB_CA_CERT }}
+        run: pnpm exec tsx scripts/staging/rebuild.ts verify
+
+  # Started from any other branch, the job above is skipped; say why instead of
+  # leaving a run that looks like it did something.
+  wrong-branch:
+    name: Wrong branch
+    if: github.ref != 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Only the staging branch may rebuild staging
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          echo "::error::Rebuild staging database must be run from the staging branch (got ${REF_NAME}). Nothing was changed."
+          exit 1
