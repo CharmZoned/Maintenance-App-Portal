@@ -12,7 +12,8 @@
     "test:browser": "playwright test --trace off",
     "test:all": "tsx tests/dashboard/run.ts all",
     "test:ui": "tsx tests/dashboard/server.ts",
-    "dev:local": "tsx tests/emulator/dev-local.ts"
+    "dev:local": "tsx tests/emulator/dev-local.ts",
+    "staging:seed": "tsx scripts/staging/seed.ts"
   },
   "dependencies": {
     "@clawnify/app": "^0.2.1",

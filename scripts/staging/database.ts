@@ -4,7 +4,7 @@
  *
  * Nothing here decides *where* to connect; that is scripts/staging/guard.ts.
  */
-import { Client, types } from "pg";
+import { Client, types, type CustomTypesConfig } from "pg";
 import type { SeedDb } from "../../tests/emulator/seed";
 import type { DbTarget } from "./guard";
 
@@ -32,17 +32,9 @@ export async function openDatabase(db: DbTarget, caCert: string | null): Promise
     password: db.password,
     database: db.database,
     ssl: caCert ? { ca: caCert, rejectUnauthorized: true } : { rejectUnauthorized: false },
-    application_name: "staging-seed",
+    // No startup parameters beyond the basics: connection poolers reject ones they do not know.
     connectionTimeoutMillis: 20_000,
-    statement_timeout: 120_000,
-    // bigint columns as numbers (when exact), the same as the emulator's
-    // database, so the world definition sees identical values on both targets.
-    types: {
-      getTypeParser: ((oid: number, format?: "text" | "binary") => {
-        if (oid === INT8_OID && format !== "binary") return parseInt8;
-        return types.getTypeParser(oid, format);
-      }) as typeof types.getTypeParser,
-    },
+    types: RESULT_TYPES,
   });
   await client.connect();
   return client;
@@ -52,6 +44,18 @@ function parseInt8(value: string): number | bigint {
   const big = BigInt(value);
   return big >= BigInt(Number.MIN_SAFE_INTEGER) && big <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(big) : big;
 }
+
+/**
+ * Result parsing: bigint columns as numbers (when exact), the same as the
+ * emulator's database, so the world definition sees identical values on both
+ * targets. Everything else keeps node-postgres' defaults.
+ */
+const RESULT_TYPES: CustomTypesConfig = {
+  getTypeParser: ((oid: number, format?: "text" | "binary") => {
+    if (oid === INT8_OID && format !== "binary") return parseInt8;
+    return types.getTypeParser(oid, format);
+  }) as typeof types.getTypeParser,
+};
 
 /** The slice of a pg client this module needs. */
 export interface Queryable {
@@ -128,14 +132,22 @@ export function seedDbOver(client: Queryable): SeedDb {
   };
 }
 
-/** Ordinary tables in schema `public`, discovered at run time, quoted and schema-qualified. */
-export async function listPublicTables(client: Queryable): Promise<string[]> {
+/**
+ * The schemas that hold the portal's own data. `public` is the API schema;
+ * `private` is the project's second schema (created by its migrations), which
+ * holds the physical tenant rows behind the public."Tenants" view. Every
+ * other schema belongs to the platform and is never written by the reset.
+ */
+const DATA_SCHEMAS = "('public', 'private')";
+
+/** Ordinary tables in the data schemas, discovered at run time, quoted and schema-qualified. */
+export async function listDataTables(client: Queryable): Promise<string[]> {
   const found = await rows<{ name: string }>(
     client,
     `select format('%I.%I', n.nspname, c.relname) as name
        from pg_class c
        join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public'
+      where n.nspname in ${DATA_SCHEMAS}
         and c.relkind in ('r', 'p')
         and not c.relispartition
         and not exists (
@@ -154,15 +166,16 @@ export interface ResetSummary {
 
 /**
  * Empty the database of data, in one transaction:
- *   - TRUNCATE every table in schema `public` (RESTART IDENTITY CASCADE)
- *   - restart the free-standing sequences in `public` (request numbers)
+ *   - TRUNCATE every table in the data schemas, `public` and `private`
+ *     (RESTART IDENTITY CASCADE) - the same set the emulator's reset clears
+ *   - restart the free-standing sequences in those schemas (request numbers)
  *   - DELETE every row of auth.users (sessions, identities and other dependent
  *     auth rows go with them through their own foreign keys)
  *
  * Nothing is dropped. No other schema is written: before truncating it checks
- * that no table outside `public` references one inside it, so CASCADE cannot
- * reach beyond the tables listed. Migration history, storage buckets and
- * storage objects are untouched.
+ * that no table outside the data schemas references one inside them, so
+ * CASCADE cannot reach beyond the tables listed. Migration history, storage
+ * buckets and storage objects are untouched.
  */
 export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
   await client.query("begin");
@@ -170,7 +183,7 @@ export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
     // Fail rather than queue forever behind another session's lock.
     await client.query("set local lock_timeout = '30s'");
 
-    const tables = await listPublicTables(client);
+    const tables = await listDataTables(client);
 
     const outside = await rows<{ name: string }>(
       client,
@@ -180,11 +193,13 @@ export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
          join pg_namespace n on n.oid = c.relnamespace
          join pg_class rc on rc.oid = k.confrelid
          join pg_namespace rn on rn.oid = rc.relnamespace
-        where k.contype = 'f' and rn.nspname = 'public' and n.nspname <> 'public'`,
+        where k.contype = 'f'
+          and rn.nspname in ${DATA_SCHEMAS}
+          and n.nspname not in ${DATA_SCHEMAS}`,
     );
     if (outside.length > 0) {
       throw new Error(
-        `Refusing to truncate: tables outside schema public reference it and would be emptied too ` +
+        `Refusing to truncate: tables outside schemas public and private reference them and would be emptied too ` +
           `(${outside.map((r) => r.name).join(", ")}).`,
       );
     }
@@ -200,7 +215,7 @@ export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
         `select format('%I.%I', n.nspname, c.relname) as name
            from pg_class c
            join pg_namespace n on n.oid = c.relnamespace
-          where n.nspname = 'public'
+          where n.nspname in ${DATA_SCHEMAS}
             and c.relkind = 'S'
             and not exists (
               select 1 from pg_depend d
@@ -222,9 +237,9 @@ export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
   }
 }
 
-/** Row count per public table, plus auth.users, in name order. */
+/** Row count per table in the data schemas, plus auth.users. */
 export async function countRows(client: Queryable): Promise<Array<{ table: string; rows: number }>> {
-  const tables = [...(await listPublicTables(client)), "auth.users"];
+  const tables = [...(await listDataTables(client)), "auth.users"];
   const counts: Array<{ table: string; rows: number }> = [];
   for (const table of tables) {
     const [row] = await rows<{ n: number }>(client, `select count(*)::int as n from ${table}`);
