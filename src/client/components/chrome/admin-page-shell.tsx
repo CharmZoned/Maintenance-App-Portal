@@ -34,7 +34,7 @@ export function AdminPageShell({
             aria-haspopup="dialog"
             className="flex size-11 shrink-0 items-center justify-center rounded-sm border border-border text-foreground transition-colors duration-150 hover:bg-muted lg:hidden"
           >
-            <Menu aria-hidden strokeWidth={2} className="size-5" />
+            <Menu aria-hidden size={20} strokeWidth={2} absoluteStrokeWidth />
           </button>
         ) : null}
         <p className="lg-body-medium min-w-0 flex-1 truncate text-foreground lg:hidden">

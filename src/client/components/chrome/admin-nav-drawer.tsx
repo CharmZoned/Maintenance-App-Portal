@@ -31,7 +31,7 @@ export function AdminNavDrawer({
             aria-label="Close navigation"
             className="absolute right-3 top-4 z-10 flex size-11 items-center justify-center rounded-sm border-2 border-ring bg-card text-foreground transition-colors duration-150 hover:bg-muted focus-visible:outline-sidebar-foreground"
           >
-            <X aria-hidden strokeWidth={2} className="size-5" />
+            <X aria-hidden size={20} strokeWidth={2} absoluteStrokeWidth />
           </DialogPrimitive.Close>
           <AdminSidebar {...sidebar} className="h-full w-full" columnClassName="max-w-48" />
         </DialogPrimitive.Content>

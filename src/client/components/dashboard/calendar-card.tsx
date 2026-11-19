@@ -180,10 +180,10 @@ export function CalendarCard({
           <span className="sr-only">, {monthSummary}</span>
         </p>
         <MonthStepButton label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}>
-          <ChevronLeft aria-hidden strokeWidth={2} className="size-5" />
+          <ChevronLeft aria-hidden size={20} strokeWidth={2.5} absoluteStrokeWidth />
         </MonthStepButton>
         <MonthStepButton label="Next month" onClick={() => setMonth(shiftMonth(month, 1))}>
-          <ChevronRight aria-hidden strokeWidth={2} className="size-5" />
+          <ChevronRight aria-hidden size={20} strokeWidth={2.5} absoluteStrokeWidth />
         </MonthStepButton>
         <AdminButton type="button" className="min-w-[4.25rem] px-3" onClick={goToToday}>
           Today

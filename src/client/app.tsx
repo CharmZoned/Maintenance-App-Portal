@@ -30,7 +30,13 @@ import { BlockedPage } from "./components/auth/blocked-page";
 import { StubPage } from "./components/stub-page";
 import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
-import { PortalNav, MobileTabBar, ShellChromeProvider } from "./components/chrome";
+import {
+  AdminWorkspace,
+  MobileTabBar,
+  PortalNav,
+  ShellChromeProvider,
+  useAdminNavCounts,
+} from "./components/chrome";
 import { FoundationGalleryPage } from "./components/foundation/foundation-gallery-page";
 import { PeoplePage } from "./components/people/people-page";
 import { MessagesPage } from "./components/messages/messages-page";
@@ -38,7 +44,13 @@ import { NotificationsHost } from "./components/messages/notifications-host";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
 import { PaymentsPage } from "./components/payments";
-import { navItemsForAudience } from "./lib/portal-nav";
+import {
+  displayNameFromEmail,
+  navItemsForAudience,
+  PORTAL_BRAND,
+  roleLabel,
+  withNavCounts,
+} from "./lib/portal-nav";
 import {
   isLandlordAllowedRoute,
   ROLE_HOME,
@@ -49,9 +61,20 @@ import {
 function activeFor(route: Route): string {
   if (route.name === "property") return "properties";
   if (route.name === "request") return "maintenance";
-  if (route.name === "tenant" || route.name === "landlords" || route.name === "users") {
+  if (
+    route.name === "tenant" ||
+    route.name === "tenants" ||
+    route.name === "landlords" ||
+    route.name === "users"
+  ) {
     return "people";
   }
+  // Staff-only screens without a rail entry of their own: leases belong with the
+  // rent roll, applications come in through the website listings, and the
+  // calendar now lives on the dashboard. (Other shells have no such nav ids.)
+  if (route.name === "leases") return "rent";
+  if (route.name === "applications") return "listings";
+  if (route.name === "calendar") return "dashboard";
   if (route.name === "account") return "account";
   // Payments are Home CTAs in Figma — keep Home nav highlight.
   if (route.name === "payments" || route.name === "payments-ledger") return "home";
@@ -83,6 +106,12 @@ export function App() {
   const { path, search, route, navigate, replace } = useRouter();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifUnread, setNotifUnread] = useState(false);
+  // Admin rail badges (staff shell only) — refreshed on every route change.
+  const navCounts = useAdminNavCounts({
+    enabled: ready && !isTenant && !isLandlord && !isMaintenance,
+    isAdmin,
+    refreshKey: path,
+  });
 
   useEffect(() => {
     if (ready) reportLocation(path);
@@ -272,14 +301,17 @@ export function App() {
     );
   }
 
-  const navItems = navItemsForAudience(audience);
-  const useMobileTabs = audience !== "staff";
+  const isStaffShell = audience === "staff";
+  const navItems = isStaffShell
+    ? withNavCounts(navItemsForAudience(audience, { isAdmin }), navCounts)
+    : navItemsForAudience(audience);
   const metaFullName = auth.gate.user.user_metadata?.full_name;
+  const displayName =
+    typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null;
   const chrome = {
     email: auth.gate.user.email ?? "",
     role: auth.gate.role.role,
-    displayName:
-      typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null,
+    displayName,
     unread: notifUnread,
     onNotifications: () => setNotificationsOpen((v) => !v),
     onAccount: () => navigate("/account"),

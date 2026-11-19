@@ -4,4 +4,5 @@ export { AccountMenu } from "./account-menu";
 export { MobileTabBar } from "./mobile-tab-bar";
 export { AdminWorkspace } from "./admin-workspace";
 export { AdminPageShell } from "./admin-page-shell";
+export { useAdminNavCounts, type AdminNavCounts } from "./use-admin-nav-counts";
 export { ShellChromeProvider, useShellChrome, type ShellChromeValue } from "./shell-chrome-context";
