@@ -1,7 +1,8 @@
 /**
  * R5 — Property documents
- * Staff upload documents to a property (or one unit); an admin decides who
- * else may see each one: staff only, the landlord, or the tenant.
+ * An admin uploads documents to a property (or one unit) and decides who else
+ * may see each one: office only, the landlord, or the tenant. Maintenance
+ * workers are outside contractors: they neither see nor manage documents.
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
@@ -137,15 +138,17 @@ describe("[R5] Property documents", () => {
       ).rejects.toThrow(/unit_id must belong to property_id/);
     });
 
-    test("a worker uploads a document; it is staff-only", async () => {
+    test("a worker cannot upload a document, even an office-only one", async () => {
       await signInApp("worker");
-      const doc = await data.uploadPropertyDocument({
-        property_id: world.property.id,
-        title: "Boiler service log",
-        file: pdfFile("boiler.pdf"),
-        visibility: "staff",
-      });
-      expect(doc).toMatchObject({ visibility: "staff", uploaded_by_role: "maintenance" });
+      await expect(
+        data.uploadPropertyDocument({
+          property_id: world.property.id,
+          title: "Boiler service log",
+          file: pdfFile("boiler.pdf"),
+          visibility: "staff",
+        }),
+      ).rejects.toThrow();
+      expect(await sql(`select 1 from public."PropertyDocuments" where title = 'Boiler service log'`)).toHaveLength(0);
     });
 
     test("staff cannot upload/update/remove storage without a matching PropertyDocuments path", async () => {
@@ -240,12 +243,16 @@ describe("[R5] Property documents", () => {
       expect(await sql(`select 1 from public."PropertyDocuments" where title = 'Worker tries tenant visibility'`)).toHaveLength(0);
     });
 
-    test("a worker cannot widen a document's visibility afterwards", async () => {
+    test("a worker cannot change, relabel or delete a document", async () => {
       const doc = await uploadAsAdmin("Staff eyes only");
       await signInApp("worker");
-      await expect(data.updatePropertyDocumentVisibility(doc.id, "tenant")).rejects.toThrow(
-        /only admins can change document visibility/i,
-      );
+      await expect(data.updatePropertyDocumentVisibility(doc.id, "tenant")).rejects.toThrow();
+      const worker = await clientFor("worker");
+      expectDenied(await worker.from("PropertyDocuments").update({ title: "Renamed" }).eq("id", doc.id).select());
+      expectDenied(await worker.from("PropertyDocuments").delete().eq("id", doc.id).select());
+      expect(
+        await sql(`select visibility, title from public."PropertyDocuments" where id = $1`, [doc.id]),
+      ).toEqual([{ visibility: "staff", title: "Staff eyes only" }]);
     });
 
     test("an admin changes a document from staff-only to tenant-visible", async () => {
@@ -269,9 +276,27 @@ describe("[R5] Property documents", () => {
 
     const vis = (titles: string[]) => titles.filter((t) => t.startsWith("VIS "));
 
-    test("staff see every document", async () => {
-      expect(vis(await titlesVisibleTo("worker"))).toHaveLength(5);
+    test("an admin sees every document", async () => {
       expect(vis(await titlesVisibleTo("admin"))).toHaveLength(5);
+    });
+
+    test("a worker sees no documents and cannot download one, even with a job at the property", async () => {
+      await sql(
+        `insert into public."MaintenanceRequests"
+           (title, description, category, unit_id, property_id, submitted_by_tenant_id, assigned_staff_id, scheduled_for, status)
+         values ('Job at Maple Court', 'Gives the worker a reason to be here', 'General repair', $1, $2, $3, $4, now(), 'Scheduled')`,
+        [world.units.a.id, world.property.id, world.tenants.tenant.id, world.staff.worker.id],
+      );
+      expect(await titlesVisibleTo("worker")).toEqual([]);
+      const worker = await clientFor("worker");
+      for (const title of ["VIS staff-only", "VIS landlord", "VIS tenant unit 1A"]) {
+        const [{ storage_path }] = await sql<{ storage_path: string }>(
+          `select storage_path from public."PropertyDocuments" where title = $1`,
+          [title],
+        );
+        const signed = await worker.storage.from("property-documents").createSignedUrl(storage_path, 60);
+        expect(signed.error, `${title} must not open for a worker`).not.toBeNull();
+      }
     });
 
     test("a tenant sees tenant-visible documents for their own property and unit only", async () => {
