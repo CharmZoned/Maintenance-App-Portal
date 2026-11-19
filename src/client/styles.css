@@ -363,6 +363,64 @@
   .app-icon { @apply inline-flex shrink-0 items-center justify-center rounded-md bg-brand text-on-brand; }
 }
 
+/*
+ * Admin workspace scope (Figma "001 - Admin Pages"). The admin chrome and the
+ * screens built from that page carry a navy rail and a warm paper background.
+ * The token NAMES are unchanged, so every existing utility (bg-card,
+ * text-muted-foreground, bg-sidebar…) keeps working inside the scope; only the
+ * values differ. Put `lg-admin` on the admin rail, drawer, page shell, and on
+ * any portalled surface (menus, sheets) that belongs to them.
+ *
+ * Light only: in dark the scope falls through to the app's dark ramp.
+ */
+@media not (prefers-color-scheme: dark) {
+  .lg-admin {
+    --background: #f6f5f1;
+    --foreground: #172d3d;
+    --card: #ffffff;
+    --card-foreground: #172d3d;
+    --popover: #ffffff;
+    --popover-foreground: #172d3d;
+    --muted: #efeee9;
+    --muted-foreground: #656d70;
+    --border: #e1e3df;
+    --input: #e1e3df;
+    --primary: #19394d;
+    --primary-foreground: #ffffff;
+    --secondary: #ffffff;
+    --secondary-foreground: #19394d;
+    --accent: #efeee9;
+    --accent-foreground: #172d3d;
+    --brand: #19394d;
+    --brand-hover: #142f42;
+    --brand-tint: #e9eff2;
+    --brand-text: #19394d;
+    --ring: #355f80;
+    --sidebar: #142f42;
+    --sidebar-foreground: #ffffff;
+    --sidebar-accent: #2c4b60;
+    --sidebar-accent-foreground: #ffffff;
+    --sidebar-border: #2c4b60;
+    --edge-raised: 0 0 1px rgba(28, 41, 64, 0.18), 0 0 0 0.5px rgba(28, 41, 64, 0.18);
+    --edge-solid: 0 2px 2px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.lg-admin {
+  color: var(--foreground);
+}
+
+@layer components {
+  /* Figma text styles used by the admin pages (Inter, no tracking). */
+  .lg-display { @apply text-[2.125rem] font-semibold leading-[2.625rem]; }      /* 34/42 */
+  .lg-heading { @apply text-2xl font-semibold leading-8; }                       /* 24/32 */
+  .lg-section { @apply text-lg font-semibold leading-[1.625rem]; }               /* 18/26 */
+  .lg-body { @apply text-sm font-normal leading-[1.375rem]; }                    /* 14/22 */
+  .lg-body-medium { @apply text-sm font-medium leading-[1.375rem]; }             /* 14/22 */
+  .lg-label { @apply text-xs font-semibold leading-[1.125rem]; }                 /* 12/18 */
+  .lg-caption { @apply text-xs font-normal leading-[1.125rem]; }                 /* 12/18 */
+}
+
 /* Portal rail (lg-nav) — Phase 0 chrome. Legacy aside.cn-nav overrides removed
    now that the app uses PortalNav instead of SDK <AppNav>. */
 

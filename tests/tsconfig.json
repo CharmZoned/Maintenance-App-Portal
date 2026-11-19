@@ -7,6 +7,7 @@
   },
   "include": [
     "./**/*.ts",
+    "./**/*.tsx",
     "../vitest.config.ts",
     "../playwright.config.ts",
     "../src/client/vite-env.d.ts",
