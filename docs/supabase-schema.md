@@ -4,7 +4,7 @@
 **URL:** `https://bgjkjtfgrfiszbzatriq.supabase.co`  
 **Verified:** 2026-11-13 via Supabase MCP (live introspection)
 
-**Ops:** Never apply live DDL without a matching file under `supabase/migrations/` on a branch/PR first. Prefer staging. See [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).
+**Ops:** Schema changes are files under `supabase/migrations/` on a PR into `staging` — never Dashboard, SQL Editor, or MCP `apply_migration`. The existing Supabase `staging` branch is broken and must not be used for testing until it is rebuilt. See [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md).
 
 Shared with the marketing site (`LandlordGopherWebsite`). Website uses service-role inserts into `inquiries` only — do not add anon policies that expose inquiries.
 

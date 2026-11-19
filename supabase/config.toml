@@ -1,0 +1,84 @@
+#:schema https://supabase.com/schemas/config/v1.json
+# Supabase configuration as code. Reference: https://supabase.com/docs/guides/local-development/cli/config
+#
+# Who reads this file (Supabase GitHub integration)
+#   - Preview branches (short-lived, one per pull request): every setting below is applied.
+#   - Persistent branches, which includes `staging` and production itself: API and Auth settings
+#     are applied only when a [remotes.<name>] block names that branch's project ref. Its values
+#     are layered over the ones below. With no such block the configure step is skipped.
+#   - Production (git `master`) therefore gets only: new migrations, plus any Edge Functions and
+#     storage buckets declared here. There is deliberately no [remotes.production] block, so
+#     production Auth settings stay exactly as set in the dashboard.
+#   - `pnpm dev:local` and the tests use the in-repo emulator and never read this file.
+#
+# Rules for editing
+#   - Only keys that are essential or differ from the CLI defaults are listed; anything omitted
+#     keeps its default. Check edits with `npx supabase config validate`.
+#   - No secrets in this file.
+#   - Do NOT add [functions.*] blocks: the three Edge Functions are on hold (Stripe), and a declared
+#     function is deployed to production on the next release.
+#   - Do NOT add [storage.buckets.*] blocks: the four buckets are created by migrations, and a
+#     declared bucket is deployed to production as well.
+#   - Do NOT add a [remotes.production] block without the owner's approval (see above).
+
+# The production project this repo belongs to. The CLI uses this only as its local project name;
+# it does not link to, deploy to, or configure that project.
+project_id = "bgjkjtfgrfiszbzatriq"
+
+# Same Postgres major version as production, so branches run the same engine.
+[db]
+major_version = 17
+
+# Off: there is no supabase/seed.sql. Staging data comes from the seed script (ADR-0007), and
+# production is never seeded.
+[db.seed]
+enabled = false
+
+# Local Vite origins, so a UI running on a developer machine can finish email links against a
+# branch. The app redirects to <origin>/dashboard (signup confirmation) and
+# <origin>/reset-password. Staging gets its real URLs from [remotes.staging.auth] below.
+[auth]
+site_url = "http://127.0.0.1:5173"
+additional_redirect_urls = [
+  "http://127.0.0.1:5173/**", # pnpm dev
+  "http://127.0.0.1:5198/**", # pnpm dev:local
+  "http://127.0.0.1:5199/**", # browser tests
+  "http://localhost:5173/**",
+  "http://localhost:5198/**",
+  "http://localhost:5199/**",
+]
+# The portal has a public signup page.
+enable_signup = true
+# Same minimum as PASSWORD_MIN_LENGTH in src/client/lib/password-policy.ts (CLI default is 6).
+minimum_password_length = 8
+
+# Accounts must confirm their email before they can sign in (CLI default is off); the approval
+# flow relies on it (migration 20261114070000_require_email_confirmed_before_approve).
+[auth.email]
+enable_confirmations = true
+
+# Adds user_role, landlord_id, tenant_id and staff_id to every access token. Auth settings are not
+# copied from production to a branch, so the hook is off there unless declared here. The function
+# is created by migration 20261012184126_app_role_policies_and_access_token_hook.
+[auth.hook.custom_access_token]
+enabled = true
+uri = "pg-functions://postgres/public/custom_access_token_hook"
+
+# Staging block: filled in during Phase 2, once the persistent `staging` branch exists.
+# project_id must be the ref of an existing branch (20 lowercase letters, from
+# `npx supabase branches list`), so this cannot be live before then. Until it is, Supabase skips the
+# configure step for the persistent staging branch, so it gets none of the Auth settings above,
+# including the hook. Values here replace the ones above for that branch only; lists are replaced
+# whole, not merged.
+#
+# [remotes.staging]
+# project_id = "<staging-branch-project-ref>"
+#
+# [remotes.staging.auth]
+# site_url = "https://<staging-site-host>"
+# additional_redirect_urls = [
+#   "https://<staging-site-host>/**",
+#   "https://*-<vercel-team-slug>.vercel.app/**", # PR preview sites (ADR-0008)
+#   "http://127.0.0.1:5173/**",
+#   "http://127.0.0.1:5198/**",
+# ]

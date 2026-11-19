@@ -1,5 +1,7 @@
 # Parallel work plan — remaining MVP + R1–R5 bugs
 
+> **Superseded in part (2026-11-18).** The WS-I instructions in this file — create a `staging` Supabase branch, run the §E migration-history repair, apply to live then repair via MCP — and every "hosting deferred until the owner provides the link" note are **out of date. Do not act on them.** Production's migration history already matches the repo, a (broken) staging branch already exists, and hosting is planned. Current rules: [`docs/ops/schema-migrations.md`](./ops/schema-migrations.md) and [`docs/staging/BUILD_PLAN.md`](./staging/BUILD_PLAN.md).
+
 **Mode:** Historical stream definitions + Wave 1–2 context. **Wave 3 staffing:** **approved** — use [`docs/wave3-plan.md`](./wave3-plan.md) (pointer) and the Cursor Project store `docs/wave3-plan.md` (canonical: I/K/N/O + WS-S hygiene + WS-R; **P/Q + portal hosting/URL not staffed**). Implementers launched for **I / K / N / O / R / S1**.  
 **Base (original):** `master` @ `15e0261` (merged [#18](https://github.com/CharmZoned/Maintenance-App-Portal/pull/18) test suite). **Wave 1–2 status:** merged on `master` (PRs #19–#29); no Wave 2 leftovers to re-plan.  
 **Inputs:** gap analysis, `docs/deferred-work.md`, historical R1–R8 map in `docs/archive/IMPLEMENTATION_PLAN.pre-wave3.md`, role rundown, owner bug list (PR #18 intentional failures), live Supabase grants/CHECKs verified 2026-11-13; owner Wave 3 choices + hygiene 1–13 + hosting deferral (2026-11-14).  

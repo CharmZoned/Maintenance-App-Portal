@@ -10,3 +10,6 @@ dist
 
 # test output (results, screenshots, report)
 tests/.results
+
+# Supabase CLI link state
+supabase/.temp
