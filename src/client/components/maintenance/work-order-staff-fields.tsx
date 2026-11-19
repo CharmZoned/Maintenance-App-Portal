@@ -3,6 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { StaffMember } from "@/lib/data";
+import { formatDate } from "@/lib/utils";
 import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceCategory,
@@ -31,7 +32,10 @@ export type WorkOrderStaffFormValues = {
   followUpDate: string;
   resolutionNotes: string;
   permissionToEnter: boolean;
-  cost: string;
+  /** What the worker is paid. Admin edits; the worker sees it read-only. */
+  workerPrice: string;
+  /** What the landlord is billed. Admin only: never shown to the worker. */
+  landlordPrice: string;
   notes: string;
 };
 
@@ -46,6 +50,11 @@ export interface WorkOrderStaffFieldsProps {
   staff: StaffMember[];
   values: WorkOrderStaffFormValues;
   onChange: (patch: Partial<WorkOrderStaffFormValues>) => void;
+}
+
+/** Exact price with cents (formatMoney rounds to whole dollars). */
+function formatPrice(amount: number): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(amount);
 }
 
 /** Staff/admin editable core + status companion fields. */
@@ -77,7 +86,8 @@ export function WorkOrderStaffFields({
     followUpDate,
     resolutionNotes,
     permissionToEnter,
-    cost,
+    workerPrice,
+    landlordPrice,
     notes,
   } = values;
 
@@ -312,21 +322,43 @@ export function WorkOrderStaffFields({
       </label>
 
       <div className="grid grid-cols-2 gap-3">
+        {/* Workers cannot change the date or their price: show both as text, not disabled inputs. */}
         {!isAdmin && (
+          <>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">Scheduled date</p>
+              <p className="mt-1 text-sm text-foreground">{scheduledAt ? formatDate(scheduledAt) : "Not scheduled"}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">Price</p>
+              <p className="mt-1 text-sm text-foreground">
+                {workerPrice ? formatPrice(Number(workerPrice)) : "Not set"}
+              </p>
+            </div>
+          </>
+        )}
+        {isAdmin && (
           <div>
-            <Label>Scheduled date</Label>
-            <Input type="date" value={scheduledAt} disabled />
+            <Label htmlFor="wo-worker-price">Worker price</Label>
+            <Input
+              id="wo-worker-price"
+              inputMode="decimal"
+              value={workerPrice}
+              onChange={(e) => onChange({ workerPrice: e.target.value })}
+            />
           </div>
         )}
-        <div className={isAdmin ? "col-span-2 sm:col-span-1" : ""}>
-          <Label htmlFor="wo-cost">Cost</Label>
-          <Input
-            id="wo-cost"
-            type="number"
-            value={cost}
-            onChange={(e) => onChange({ cost: e.target.value })}
-          />
-        </div>
+        {isAdmin && (
+          <div>
+            <Label htmlFor="wo-landlord-price">Landlord price</Label>
+            <Input
+              id="wo-landlord-price"
+              inputMode="decimal"
+              value={landlordPrice}
+              onChange={(e) => onChange({ landlordPrice: e.target.value })}
+            />
+          </div>
+        )}
       </div>
 
       <div>

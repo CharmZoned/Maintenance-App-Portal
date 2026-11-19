@@ -289,7 +289,16 @@ export interface WorkOrder {
   assigned_staff_id?: number | null;
   scheduled_at: string | null;
   completed_at: string | null;
-  cost: number | null;
+  /**
+   * What the worker is paid (MaintenanceRequestWorkerPrices). Readable by admin,
+   * the assigned worker, and workers viewing the job in the pool; null otherwise.
+   */
+  worker_price: number | null;
+  /**
+   * What the landlord is billed (MaintenanceRequestLandlordPrices). Readable by
+   * admin and the owning landlord; null otherwise.
+   */
+  landlord_price: number | null;
   /** Internal staff notes (MaintenanceRequestStaffNotes); always null for landlord/tenant. */
   notes: string | null;
   resolution_notes?: string | null;

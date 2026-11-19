@@ -35,7 +35,7 @@ export function PropertyDocumentsPanel({
 }) {
   const app = useApp();
   /** Staff/admin manage docs; landlord (and tenant) shells are list/download only. */
-  const canManageDocuments = !app.isLandlord && !app.isTenant;
+  const canManageDocuments = app.isAdmin;
   const [docs, setDocs] = useState<PropertyDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);

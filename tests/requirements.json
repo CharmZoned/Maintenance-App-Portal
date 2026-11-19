@@ -4,7 +4,7 @@
     { "id": "R2", "title": "Account approval", "summary": "New accounts wait as pending; admins approve, reject, or suspend them." },
     { "id": "R3", "title": "Properties and units", "summary": "Staff create properties and units and link tenants through a lease; every property has a landlord." },
     { "id": "R4", "title": "Maintenance requests", "summary": "Tenants submit requests with a category and photos; staff work them through statuses; every change is recorded." },
-    { "id": "R5", "title": "Property documents", "summary": "Staff upload documents to a property or unit; an admin decides who else can see each one." },
+    { "id": "R5", "title": "Property documents", "summary": "An admin uploads documents to a property or unit and decides who else can see each one; workers see none." },
     { "id": "R6", "title": "Notifications", "summary": "Email and push notifications, and messaging. Deferred — nothing built yet." },
     { "id": "R7", "title": "Permissions", "summary": "Nothing is readable without logging in, and each role sees only its own slice of the data." },
     { "id": "R8", "title": "Admin web portal", "summary": "Dashboard, user management, rental applications, vendors and settings — limited to the right people." }
@@ -19,6 +19,11 @@
       "id": "WF2",
       "title": "New account onboarding",
       "summary": "A new resident signs up, verifies their email, waits for approval, and gets into the portal once an admin approves them."
+    },
+    {
+      "id": "WF3",
+      "title": "Worker job pool",
+      "summary": "An admin sets the date, time and price and pushes a job; a worker accepts it (first accept wins), can release it back, completes it with a photo, and the tenant confirms the fix. Includes the direct chat with the office."
     }
   ]
 }

@@ -283,7 +283,8 @@ describe("[R7] Permissions", () => {
       // passed staff_can_see_tenant / staff_assigned_to_*.
       const approved = await clientFor("worker");
       expect((await approved.from("Tenants").select("id")).data).toEqual([{ id: world.tenants.tenant.id }]);
-      expect((await approved.from("Landlords").select("id")).data).toEqual([{ id: world.landlord.id }]);
+      // Workers never read the landlord's contact record, assigned or not.
+      expect((await approved.from("Landlords").select("id")).data).toEqual([]);
 
       await sql(`update public.user_roles set account_status = 'suspended' where user_id = $1`, [
         world.users.worker.id,
@@ -488,6 +489,47 @@ describe("[R7] Permissions", () => {
       expect((await mine.from("RentCharges").select("id").eq("id", chargeId)).data).toEqual([{ id: chargeId }]);
       const other = await clientFor("tenant2");
       expect((await other.from("RentCharges").select("id").eq("id", chargeId)).data).toEqual([]);
+    });
+
+    test("a worker with a job in the unit cannot read its rent receipts or payment attempts", async () => {
+      const [pay] = await sql<{ id: number }>(`select id from public."Payments" where charge_id = $1 limit 1`, [
+        chargeId,
+      ]);
+      const payId = Number(pay.id);
+      await sql(
+        `insert into public."PaymentReceipts" (payment_id, storage_path, file_name, content_type)
+         values ($1, $2, 'receipt.pdf', 'application/pdf')`,
+        [payId, `receipts/${payId}/receipt.pdf`],
+      );
+      await sql(
+        `insert into public."PaymentIntents" (charge_id, tenant_id, amount, method, status)
+         values ($1, $2, 10, 'zelle', 'pending')`,
+        [chargeId, world.tenants.tenant.id],
+      );
+      await sql(
+        `insert into public."MaintenanceRequests"
+           (title, description, category, unit_id, property_id, submitted_by_tenant_id, assigned_staff_id, scheduled_for, status)
+         values ('Job in 1A', 'Puts the worker in the unit', 'General repair', $1, $2, $3, $4, now(), 'Scheduled')`,
+        [world.units.a.id, world.property.id, world.tenants.tenant.id, world.staff.worker.id],
+      );
+
+      const worker = await clientFor("worker");
+      expect((await worker.from("PaymentReceipts").select("id")).data, "worker: receipts").toEqual([]);
+      expect((await worker.from("PaymentIntents").select("id")).data, "worker: payment attempts").toEqual([]);
+      expectDenied(
+        await worker
+          .from("PaymentReceipts")
+          .insert({ payment_id: payId, storage_path: `receipts/${payId}/x.pdf`, file_name: "x.pdf", content_type: "application/pdf" })
+          .select(),
+        "a worker cannot write receipts",
+      );
+
+      // The people the money belongs to still see it.
+      for (const persona of ["tenant", "landlord", "admin"] as const) {
+        const client = await clientFor(persona);
+        expect((await client.from("PaymentReceipts").select("id")).data, `${persona}: receipts`).toHaveLength(1);
+        expect((await client.from("PaymentIntents").select("id")).data, `${persona}: payment attempts`).toHaveLength(1);
+      }
     });
 
     describe("payment ledger RPCs", () => {

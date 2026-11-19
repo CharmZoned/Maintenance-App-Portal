@@ -102,7 +102,8 @@ Same advisor gap → Phase 1 policies.
 ### `Vendors`
 
 `name`, `category`, `phone`, `email`, `notes`, `color`, `is_test_data`. Phase 1: admin CRUD policies.  
-**Phase 1.5:** `vendors_select` narrowed to `private.is_staff_or_admin()` (landlords no longer SELECT all vendors); `FORCE ROW LEVEL SECURITY`.
+**Phase 1.5:** `vendors_select` narrowed to `private.is_staff_or_admin()` (landlords no longer SELECT all vendors); `FORCE ROW LEVEL SECURITY`.  
+**2026-11-19:** deprecated (vendors are `Staff` rows now) and `vendors_select` is admin-only.
 
 ### `Settings`
 
@@ -139,6 +140,51 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 **Phase 3:** `MaintenanceRequestStatusHistory` (append-only via trigger). Accept & schedule (`Scheduled` / `scheduled_for`) is **admin-only** (`protect_maintenance_request`). Comments: `visibility` = `tenant_visible` \| `internal` (tenants only see `tenant_visible`).  
 **LGA-19:** landlord removed from UPDATE + `private.can_update_maintenance_request` (read-only WOs — cannot close or edit; comment/photo writes via that helper also denied).  
 **WS-E:** internal `notes` moved off the request row (see StaffNotes below). `landlord_owns_unit` / `landlord_can_see_*` use hardened `current_landlord_id()`. `can_upload_maintenance_photo` codified in repo migrations.
+
+### Worker job pool (`20261118190000_worker_job_pool.sql`)
+
+Owner decisions 2026-11-18/19. **Not applied to live yet.** Ships through a PR into `staging`, then the release PR to `master`, per [`ops/schema-migrations.md`](./ops/schema-migrations.md).
+
+- **Workers = Staff.** Maintenance staff and vendors are the same thing. `Staff` gains `company_name`, `phone`, `services text[]` (same values as request `category`). **An empty `services` list matches no jobs** — never "all jobs" — so a new or blank profile sees nothing until services are set. `Vendors` and `MaintenanceRequests.vendor_id` are deprecated and left in place until the portal stops reading them.
+- **Available is derived, not a status:** `status = 'Open' AND offered_at IS NOT NULL AND assigned_staff_id IS NULL`. New request columns: `offered_at`, `offered_by_user_id`, `accepted_at`, `released_at`, `released_by_staff_id`, `tenant_fix_response` (`confirmed` | `not_fixed`), `tenant_fix_responded_at`, `tenant_fix_note`. CHECK `requests_offered_details`: a pooled job always has `scheduled_for`.
+- **Two prices, two tables.** Landlord Gopher keeps the difference between what the worker is paid and what the landlord is billed, so neither side may see the other's number. `MaintenanceRequests.cost` is **dropped** (existing values carry over as the landlord price):
+
+| Table | Meaning | Who reads | Who writes |
+|---|---|---|---|
+| `MaintenanceRequestWorkerPrices` (`maintenance_request_id`, `amount`) | What the worker is paid | admin, the assigned worker, workers viewing the job in the pool | admin |
+| `MaintenanceRequestLandlordPrices` (`maintenance_request_id`, `amount`) | What the landlord is billed | admin, the owning landlord | admin |
+
+  Tenants read neither. A pooled job cannot lose its worker price (`worker_prices_keep_pooled` trigger).
+- **Only an admin sets date/time (`scheduled_for`) and prices.** `private.protect_maintenance_request` blocks non-admin changes to schedule, pool and tenant-confirmation columns; the price tables are admin-write by RLS.
+- **RPCs** (all `SECURITY DEFINER`, `authenticated` only):
+
+| RPC | Who | What |
+|---|---|---|
+| `offer_maintenance_request(p_request_id, p_scheduled_for, p_worker_price, p_landlord_price?)` | admin | Sets date/time + prices and pushes an Open, unassigned request to the pool |
+| `withdraw_maintenance_offer(p_request_id)` | admin | Takes a pooled job back before anyone accepts |
+| `accept_maintenance_request(p_request_id)` | approved worker | First accept wins: assigns the caller, status → `Scheduled`. No decline exists |
+| `release_maintenance_request(p_request_id, p_reason)` | assigned worker | Unassigns, status → `Open`, **not** re-offered. Reason is written as an `internal` comment (tenant never sees it) |
+| `confirm_maintenance_request_fixed(p_request_id, p_fixed, p_note)` | reporting tenant | Only on `Closed`. Reopening clears the answer |
+| `update_staff_profile(p_first_name?, p_last_name?, p_company_name?, p_phone?, p_services?)` | any approved staff login | Own Staff row only; email not editable. An argument left out leaves that column unchanged (a name-only save cannot touch `services`); pass `''` to clear company/phone, `{}` to take no jobs |
+
+- **What a worker sees before accepting:** the request row (problem, date/time), its worker price, and its photos (table + storage) — via `private.job_available_to_me`. The address comes from `public.list_available_job_locations()`, which returns address fields only (unit label, property name, street, city, state, zip). The `Units` and `Properties` rows themselves (notes, rent, listing fields) are **not** opened to the pool. Comments, status history, staff notes and the tenant record still require assignment (`private.can_select_maintenance_request` is unchanged).
+- **Completion photo:** a `maintenance` login cannot set `Closed` without **their own** photo (`uploaded_by_user_id = auth.uid()`, role `maintenance`) uploaded after they took the job (`accepted_at` / `released_at`) and after the request last left `Closed`. A previous worker's photo, or one from before a reopen, does not count. Photo cap is 5 worker photos + 5 from everyone else (was 5 total); the cap trigger locks the request row so overlapping uploads cannot pass it.
+- **Chat:** job chat stays on `MaintenanceRequestComments` (`tenant_visible` = tenant + worker + office; `internal` = worker + office). New `OfficeMessages` is one direct thread per non-admin user with the office (all admins), keyed by `thread_user_id`; in Realtime. `OfficeThreadReads` and `MaintenanceThreadReads` hold per-user last-read times for unread dots.
+- Tests: `tests/workflows/wf3-worker-job-pool.test.ts` (WF3).
+
+### Workers are outside contractors (`20261119090000_worker_contractor_access.sql`)
+
+**Not applied to live yet.** Before this file an approved `maintenance` login was treated as in-house staff. Now admin-only (landlord/tenant access unchanged):
+
+| Area | Before | After |
+|---|---|---|
+| `PropertyDocuments` + `property-documents` bucket | Worker read **every** document (all visibilities), uploaded, and deleted | Worker sees and manages none (`private.can_manage_property_documents()` and `can_select_property_document` → admin) |
+| `PaymentReceipts` / `PaymentIntents` + `payment-receipts` bucket | Worker read receipts/attempts for any unit they had a job in; could write receipts | Admin, owning landlord, tenant only |
+| `Vendors` | Worker read the whole directory | Admin only |
+| `Landlords` | Worker read the landlord's email, phone, preferred contact and notes for any property they ever had a job in | Worker reads no landlord record (`landlords_select` no longer includes `staff_can_see_landlord`) |
+| `Tenants` view: `email`, `mobile_phone`, `emergency_contact` | Worker kept reading them forever after any job in the unit | Shown only while the worker is assigned a job in that tenant's unit that is not `Closed` (`private.worker_has_open_job_for_tenant`); NULL once it is completed, released or reassigned. The tenant's name stays visible on jobs the worker holds or held |
+
+`private.is_staff_or_admin()` and `private.staff_can_see_landlord()` still exist but no access rule depends on them. A worker keeps what a job needs: the request, photos, address, tenant name, job chat, and the tenant's contact details until the job is completed. Still open (not changed here): an assigned worker reads the whole `Units` / `Properties` rows for jobs they hold, and a tenant can read the phone and company of the worker on their job.
 
 ### `MaintenanceRequestStaffNotes`
 

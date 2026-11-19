@@ -24,7 +24,12 @@ import {
   type WorkOrderStaffFormValues,
 } from "./work-order-staff-fields";
 import { WorkOrderTenantDetail } from "./work-order-tenant-detail";
-import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
+import {
+  MAX_MAINTENANCE_PHOTOS,
+  changedPriceFields,
+  photoSlotsLeft,
+  takePhotoFiles,
+} from "./work-order-status";
 
 interface WorkOrderDialogProps {
   open: boolean;
@@ -37,7 +42,7 @@ interface WorkOrderDialogProps {
 /**
  * Role → panels / editability:
  * - Tenant / landlord (viewer): tenant detail + media (comments/photos per role); no Save.
- * - Maintenance staff: staff fields with readOnlyCore (title/location locked); can edit status/cost/notes/comments.
+ * - Maintenance staff: staff fields with readOnlyCore (title/location locked); can edit status/notes/comments (prices are admin-only).
  * - Admin: full staff fields + Accept & schedule on Open; create/delete.
  *
  * Open→Scheduled writers: Accept Confirm (preferred intake) or Save with status Scheduled.
@@ -61,7 +66,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   const [resolutionNotes, setResolutionNotes] = useState("");
   const [holdReason, setHoldReason] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
-  const [cost, setCost] = useState("");
+  const [workerPrice, setWorkerPrice] = useState("");
+  const [landlordPrice, setLandlordPrice] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -131,7 +137,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     setResolutionNotes(workOrder?.resolution_notes ?? "");
     setHoldReason(workOrder?.hold_reason ?? "");
     setFollowUpDate(workOrder?.next_follow_up_date?.slice(0, 10) ?? "");
-    setCost(workOrder?.cost != null ? String(workOrder.cost) : "");
+    setWorkerPrice(workOrder?.worker_price != null ? String(workOrder.worker_price) : "");
+    setLandlordPrice(workOrder?.landlord_price != null ? String(workOrder.landlord_price) : "");
     setNotes(workOrder?.notes ?? "");
     setCommentBody("");
     setCommentVisibility(app.isTenant ? "tenant_visible" : "internal");
@@ -233,9 +240,21 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     followUpDate,
     resolutionNotes,
     permissionToEnter,
-    cost,
+    workerPrice,
+    landlordPrice,
     notes,
   };
+
+  /** Only the prices the admin changed; throws (shown as the save error) on an invalid value. */
+  function priceFields() {
+    return changedPriceFields(
+      { workerPrice, landlordPrice },
+      {
+        worker_price: workOrder?.worker_price ?? null,
+        landlord_price: workOrder?.landlord_price ?? null,
+      },
+    );
+  }
 
   function onStaffFormChange(patch: Partial<WorkOrderStaffFormValues>) {
     if (patch.propertyId !== undefined) setPropertyId(patch.propertyId);
@@ -252,7 +271,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     if (patch.followUpDate !== undefined) setFollowUpDate(patch.followUpDate);
     if (patch.resolutionNotes !== undefined) setResolutionNotes(patch.resolutionNotes);
     if (patch.permissionToEnter !== undefined) setPermissionToEnter(patch.permissionToEnter);
-    if (patch.cost !== undefined) setCost(patch.cost);
+    if (patch.workerPrice !== undefined) setWorkerPrice(patch.workerPrice);
+    if (patch.landlordPrice !== undefined) setLandlordPrice(patch.landlordPrice);
     if (patch.notes !== undefined) setNotes(patch.notes);
   }
 
@@ -336,7 +356,8 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
         priority,
         status,
         permission_to_enter: permissionToEnter,
-        cost: cost ? parseFloat(cost) : null,
+        // Only an admin may write prices; omit them for everyone else.
+        ...(app.isAdmin ? priceFields() : {}),
         notes: notes.trim() || null,
         resolution_notes: status === "closed" ? resolutionNotes.trim() : resolutionNotes.trim() || null,
         hold_reason: status === "on_hold" ? holdReason.trim() : holdReason.trim() || null,
@@ -419,7 +440,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
           category,
           priority,
           permission_to_enter: permissionToEnter,
-          cost: cost ? parseFloat(cost) : null,
+          ...priceFields(),
           notes: notes.trim() || null,
         },
         { previousStatus: workOrder.status },
@@ -464,11 +485,12 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
   async function uploadMorePhotos() {
     if (!workOrder || !photoFiles.length) return;
     const id = workOrder.id;
-    const remaining = Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length);
+    const remaining = photoSlotsLeft(photos, app.canEditWorkOrders && !app.isAdmin);
     try {
-      await Promise.all(
-        photoFiles.slice(0, remaining).map((file) => app.uploadMaintenancePhoto(id, file)),
-      );
+      // One at a time: parallel inserts race the per-request photo cap.
+      for (const file of photoFiles.slice(0, remaining)) {
+        await app.uploadMaintenancePhoto(id, file);
+      }
       if (workOrderId !== id) return;
       setPhotoFiles([]);
       await loadMedia(id);
@@ -545,7 +567,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 comments={comments}
                 photoFiles={photoFiles}
                 photoPreviews={photoPreviews}
-                remainingPhotoSlots={Math.max(0, MAX_MAINTENANCE_PHOTOS - photos.length)}
+                remainingPhotoSlots={photoSlotsLeft(photos, app.canEditWorkOrders && !app.isAdmin)}
                 onPhotoFilesChange={setPhotoFiles}
                 onUploadPhotos={() => void uploadMorePhotos()}
                 commentBody={commentBody}

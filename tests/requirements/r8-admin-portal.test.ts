@@ -139,9 +139,9 @@ describe("[R8] Admin web portal", () => {
       expect(await data.getSettings()).toMatchObject({ rent_due_day: "5" });
     });
 
-    test("a worker can read vendors but cannot read or change settings", async () => {
+    test("a worker cannot read or change the vendor directory or settings", async () => {
       const worker = await clientFor("worker");
-      expect((await worker.from("Vendors").select("id")).data?.length).toBeGreaterThan(0);
+      expect((await worker.from("Vendors").select("id")).data).toEqual([]);
       expectDenied(await worker.from("Vendors").insert({ name: "Worker's cousin" }).select());
       expectDenied(await worker.from("Settings").select("*"), "worker must not read Settings");
       expectDenied(await worker.from("Settings").update({ value: "1" }).eq("key", "rent_due_day").select());
