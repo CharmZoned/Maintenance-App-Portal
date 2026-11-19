@@ -195,8 +195,12 @@ describe("staging rebuild: the drop runs only behind the guard", () => {
     } finally {
       console.log = log;
     }
-    expect(lines.join("\n")).toContain("connected to");
-    expect(lines.join("\n")).not.toContain(DB_PASSWORD);
+    // Under GitHub Actions the script registers the password with the runner on
+    // purpose (`::add-mask::`); every other line must have it blanked.
+    const printed = lines.filter((line) => !line.startsWith("::add-mask::")).join("\n");
+    expect(printed).toContain("connected to");
+    expect(printed).not.toContain(DB_PASSWORD);
+    expect(printed).not.toContain(encodeURIComponent(DB_PASSWORD));
   });
 });
 
