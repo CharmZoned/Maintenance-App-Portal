@@ -151,7 +151,8 @@ export interface Database {
           source_id: string;
           first_name: string;
           last_name: string;
-          email: string;
+          /** NULL for a worker unless they hold an open job in this tenant's unit. */
+          email: string | null;
           mobile_phone: string | null;
           unit_id: number | null;
           primary_on_lease: boolean;

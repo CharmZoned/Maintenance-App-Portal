@@ -87,6 +87,22 @@ async function row(requestId: number): Promise<Request> {
   return r;
 }
 
+const TENANT_CONTACT = {
+  email: "tenant@test.local",
+  mobile_phone: "(410) 555-0142",
+  emergency_contact: "Rae Renter (410) 555-0143",
+};
+const NO_CONTACT = { email: null, mobile_phone: null, emergency_contact: null };
+
+/** What a login reads of Tina's tenant record: name plus the three contact fields. */
+async function tenantRecordSeenBy(client: SupabaseClient) {
+  const { data } = await client
+    .from("Tenants")
+    .select("first_name, email, mobile_phone, emergency_contact")
+    .eq("id", world.tenants.tenant.id);
+  return data ?? [];
+}
+
 const visibleIds = async (client: SupabaseClient): Promise<number[]> =>
   ((await client.from("MaintenanceRequests").select("id")).data ?? []).map((r) => Number(r.id));
 
@@ -98,6 +114,9 @@ beforeAll(async () => {
     [world.staff.worker.id],
   );
   await sql(`update public."Staff" set services = '{Electrical}' where id = $1`, [world.staff.worker2.id]);
+  await sql(`update public."Tenants" set mobile_phone = '(410) 555-0142', emergency_contact = 'Rae Renter (410) 555-0143' where id = $1`, [
+    world.tenants.tenant.id,
+  ]);
   [admin, sam, riley, tenant, tenant2, landlord] = await Promise.all([
     clientFor("admin"),
     clientFor("worker"),
@@ -269,6 +288,11 @@ describe("[WF3] Worker job pool", () => {
 
   test("Worker · now sees the tenant and the conversation, and can reply", async () => {
     expect((await sam.from("Tenants").select("id")).data).toEqual([{ id: world.tenants.tenant.id }]);
+    expect(await tenantRecordSeenBy(sam), "contact details open while the job is open").toEqual([
+      { first_name: "Tina", ...TENANT_CONTACT },
+    ]);
+    expect(await tenantRecordSeenBy(riley), "but not for a worker without the job").toEqual([]);
+    expect((await sam.from("Landlords").select("id")).data, "the landlord's record stays closed").toEqual([]);
     const { data: thread } = await sam
       .from("MaintenanceRequestComments")
       .select("body")
@@ -350,6 +374,17 @@ describe("[WF3] Worker job pool", () => {
     expect(closed).toMatchObject({ status: "closed" });
   });
 
+  test("Worker · once the job is completed, the tenant's contact details are hidden again", async () => {
+    expect(await tenantRecordSeenBy(sam), "the name stays on the finished job; the contact details go").toEqual([
+      { first_name: "Tina", ...NO_CONTACT },
+    ]);
+    expect((await sam.from("Landlords").select("id")).data).toEqual([]);
+    // Nothing changes for the people who are meant to have them.
+    expect(await tenantRecordSeenBy(admin)).toEqual([{ first_name: "Tina", ...TENANT_CONTACT }]);
+    expect(await tenantRecordSeenBy(landlord)).toEqual([{ first_name: "Tina", ...TENANT_CONTACT }]);
+    expect(await tenantRecordSeenBy(tenant)).toEqual([{ first_name: "Tina", ...TENANT_CONTACT }]);
+  });
+
   test("Tenant · only the tenant who reported it can answer, and only once it is completed", async () => {
     for (const client of [tenant2, sam, landlord, admin]) {
       const res = await client.rpc("confirm_maintenance_request_fixed", { p_request_id: requestId, p_fixed: true });
@@ -386,6 +421,9 @@ describe("[WF3] Worker job pool", () => {
       tenant_fix_response: null,
       tenant_fix_note: null,
     });
+    expect(await tenantRecordSeenBy(sam), "a reopened job is open again, so the worker can reach the tenant").toEqual([
+      { first_name: "Tina", ...TENANT_CONTACT },
+    ]);
   });
 
   test("Tenant · confirms it is fixed after the second visit", async () => {

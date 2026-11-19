@@ -5,11 +5,17 @@
 --     landlord-only files included), upload documents, and delete any document;
 --   * read the rent payment receipts and payment attempts of any unit they had
 --     ever been assigned a job in, and write payment-receipt files;
---   * read the whole vendor directory.
--- None of that is needed to do a repair. This file makes each of them
--- admin-only (landlord and tenant access is unchanged). A worker keeps exactly
--- what the job needs: the request, its photos, the address, the tenant's name
--- and the job chat.
+--   * read the whole vendor directory;
+--   * read the landlord's contact record (email, phone, preferred contact,
+--     notes) for any property they had ever been assigned a job in;
+--   * keep reading a tenant's email, phone and emergency contact forever after
+--     a job in their unit, long after it was completed.
+-- None of that is needed to do a repair. This file makes the first three
+-- admin-only, closes the landlord record to workers, and limits tenant contact
+-- details to the time the worker actually holds an open job there (landlord and
+-- tenant access is unchanged). A worker keeps exactly what the job needs: the
+-- request, its photos, the address, the tenant's name, the job chat, and the
+-- tenant's contact details until the job is completed.
 --
 -- private.is_staff_or_admin() is left in place but no rule uses it for access
 -- any more, apart from the second check inside public.register_payment_receipt,
@@ -171,5 +177,76 @@ DROP POLICY IF EXISTS vendors_select ON public."Vendors";
 CREATE POLICY vendors_select ON public."Vendors"
   FOR SELECT TO authenticated
   USING ((SELECT private.is_admin()));
+
+-- ── Landlord contact record ─────────────────────────────────────────
+-- Landlord Gopher is the go-between; a worker has no reason to hold the
+-- landlord's email, phone or notes. private.staff_can_see_landlord() is left
+-- in place but no rule uses it.
+
+DROP POLICY IF EXISTS landlords_select ON public."Landlords";
+CREATE POLICY landlords_select ON public."Landlords"
+  FOR SELECT TO authenticated
+  USING (
+    ((SELECT private.current_role()) = 'admin'::public.app_role)
+    OR (id = (SELECT private.current_landlord_id()))
+    OR (SELECT private.tenant_can_see_landlord(id))
+  );
+
+-- ── Tenant contact details: only while the job is open ──────────────
+-- A worker still sees the tenant's name on every job they hold or held (the
+-- row rule is unchanged). Email, mobile phone and emergency contact show only
+-- while the worker is assigned a job in that tenant's unit that is not yet
+-- completed. Once the job is Closed (or released, or reassigned) they read as
+-- NULL again.
+
+CREATE OR REPLACE FUNCTION private.worker_has_open_job_for_tenant(target_tenant bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO ''
+AS $function$
+  SELECT (SELECT private.current_role()) = 'maintenance'::public.app_role
+     AND EXISTS (
+       SELECT 1
+       FROM private.tenants AS tenant
+       JOIN public."MaintenanceRequests" AS request ON request.unit_id = tenant.unit_id
+       WHERE tenant.id = target_tenant
+         AND request.assigned_staff_id = (SELECT private.current_staff_id())
+         AND request.status <> 'Closed'
+     )
+$function$;
+
+REVOKE ALL ON FUNCTION private.worker_has_open_job_for_tenant(bigint) FROM public, anon;
+GRANT EXECUTE ON FUNCTION private.worker_has_open_job_for_tenant(bigint) TO authenticated, service_role;
+
+-- Same columns, order and types as before; only the three contact columns gain
+-- a mask. INSTEAD OF triggers and grants on the view are kept by REPLACE.
+CREATE OR REPLACE VIEW public."Tenants"
+WITH (security_invoker = true) AS
+SELECT
+  t.id,
+  t.created_at,
+  t.source_id,
+  t.first_name,
+  t.last_name,
+  CASE WHEN private.can_read_tenant_pii() OR private.worker_has_open_job_for_tenant(t.id)
+       THEN t.email ELSE NULL END AS email,
+  CASE WHEN private.can_read_tenant_pii() OR private.worker_has_open_job_for_tenant(t.id)
+       THEN t.mobile_phone ELSE NULL END AS mobile_phone,
+  t.unit_id,
+  t.primary_on_lease,
+  t.invite_to_app,
+  CASE WHEN private.can_read_tenant_pii() THEN t.notes ELSE NULL END AS notes,
+  t.is_test_data,
+  CASE WHEN private.can_read_tenant_pii() THEN t.date_of_birth ELSE NULL END AS date_of_birth,
+  CASE WHEN private.can_read_tenant_pii() OR private.worker_has_open_job_for_tenant(t.id)
+       THEN t.emergency_contact ELSE NULL END AS emergency_contact,
+  CASE WHEN private.can_read_tenant_pii() THEN t.employer ELSE NULL END AS employer,
+  CASE WHEN private.can_read_tenant_pii() THEN t.monthly_income ELSE NULL END AS monthly_income
+FROM private.tenants t;
+
+COMMENT ON VIEW public."Tenants" IS
+  'Tenant rows. Income/DOB/employer/notes only for admin/landlord/tenant/service_role. Email/phone/emergency contact also for a worker, but only while they hold an open (not Closed) job in that tenant''s unit.';
 
 NOTIFY pgrst, 'reload schema';

@@ -283,7 +283,8 @@ describe("[R7] Permissions", () => {
       // passed staff_can_see_tenant / staff_assigned_to_*.
       const approved = await clientFor("worker");
       expect((await approved.from("Tenants").select("id")).data).toEqual([{ id: world.tenants.tenant.id }]);
-      expect((await approved.from("Landlords").select("id")).data).toEqual([{ id: world.landlord.id }]);
+      // Workers never read the landlord's contact record, assigned or not.
+      expect((await approved.from("Landlords").select("id")).data).toEqual([]);
 
       await sql(`update public.user_roles set account_status = 'suspended' where user_id = $1`, [
         world.users.worker.id,

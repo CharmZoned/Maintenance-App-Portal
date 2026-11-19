@@ -181,8 +181,10 @@ Owner decisions 2026-11-18/19. **Not applied to live yet.** Ships through a PR i
 | `PropertyDocuments` + `property-documents` bucket | Worker read **every** document (all visibilities), uploaded, and deleted | Worker sees and manages none (`private.can_manage_property_documents()` and `can_select_property_document` → admin) |
 | `PaymentReceipts` / `PaymentIntents` + `payment-receipts` bucket | Worker read receipts/attempts for any unit they had a job in; could write receipts | Admin, owning landlord, tenant only |
 | `Vendors` | Worker read the whole directory | Admin only |
+| `Landlords` | Worker read the landlord's email, phone, preferred contact and notes for any property they ever had a job in | Worker reads no landlord record (`landlords_select` no longer includes `staff_can_see_landlord`) |
+| `Tenants` view: `email`, `mobile_phone`, `emergency_contact` | Worker kept reading them forever after any job in the unit | Shown only while the worker is assigned a job in that tenant's unit that is not `Closed` (`private.worker_has_open_job_for_tenant`); NULL once it is completed, released or reassigned. The tenant's name stays visible on jobs the worker holds or held |
 
-`private.is_staff_or_admin()` still exists but no access rule depends on it. A worker keeps what a job needs: the request, photos, address, tenant name, job chat. Still open (not changed here): an assigned worker can read the tenant's email/phone via the `Tenants` view and the property's landlord contact via `landlords_select`.
+`private.is_staff_or_admin()` and `private.staff_can_see_landlord()` still exist but no access rule depends on them. A worker keeps what a job needs: the request, photos, address, tenant name, job chat, and the tenant's contact details until the job is completed. Still open (not changed here): an assigned worker reads the whole `Units` / `Properties` rows for jobs they hold, and a tenant can read the phone and company of the worker on their job.
 
 ### `MaintenanceRequestStaffNotes`
 
