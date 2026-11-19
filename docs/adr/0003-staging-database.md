@@ -75,6 +75,14 @@ staging database that is provably built from the repo and stays in step automati
 Option C is the right move later if staging ever needs production-grade isolation — for
 example, a copy of anonymised real data — and nothing in Option A blocks that.
 
+## Progress — 2026-11-19
+
+The broken branch was deleted on 2026-11-19. One finding changes how the rebuild is done:
+24 of production's 59 migration records contain no SQL, so a branch created by copying
+production's records would be missing those migrations. The new branch is therefore
+rebuilt from the files in `supabase/migrations/` by a dedicated workflow, whatever
+Supabase puts in it at creation.
+
 ## Consequences
 
 - The owner has approved the wipe. It is carried out in Phase 2 of the rollout, after
