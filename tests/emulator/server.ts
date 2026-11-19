@@ -20,8 +20,8 @@ export interface Emulator {
   serviceRoleKey: string;
   db: EmulatorDb;
   auth: AuthApi;
-  /** Wipe all data; optionally load the standard test world. */
-  reset(opts?: { seed?: boolean }): Promise<World | null>;
+  /** Wipe all data; optionally load the standard test world (`seed`), plus the demo extras (`demo`). */
+  reset(opts?: { seed?: boolean; demo?: boolean }): Promise<World | null>;
   close(): Promise<void>;
 }
 
@@ -82,11 +82,11 @@ export async function startEmulator(opts: { port?: number; quiet?: boolean } = {
   const rest = new RestApi(db);
   const storage = new StorageApi(db);
 
-  const reset = async (o: { seed?: boolean } = {}): Promise<World | null> => {
+  const reset = async (o: { seed?: boolean; demo?: boolean } = {}): Promise<World | null> => {
     await db.reset();
     auth.reset();
     storage.reset();
-    return o.seed ? seedWorld(db, auth) : null;
+    return o.seed ? seedWorld(db, auth, { demo: o.demo === true }) : null;
   };
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -116,7 +116,7 @@ export async function startEmulator(opts: { port?: number; quiet?: boolean } = {
         return sendJson(res, 200, { ok: true, migrations: db.migrations });
       }
       if (route === "/reset" && method === "POST") {
-        const body = (jsonBody() ?? {}) as { seed?: boolean };
+        const body = (jsonBody() ?? {}) as { seed?: boolean; demo?: boolean };
         return sendJson(res, 200, { world: await reset(body) });
       }
       if (route === "/sql" && method === "POST") {

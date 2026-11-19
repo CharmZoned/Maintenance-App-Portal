@@ -10,7 +10,7 @@ import { PASSWORD, PERSONAS } from "./seed";
 import { startEmulator } from "./server";
 
 const emulator = await startEmulator({ port: DEV_EMULATOR_PORT });
-await emulator.reset({ seed: true });
+await emulator.reset({ seed: true, demo: true });
 
 console.log(`\nLocal backend ready (${emulator.db.migrations.length} migrations applied) at ${emulator.url}`);
 console.log(`\nDemo logins — password for all: ${PASSWORD}`);
