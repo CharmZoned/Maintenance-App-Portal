@@ -18,7 +18,7 @@ This file used to hold the full phased plan. That snapshot is archived at
 | [`docs/supabase-schema.md`](supabase-schema.md) | Schema field notes |
 | [`docs/staging/BUILD_PLAN.md`](staging/BUILD_PLAN.md) | Staging environment + staging → production release path (design in [`DESIGN_PLAN.md`](staging/DESIGN_PLAN.md), decisions in [`docs/adr/`](adr/README.md)) |
 
-## Status snapshot (after Wave 1–2 on `master`)
+## Status snapshot (after Wave 1–2 on `main`)
 
 | Wave / phase | Status |
 |--------------|--------|
@@ -29,6 +29,6 @@ This file used to hold the full phased plan. That snapshot is archived at
 | Phase 4 (website CTAs) | Waiting on **portal hosting/URL** — now planned on Vercel in Phases 3–4 of [`docs/staging/BUILD_PLAN.md`](staging/BUILD_PLAN.md) |
 | Phase 6 / R6 / web push | **Hold** (WS-L) |
 
-**Branches (2026-11-18):** work targets `staging`; `master` is production and receives only the release PR from `staging` ([ADR-0001](adr/0001-environments-and-promotion.md)). `staging` becomes the default branch once the owner changes the repo setting. Legacy `main` ↔ `master` sync is retired; a stale `main` branch still exists on the remote.
+**Branches (2026-11-18):** work targets `staging`; `main` is production and receives only the release PR from `staging` ([ADR-0001](adr/0001-environments-and-promotion.md)). `staging` becomes the default branch once the owner changes the repo setting. The production branch was renamed from `master` to `main` on 2026-11-19, after the stale older `main` branch was deleted; older docs that say `master` mean today's `main`.
 
 **Product data path:** Supabase Auth + Postgres + RLS (not D1/Hono). Legacy Worker / Clawnify deploy assets live under [`archive/`](../archive/README.md).

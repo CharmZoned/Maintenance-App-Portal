@@ -22,7 +22,7 @@ deferred in `docs/deferred-work.md`. Staging and production both need a host.
 
 Vercel, one project connected to this repository:
 
-- **Production** environment tracks `master`, serves the production domain.
+- **Production** environment tracks `main`, serves the production domain.
 - **Staging** custom environment tracks `staging`, serves the staging domain.
 - **Preview** deployments for other branches per [ADR-0008](0008-pr-previews.md).
 

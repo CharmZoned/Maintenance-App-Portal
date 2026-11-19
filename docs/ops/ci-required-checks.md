@@ -4,9 +4,9 @@
 
 Workflow: [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)
 
-The workflow runs on every PR into `staging` or `master`, and every push to `staging`
-or `master`. It has two jobs: `typecheck / build / test` runs every time;
-`release source` runs only on a pull request into `master`.
+The workflow runs on every PR into `staging` or `main`, and every push to `staging`
+or `main`. It has two jobs: `typecheck / build / test` runs every time;
+`release source` runs only on a pull request into `main`.
 
 **`typecheck / build / test`** (unchanged):
 
@@ -16,11 +16,11 @@ or `master`. It has two jobs: `typecheck / build / test` runs every time;
 
 **`release source`** (new):
 
-- Fails any pull request into `master` whose source is not the `staging` branch of
-  this repository. `master` only receives the release PR from `staging`
+- Fails any pull request into `main` whose source is not the `staging` branch of
+  this repository. `main` only receives the release PR from `staging`
   ([ADR-0001](../adr/0001-environments-and-promotion.md)).
 - On every other pull request, and on pushes, it is skipped, which counts as passing.
-- It does not stop a direct push to `master`. Branch protection does that (below).
+- It does not stop a direct push to `main`. Branch protection does that (below).
 
 The workflow **no longer skips docs-only changes** (the old `paths-ignore` filter for
 Markdown / `docs/**` is removed). A required status check that never runs leaves a PR
@@ -44,7 +44,7 @@ This is owner action **O3** in [`docs/staging/BUILD_PLAN.md`](../staging/BUILD_P
    | Branch | Required status checks | Also |
    |--------|------------------------|------|
    | `staging` | `typecheck / build / test`, `Supabase Preview` | Require a pull request before merging |
-   | `master` | `typecheck / build / test`, `Supabase Preview`, `release source` | Require a pull request before merging; allowed merge method = **merge commit only** |
+   | `main` | `typecheck / build / test`, `Supabase Preview`, `release source` | Require a pull request before merging; allowed merge method = **merge commit only** |
 
 3. In each rule enable **Require status checks to pass before merging** and add the
    checks by their exact names (a check appears in the picker after it has reported at
@@ -52,8 +52,8 @@ This is owner action **O3** in [`docs/staging/BUILD_PLAN.md`](../staging/BUILD_P
 4. Do **not** allow bypass for non-admins unless intentional.
 5. Save.
 
-Why merge commit only on `master`: squashing or rebasing a release PR makes `staging`
-and `master` diverge, and every later release conflicts (ADR-0001).
+Why merge commit only on `main`: squashing or rebasing a release PR makes `staging`
+and `main` diverge, and every later release conflicts (ADR-0001).
 
 Until this is set, the workflow still runs on PRs but merge is not blocked by GitHub.
 

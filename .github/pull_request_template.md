@@ -1,4 +1,4 @@
-<!-- Target branch: staging. Only the release pull request targets master. -->
+<!-- Target branch: staging. Only the release pull request targets main. -->
 
 ## What changed
 

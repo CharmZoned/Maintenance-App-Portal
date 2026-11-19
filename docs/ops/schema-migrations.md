@@ -1,7 +1,7 @@
 # Schema migrations (ops)
 
 **Project:** Landlord Gopher Supabase `bgjkjtfgrfiszbzatriq` (production)  
-**Source of truth:** `supabase/migrations/` in this repo. A change travels feature branch → PR into `staging` → release PR `staging` → `master` ([ADR-0001](../adr/0001-environments-and-promotion.md)). This portal repo is the only place database structure changes are written — the website repo applies none ([ADR-0009](../adr/0009-schema-ownership.md)).  
+**Source of truth:** `supabase/migrations/` in this repo. A change travels feature branch → PR into `staging` → release PR `staging` → `main` ([ADR-0001](../adr/0001-environments-and-promotion.md)). This portal repo is the only place database structure changes are written — the website repo applies none ([ADR-0009](../adr/0009-schema-ownership.md)).  
 **Status (verified 2026-11-18):** production's migration history matches the repo (see [Drift check](#drift-check-quick)); a staging database exists but is broken and must not be used until it is rebuilt (see [Staging database](#staging-database-adr-0003)).
 
 ## Rule (file only — no live-only DDL)
@@ -9,17 +9,17 @@
 [ADR-0004](../adr/0004-database-promotion.md) (accepted 2026-11-18) turns the old "file first, then apply by hand" rule into **"file only"**:
 
 1. Every schema change is a file under `supabase/migrations/` on a feature branch with a PR into `staging`. **No** schema change reaches staging or production through the Dashboard, SQL Editor, or MCP `apply_migration`.
-2. **Once Phase 4 of [`docs/staging/BUILD_PLAN.md`](../staging/BUILD_PLAN.md) lands**, production migrations are applied automatically by the Supabase GitHub integration when the release PR (`staging` → `master`) merges. Nobody applies to production by hand from then on.
+2. **Once Phase 4 of [`docs/staging/BUILD_PLAN.md`](../staging/BUILD_PLAN.md) lands**, production migrations are applied automatically by the Supabase GitHub integration when the release PR (`staging` → `main`) merges. Nobody applies to production by hand from then on.
 3. **Until Phase 4 lands**, if a migration must reach production it is still applied by hand, with a recorded version **equal to the repo file prefix** (CLI `supabase db push`) — **never** via MCP `apply_migration`, which stamps a different version. Compare `list_migrations` with the repo first (read-only) so nothing already recorded is pushed again.
 4. An applied migration file is never edited. Mistakes are corrected by a new migration.
-5. If you already applied live by mistake: capture the SQL into a new timestamped migration on a branch immediately, and do not leave live ahead of `master` (LGA-17 / Phase 5 `#11` pattern).
+5. If you already applied live by mistake: capture the SQL into a new timestamped migration on a branch immediately, and do not leave live ahead of `main` (LGA-17 / Phase 5 `#11` pattern).
 
 Agents: phase-ship expects migrations in the PR. Applying is never a substitute for the repo file, and an agent never uses MCP `apply_migration` on staging or production.
 
 ## Filenames and versions (must stay unique)
 
 - Repo files are `YYYYMMDDHHMMSS_<snake_name>.sql`. The **14-digit prefix is the migration version**.
-- **Every new migration version must be unique** across `staging`, `master`, and all open PRs. Do not reuse a timestamp already claimed by another branch (coordinate or bump by ≥1 second / use a later slot).
+- **Every new migration version must be unique** across `staging`, `main`, and all open PRs. Do not reuse a timestamp already claimed by another branch (coordinate or bump by ≥1 second / use a later slot).
 - Prefer bumping forward from the latest repo prefix on `staging` (and scan open `cursor/*` branches before picking).
 
 ## Applying without version drift
@@ -38,11 +38,11 @@ Do not leave a permanent “name matches, version differs” gap without a defer
 
 ## Recommended apply order
 
-1. Pick a **unique** `YYYYMMDDHHMMSS` not used on `staging`, `master`, or open PRs.
+1. Pick a **unique** `YYYYMMDDHHMMSS` not used on `staging`, `main`, or open PRs.
 2. Add `supabase/migrations/YYYYMMDDHHMMSS_<name>.sql` on a feature branch (e.g. `cursor/...`).
 3. Open a PR into **`staging`**; keep SQL reviewable (additive preferred; never break `inquiries`). CI and the `Supabase Preview` check must pass — see [`ci-required-checks.md`](./ci-required-checks.md).
 4. Merge into `staging`. Once Phase 2 of the build plan has rebuilt the staging database, that merge applies the migration there and it is tested on staging. **Until then there is no usable staging database** — do not apply to or test on the existing broken branch (see [Staging database](#staging-database-adr-0003)).
-5. Production: the migration ships in the release PR `staging` → `master` (merge commit only). Once Phase 4 lands, merging that PR applies it automatically. **Until Phase 4 lands**, and only if it must reach production, apply by hand after human review (or with explicit ops go-ahead) **with matching version** (CLI `supabase db push`) — never MCP `apply_migration`. See [Applying without version drift](#applying-without-version-drift).
+5. Production: the migration ships in the release PR `staging` → `main` (merge commit only). Once Phase 4 lands, merging that PR applies it automatically. **Until Phase 4 lands**, and only if it must reach production, apply by hand after human review (or with explicit ops go-ahead) **with matching version** (CLI `supabase db push`) — never MCP `apply_migration`. See [Applying without version drift](#applying-without-version-drift).
 6. Update `docs/deferred-work.md` / `docs/supabase-schema.md` if the change is user-visible or ops-relevant.
 
 ## Staging database (ADR-0003)
@@ -73,22 +73,22 @@ An earlier version of this doc said no staging branch existed. That was wrong �
 
 Related, same verification date:
 
-- `supabase/config.toml` did not exist on `master` @ `90a0239`; Phase 1 of the build plan adds it. It must exist before the staging rebuild (ADR-0003).
+- `supabase/config.toml` did not exist on `main` @ `90a0239`; Phase 1 of the build plan adds it. It must exist before the staging rebuild (ADR-0003).
 - No Edge Functions are deployed on production. Three exist in `supabase/functions/`; they stay on hold with Stripe.
 - Portal hosting is no longer deferred: it is planned on Vercel in Phases 3–4 of the build plan. Hostnames are still to be chosen by the owner (needed for Phase 4 only).
 
 ## Drift check (quick)
 
-Compare Supabase MCP `list_migrations` to `supabase/migrations/` on `master` on **both**:
+Compare Supabase MCP `list_migrations` to `supabase/migrations/` on `main` on **both**:
 
 | Check | Drift if… |
 |-------|-----------|
-| **Name** | Live name has no matching `*_name.sql` on `master` (and no open PR owning it) |
+| **Name** | Live name has no matching `*_name.sql` on `main` (and no open PR owning it) |
 | **Version** | Live version ≠ repo file prefix for the same logical migration |
 
 Name-only checks miss MCP clock stamps. Track mismatches in `docs/deferred-work.md` until repaired.
 
-**Last check — 2026-11-18:** production (`bgjkjtfgrfiszbzatriq`) records 59 versions, identical to the 59 file prefixes in `supabase/migrations/` on `master` @ `90a0239`. No drift on production. The `staging` Supabase branch does drift — see [Staging database](#staging-database-adr-0003); it is rebuilt, not repaired.
+**Last check — 2026-11-18:** production (`bgjkjtfgrfiszbzatriq`) records 59 versions, identical to the 59 file prefixes in `supabase/migrations/` on `main` @ `90a0239`. No drift on production. The `staging` Supabase branch does drift — see [Staging database](#staging-database-adr-0003); it is rebuilt, not repaired.
 
 Pre-portal setup scripts (`20261010152511` … `20261109204421`) now ship in this folder so a fresh Supabase project can rebuild from the repo. Live already has those version stamps — **do not re-run** them on production (`db push` should treat them as applied). Portal phase work continues from `20261113160000_*`. Pre-repo maintenance ACL notes: [`live-maintenance-acl-baseline.md`](./live-maintenance-acl-baseline.md).
 
@@ -96,7 +96,7 @@ Pre-portal setup scripts (`20261010152511` … `20261109204421`) now ship in thi
 
 > **HISTORICAL — completed, verified matching on 2026-11-18. Do not run.**
 >
-> - Production's migration history has 59 versions, identical to the 59 file prefixes in `supabase/migrations/` on `master` @ `90a0239`. The mismatches inventoried in §B and §C below **no longer exist on production**.
+> - Production's migration history has 59 versions, identical to the 59 file prefixes in `supabase/migrations/` on `main` @ `90a0239`. The mismatches inventoried in §B and §C below **no longer exist on production**.
 > - Who ran the repair, and when, is not recorded.
 > - **The §E command sequence must NOT be run again.** It reverts and re-stamps versions that are no longer the state of production.
 > - §A–§E are kept unchanged below for the record only. They describe production as of 2026-11-14, not today — for example, the three §D versions `20261113214011`, `20261114002715`, and `20261114002848` now have files in `supabase/migrations/` under the same versions.
@@ -104,7 +104,7 @@ Pre-portal setup scripts (`20261010152511` … `20261109204421`) now ship in thi
 
 **Not standing daily ops** — a dated inventory + command sequence for this drift episode. After a successful §E run, update the §E status line (repaired @ date/SHA) and the deferred-work repair row; do **not** re-run blindly on a later date without a fresh `list_migrations` diff.
 
-**Snapshotted:** 2026-11-14 via MCP `list_migrations` / `schema_migrations` on `bgjkjtfgrfiszbzatriq` vs `supabase/migrations/` on `master` @ `33424b7` (see PR #31).  
+**Snapshotted:** 2026-11-14 via MCP `list_migrations` / `schema_migrations` on `bgjkjtfgrfiszbzatriq` vs `supabase/migrations/` on `main` @ `33424b7` (see PR #31).  
 **Scope:** History alignment only (`supabase migration repair`). **No DDL.** Do not run while another migration/RLS PR is open. **Never repair/revert §D versions.**
 
 ### A. Clean match (repo prefix = live version; no duplicate clock)
@@ -194,4 +194,4 @@ supabase migration repair --remote --yes --status reverted \
 
 **Verify:** MCP `list_migrations` — every portal file under `supabase/migrations/` has a matching version; §B duplicate names gone; §D exceptions remain. Only then is `db push` safe for **new** migrations.
 
-**WS-I status:** **Verified matching on 2026-11-18** against `master` @ `90a0239` — production's 59 recorded versions equal the 59 repo file prefixes. Who ran the repair, and when, is not recorded. §E is closed: **do not run it again.** (Previous status, 2026-11-14 / PR #31: docs inventory + plan done, live repair not executed.) The deferred-work repair row is marked done.
+**WS-I status:** **Verified matching on 2026-11-18** against `main` @ `90a0239` — production's 59 recorded versions equal the 59 repo file prefixes. Who ran the repair, and when, is not recorded. §E is closed: **do not run it again.** (Previous status, 2026-11-14 / PR #31: docs inventory + plan done, live repair not executed.) The deferred-work repair row is marked done.

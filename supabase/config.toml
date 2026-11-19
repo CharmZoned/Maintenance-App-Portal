@@ -6,7 +6,7 @@
 #   - Persistent branches, which includes `staging` and production itself: API and Auth settings
 #     are applied only when a [remotes.<name>] block names that branch's project ref. Its values
 #     are layered over the ones below. With no such block the configure step is skipped.
-#   - Production (git `master`) therefore gets only: new migrations, plus any Edge Functions and
+#   - Production (git `main`) therefore gets only: new migrations, plus any Edge Functions and
 #     storage buckets declared here. There is deliberately no [remotes.production] block, so
 #     production Auth settings stay exactly as set in the dashboard.
 #   - `pnpm dev:local` and the tests use the in-repo emulator and never read this file.
