@@ -10,7 +10,8 @@ name: Rebuild staging database
 # "Reset staging data" afterwards to load the demo world again.
 #
 # It cannot touch production: scripts/staging/rebuild.ts refuses unless the
-# database is not the production one AND matches the ref typed below.
+# database is the staging project pinned in scripts/staging/guard.ts AND
+# matches the ref typed below. The drop runs only from inside that script.
 #
 # Repository secrets (Settings -> Secrets and variables -> Actions):
 #   STAGING_DB_URL       staging SESSION POOLER connection string (port 5432);
@@ -62,25 +63,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Must pass before anything is dropped. Also masks the database password
-      # in the output of the steps below.
-      - name: Refuse unless the target is staging
-        env:
-          CONFIRM_STAGING_REF: ${{ inputs.staging_project_ref }}
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
-        run: pnpm exec tsx scripts/staging/rebuild.ts check
-
-      - name: Drop and re-apply every migration
-        env:
-          STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
-        run: npx --yes "supabase@${SUPABASE_CLI_VERSION}" db reset --remote="$STAGING_DB_URL" --no-seed --yes
-
-      - name: Verify the database matches the repo
+      # One process: the guard runs first, and only if it passes does the same
+      # process start the Supabase CLI (with a connection string rebuilt from
+      # what the guard checked), then verify the history and the schema
+      # against the repo. There is no step that can drop anything on its own.
+      - name: Rebuild staging (guard, drop and re-apply, verify)
         env:
           CONFIRM_STAGING_REF: ${{ inputs.staging_project_ref }}
           STAGING_DB_URL: ${{ secrets.STAGING_DB_URL }}
           STAGING_DB_CA_CERT: ${{ secrets.STAGING_DB_CA_CERT }}
-        run: pnpm exec tsx scripts/staging/rebuild.ts verify
+        run: pnpm exec tsx scripts/staging/rebuild.ts rebuild
 
   # Started from any other branch, the job above is skipped; say why instead of
   # leaving a run that looks like it did something.

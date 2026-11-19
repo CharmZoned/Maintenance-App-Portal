@@ -17,6 +17,24 @@
  */
 export const PRODUCTION_PROJECT_REF = "bgjkjtfgrfiszbzatriq";
 
+/**
+ * The staging Supabase project (a persistent branch of production), the only
+ * project the reset and rebuild will ever touch. Allow-list, not deny-list: a
+ * third project, or a typo that happens to be a valid ref, is refused too.
+ * tests/unit/staging-seed-guard.test.ts asserts it equals `[remotes.staging]
+ * project_id` in supabase/config.toml, so changing staging means changing both.
+ */
+export const STAGING_PROJECT_REF = "gzwcegtwzzhtstgzphaw";
+
+/** Why a ref that is well-formed and not production is still refused. Null when it is the staging project. */
+export function notStagingReason(label: string, ref: string): string | null {
+  if (ref === STAGING_PROJECT_REF) return null;
+  return (
+    `${label} names project ${ref}, which is not the staging project (${STAGING_PROJECT_REF}). ` +
+    "If staging has moved, update STAGING_PROJECT_REF in scripts/staging/guard.ts and [remotes.staging] in supabase/config.toml."
+  );
+}
+
 export const MIN_DEMO_PASSWORD_LENGTH = 16;
 
 /** The only database port accepted: direct connections and the session pooler. */
@@ -183,6 +201,9 @@ export function checkStagingTarget(env: StagingEnv): GuardResult {
     errors.push("STAGING_SUPABASE_URL must be exactly https://<project-ref>.supabase.co (the Project URL).");
   } else if (apiRef === PRODUCTION_PROJECT_REF) {
     errors.push("STAGING_SUPABASE_URL is the PRODUCTION project. This script never runs against production.");
+  } else {
+    const reason = notStagingReason("STAGING_SUPABASE_URL", apiRef);
+    if (reason) errors.push(reason);
   }
 
   let db: DbTarget | null = null;
@@ -195,6 +216,8 @@ export function checkStagingTarget(env: StagingEnv): GuardResult {
     } else if (parsed.db.ref === PRODUCTION_PROJECT_REF) {
       errors.push("STAGING_DB_URL is the PRODUCTION database. This script never runs against production.");
     } else {
+      const reason = notStagingReason("STAGING_DB_URL", parsed.db.ref);
+      if (reason) errors.push(reason);
       db = parsed.db;
     }
   }
@@ -230,6 +253,9 @@ export function checkStagingTarget(env: StagingEnv): GuardResult {
   // successful result can never carry the production ref.
   if (errors.length === 0 && (apiRef === PRODUCTION_PROJECT_REF || db?.ref === PRODUCTION_PROJECT_REF)) {
     errors.push("Refusing to target the production project.");
+  }
+  if (errors.length === 0 && (apiRef !== STAGING_PROJECT_REF || db?.ref !== STAGING_PROJECT_REF)) {
+    errors.push("Refusing to target anything but the staging project.");
   }
 
   if (errors.length > 0 || apiRef === null || db === null) {

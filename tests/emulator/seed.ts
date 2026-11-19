@@ -83,6 +83,20 @@ export interface DemoWorld {
     content_type: string;
     visibility: "tenant" | "landlord" | "staff";
   }>;
+  /**
+   * MaintenanceRequestPhotos rows: what tenants attached when reporting, and the
+   * worker's completion photo on the closed job. As with documents, only the
+   * rows are seeded; the file at `storage_path` (bucket `maintenance-photos`)
+   * is uploaded by the caller (the staging reset does).
+   */
+  photos: Array<{
+    id: number;
+    request: DemoRequestKey;
+    storage_path: string;
+    content_type: "image/png";
+    caption: string;
+    uploaded_by_role: "tenant" | "maintenance";
+  }>;
 }
 
 export interface World {
@@ -671,6 +685,29 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   await offer(pooled, "-3 hours", "+2 days", 140, 190);
   await offer(pooledElectrical, "-2 hours", "+1 days", 160, 230);
 
+  // ── Job photos ──────────────────────────────────────────────────────
+  // Rows only (see DemoWorld.photos). Paths follow `{request_id}/{file}`, the
+  // shape the maintenance-photos storage policies require.
+  const photos: DemoWorld["photos"] = [];
+  const photo = async (request: DemoRequestKey, requestId: number, by: Person, at: Offset, file: string, caption: string) => {
+    const storagePath = `${requestId}/${file}`;
+    const role = by.role === "maintenance" ? "maintenance" : "tenant";
+    const row = await one<{ id: string | number }>(
+      db,
+      `insert into public."MaintenanceRequestPhotos"
+         (maintenance_request_id, storage_path, uploaded_by_role, uploaded_by_user_id, caption, created_at)
+       values ($1, $2, $3::text::public.app_role, $4, $5, now() + $6::interval)
+       returning id`,
+      [requestId, storagePath, role, by.userId, caption, at],
+    );
+    photos.push({ id: id(row), request, storage_path: storagePath, content_type: "image/png", caption, uploaded_by_role: role });
+  };
+  await photo("closed", closed, tina, "-24 days", "demo-disposal-reported.png", "It hums but the blades do not turn.");
+  // The completion photo the worker must add before closing a job (worker job pool rules).
+  await photo("closed", closed, sam, "-20 days -23 hours", "demo-disposal-fixed.png", "Running again after the fix.");
+  await photo("onHold", onHold, tom, "-9 days", "demo-window-latch.png", "The cracked latch on the left window.");
+  await photo("pooled", pooled, tina, "-20 hours", "demo-faucet-drip.png", "Drips even when fully closed.");
+
   // ── Property documents ──────────────────────────────────────────────
   // Rows only (see DemoWorld.documents). Paths follow `{property_id}/{file}`.
   const documents: DemoWorld["documents"] = [];
@@ -765,5 +802,6 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
       otherProperty: { id: otherProperty },
     },
     documents,
+    photos,
   };
 }

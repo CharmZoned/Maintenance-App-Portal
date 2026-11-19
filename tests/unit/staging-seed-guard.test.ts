@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { PRODUCTION_PROJECT_REF as APP_PRODUCTION_PROJECT_REF } from "@/lib/env";
 import {
@@ -9,11 +11,12 @@ import {
   PRODUCTION_PROJECT_REF,
   projectRefFromApiUrl,
   projectRefFromDbUrl,
+  STAGING_PROJECT_REF,
   type StagingEnv,
 } from "../../scripts/staging/guard";
 
-// Made-up refs: 20 lowercase letters, like a real one.
-const STAGING = "stagingstagingstagin";
+// The real staging ref (the guard accepts no other); OTHER is made up, 20 lowercase letters like a real one.
+const STAGING = STAGING_PROJECT_REF;
 const OTHER = "otherotherotherother";
 const PROD = PRODUCTION_PROJECT_REF;
 
@@ -41,6 +44,15 @@ function errorsOf(env: StagingEnv): string[] {
 describe("production project ref", () => {
   test("is the same ref the app guards against", () => {
     expect(PRODUCTION_PROJECT_REF).toBe(APP_PRODUCTION_PROJECT_REF);
+  });
+});
+
+describe("staging project ref", () => {
+  test("is the ref supabase/config.toml names for staging", () => {
+    const config = readFileSync(join(__dirname, "..", "..", "supabase", "config.toml"), "utf8");
+    const block = /^\[remotes\.staging\]\s*\nproject_id\s*=\s*"([a-z0-9]{20})"/m.exec(config);
+    expect(block?.[1], "[remotes.staging] project_id").toBe(STAGING_PROJECT_REF);
+    expect(STAGING_PROJECT_REF).not.toBe(PRODUCTION_PROJECT_REF);
   });
 });
 
@@ -170,6 +182,16 @@ describe("checkStagingTarget", () => {
     );
     expect(errors).toHaveLength(3);
     expect(errors.every((e) => e.includes("PRODUCTION"))).toBe(true);
+  });
+
+  test("refuses any project other than staging, even when everything agrees and it is confirmed", () => {
+    const errors = errorsOf(
+      goodEnv({ STAGING_SUPABASE_URL: apiUrl(OTHER), STAGING_DB_URL: poolerUrl(OTHER), CONFIRM_STAGING_REF: OTHER }),
+    );
+    expect(errors.join("\n")).toMatch(/STAGING_SUPABASE_URL names project otherotherotherother, which is not the staging project/);
+    expect(errors.join("\n")).toMatch(/STAGING_DB_URL names project otherotherotherother, which is not the staging project/);
+    const direct = errorsOf(goodEnv({ STAGING_SUPABASE_URL: apiUrl(OTHER), STAGING_DB_URL: directUrl(OTHER), CONFIRM_STAGING_REF: OTHER }));
+    expect(direct.join("\n")).toMatch(/not the staging project/);
   });
 
   test("refuses an API URL and database that belong to different projects", () => {

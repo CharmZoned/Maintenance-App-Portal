@@ -174,8 +174,10 @@ export interface ResetSummary {
  *
  * Nothing is dropped. No other schema is written: before truncating it checks
  * that no table outside the data schemas references one inside them, so
- * CASCADE cannot reach beyond the tables listed. Migration history, storage
- * buckets and storage objects are untouched.
+ * CASCADE cannot reach beyond the tables listed. Migration history and storage
+ * buckets are untouched. storage.objects must already be empty (the caller
+ * empties the buckets through the Storage API first); if it is not, the whole
+ * transaction is rolled back and nothing is deleted.
  */
 export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
   await client.query("begin");
@@ -225,6 +227,17 @@ export async function resetDatabase(client: Queryable): Promise<ResetSummary> {
     ).map((r) => r.name);
     for (const sequence of sequences) {
       await client.query(`alter sequence ${sequence} restart`);
+    }
+
+    // Stored files point at their owners in auth.users, so deleting the logins
+    // with files still there fails part-way (or orphans them). The caller
+    // empties the buckets first; this is the check that it worked.
+    const [{ n: leftover }] = await rows<{ n: number }>(client, "select count(*)::int as n from storage.objects");
+    if (leftover > 0) {
+      throw new Error(
+        `Refusing to delete the logins: storage still holds ${leftover} file(s). ` +
+          "Empty every storage bucket first (the reset does this before it wipes the database).",
+      );
     }
 
     const deleted = await client.query("delete from auth.users");

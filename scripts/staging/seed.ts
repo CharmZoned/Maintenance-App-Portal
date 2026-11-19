@@ -23,13 +23,14 @@
 import { pathToFileURL } from "node:url";
 import { seedWorld } from "../../tests/emulator/seed";
 import { countRows, openDatabase, resetDatabase, seedDbOver } from "./database";
-import { checkStagingTarget, createRedactor, describeDbTarget, PRODUCTION_PROJECT_REF, type StagingEnv } from "./guard";
+import { checkStagingTarget, createRedactor, describeDbTarget, PRODUCTION_PROJECT_REF, STAGING_PROJECT_REF, type StagingEnv } from "./guard";
 import {
   assertAdminAccess,
   emptyStorageBuckets,
   seedAuthOver,
   statelessClient,
   uploadDemoDocuments,
+  uploadDemoPhotos,
   verifySignIns,
 } from "./supabase";
 
@@ -62,8 +63,8 @@ export async function main(env: StagingEnv): Promise<number> {
     return 1;
   }
   const target = guard.target;
-  if (target.ref === PRODUCTION_PROJECT_REF) {
-    say("Refusing to run: the target is the production project.");
+  if (target.ref === PRODUCTION_PROJECT_REF || target.ref !== STAGING_PROJECT_REF) {
+    say("Refusing to run: the target is not the staging project.");
     return 1;
   }
   redact = createRedactor([...secrets, target.db.password, target.serviceRoleKey, target.anonKey]);
@@ -75,7 +76,7 @@ export async function main(env: StagingEnv): Promise<number> {
   const admin = statelessClient(target.apiUrl, target.serviceRoleKey);
   let failed = false;
   let stage = "connect to the database";
-  let state: "untouched" | "wiped" | "seeded" = "untouched";
+  let state: "untouched" | "storage emptied" | "wiped" | "seeded" = "untouched";
   let db: Awaited<ReturnType<typeof openDatabase>> | undefined;
 
   try {
@@ -85,19 +86,28 @@ export async function main(env: StagingEnv): Promise<number> {
     stage = "check the service-role key";
     await assertAdminAccess(admin);
 
-    // 2. Wipe: the portal's tables (schemas public and private) and auth.users, one transaction.
-    stage = "reset the database";
+    // 2. Storage first. Uploaded files belong to logins, so they must be gone
+    //    before auth.users is deleted; and a file whose row is gone could never
+    //    be reached again. Any bucket that does not empty stops the reset here,
+    //    before the database is touched.
+    stage = "empty the storage buckets";
     say("\nResetting ...");
+    const buckets = await emptyStorageBuckets(admin);
+    for (const bucket of buckets) {
+      say(`  storage ${bucket.bucket}: ${bucket.emptied ? "emptied" : `NOT emptied - ${bucket.detail}`}`);
+    }
+    state = "storage emptied";
+    if (buckets.some((bucket) => !bucket.emptied)) {
+      throw new Error("not every storage bucket could be emptied, so the database was left as it was.");
+    }
+
+    // 3. Wipe: the portal's tables (schemas public and private) and auth.users,
+    //    one transaction. It re-checks that storage.objects is empty and refuses otherwise.
+    stage = "reset the database";
     const reset = await resetDatabase(db);
     state = "wiped";
     say(`  truncated ${reset.tables.length} tables, restarted ${reset.sequences.length} sequence(s)`);
     say(`  deleted ${reset.usersDeleted} auth user(s)`);
-
-    // 3. Storage objects. Best effort: a leftover file is harmless.
-    stage = "empty the storage buckets";
-    for (const bucket of await emptyStorageBuckets(admin)) {
-      say(`  storage ${bucket.bucket}: ${bucket.emptied ? "emptied" : `NOT emptied - ${bucket.detail}`}`);
-    }
 
     // 4. Seed the demo world, with logins already email-confirmed.
     stage = "seed the demo world";
@@ -106,13 +116,17 @@ export async function main(env: StagingEnv): Promise<number> {
     state = "seeded";
     say(`  created ${Object.keys(world.users).length} logins`);
 
-    // 5. Sample files for the seeded document rows, so Download works.
-    stage = "upload the sample documents";
-    const uploads = await uploadDemoDocuments(admin, world.demo?.documents ?? []);
-    const notUploaded = uploads.filter((u) => !u.ok);
-    say(`  uploaded ${uploads.length - notUploaded.length} of ${uploads.length} sample document(s)`);
-    for (const upload of notUploaded) say(`  NOT uploaded ${upload.path}: ${upload.detail}`);
-    if (notUploaded.length > 0) failed = true;
+    // 5. Sample files for the seeded document and photo rows, so Download and
+    //    the photo strips work.
+    stage = "upload the sample files";
+    const documentUploads = await uploadDemoDocuments(admin, world.demo?.documents ?? []);
+    const photoUploads = await uploadDemoPhotos(admin, world.demo?.photos ?? []);
+    for (const [label, uploads] of [["sample document(s)", documentUploads], ["sample photo(s)", photoUploads]] as const) {
+      const notUploaded = uploads.filter((u) => !u.ok);
+      say(`  uploaded ${uploads.length - notUploaded.length} of ${uploads.length} ${label}`);
+      for (const upload of notUploaded) say(`  NOT uploaded ${upload.path}: ${upload.detail}`);
+      if (notUploaded.length > 0) failed = true;
+    }
 
     // 6. Report.
     stage = "count rows";
@@ -136,6 +150,9 @@ export async function main(env: StagingEnv): Promise<number> {
     failed = true;
     say(`\nFAILED while trying to ${stage}: ${messageOf(error)}`);
     if (state === "untouched") say("Nothing was changed.");
+    if (state === "storage emptied") {
+      say("Stored files were removed; the database and logins were not changed. Fix the cause and run this again.");
+    }
     if (state === "wiped") {
       say("Staging has been wiped and is only partly seeded. Fix the cause and run this again - it is safe to repeat.");
     }

@@ -3,6 +3,7 @@
  * the Auth admin API, emptying storage buckets, and the sign-in check that
  * runs after seeding. Database work is in ./database.ts.
  */
+import { deflateSync } from "node:zlib";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { PERSONAS, type DemoWorld, type PersonaKey, type SeedAuth } from "../../tests/emulator/seed";
 
@@ -47,24 +48,49 @@ export interface BucketResult {
   detail: string;
 }
 
+/** The slice of the Storage API `emptyStorageBuckets` uses; lets tests supply a fake. */
+export interface StorageAdmin {
+  listBuckets(): Promise<{ data: Array<{ id: string }> | null; error: { message: string } | null }>;
+  emptyBucket(id: string): Promise<{ data: { message?: string } | null; error: { message: string } | null }>;
+  from(id: string): {
+    list(path?: string, options?: { limit?: number }): Promise<{ data: unknown[] | null; error: { message: string } | null }>;
+  };
+}
+
+/** How many times a bucket is emptied before giving up: the API removes large buckets in batches. */
+const EMPTY_ATTEMPTS = 5;
+
 /**
  * Remove every object from every storage bucket through the Storage API. The
- * buckets themselves stay. Problems are reported, not thrown: leftover files
- * are unreachable once the rows that pointed at them are gone.
+ * buckets themselves stay. A bucket counts as emptied only once listing it
+ * comes back empty. Problems are reported, not thrown; the reset refuses to
+ * touch the database unless every bucket is emptied, because the logins those
+ * files belong to are deleted next.
  */
-export async function emptyStorageBuckets(admin: SupabaseClient): Promise<BucketResult[]> {
-  const { data: buckets, error } = await admin.storage.listBuckets();
+export async function emptyStorageBuckets(admin: SupabaseClient | StorageAdmin): Promise<BucketResult[]> {
+  const storage = (admin as SupabaseClient).storage ?? (admin as StorageAdmin);
+  const { data: buckets, error } = await storage.listBuckets();
   if (error || !buckets) {
     return [{ bucket: "(all)", emptied: false, detail: error?.message ?? "could not list buckets" }];
   }
   const results: BucketResult[] = [];
   for (const bucket of buckets) {
-    const { data, error: emptyError } = await admin.storage.emptyBucket(bucket.id);
-    results.push({
-      bucket: bucket.id,
-      emptied: !emptyError,
-      detail: emptyError ? emptyError.message : (data?.message ?? "emptied"),
-    });
+    let detail = "still has files";
+    let emptied = false;
+    for (let attempt = 1; attempt <= EMPTY_ATTEMPTS && !emptied; attempt++) {
+      const { error: emptyError } = await storage.emptyBucket(bucket.id);
+      if (emptyError) {
+        detail = emptyError.message;
+        break;
+      }
+      const { data: left, error: listError } = await storage.from(bucket.id).list("", { limit: 1 });
+      if (listError) {
+        detail = `could not check it is empty: ${listError.message}`;
+        break;
+      }
+      emptied = (left ?? []).length === 0;
+    }
+    results.push({ bucket: bucket.id, emptied, detail: emptied ? "emptied" : detail });
   }
   return results;
 }
@@ -122,6 +148,77 @@ export async function uploadDemoDocuments(
       .from(DOCUMENTS_BUCKET)
       .upload(doc.storage_path, samplePdf(doc.title), { contentType: doc.content_type, upsert: true });
     results.push({ path: doc.storage_path, ok: !error, detail: error ? error.message : "uploaded" });
+  }
+  return results;
+}
+
+/** The bucket `DemoWorld.photos[].storage_path` refers to. */
+const PHOTOS_BUCKET = "maintenance-photos";
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Uint8Array): Buffer {
+  const head = Buffer.alloc(8);
+  head.writeUInt32BE(data.length, 0);
+  head.write(type, 4, "latin1");
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+  return Buffer.concat([head, data, crc]);
+}
+
+/**
+ * A small placeholder photo (PNG, 320x240): a diagonal two-tone gradient whose
+ * colours come from `seed`, so each demo photo looks different. Not a real
+ * picture - enough for the photo strips and the lightbox to show something.
+ */
+export function samplePng(seed: string, width = 320, height = 240): Uint8Array {
+  let hash = 0;
+  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const a = [64 + (hash & 0x7f), 64 + ((hash >>> 7) & 0x7f), 64 + ((hash >>> 14) & 0x7f)];
+  const b = [255 - a[0] / 2, 255 - a[1] / 2, 255 - a[2] / 2];
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  for (let y = 0; y < height; y++) {
+    const row = y * (width * 3 + 1);
+    raw[row] = 0; // filter: none
+    for (let x = 0; x < width; x++) {
+      const t = (x / width + y / height) / 2;
+      for (let c = 0; c < 3; c++) raw[row + 1 + x * 3 + c] = Math.round(a[c] * (1 - t) + b[c] * t);
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // colour type: RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", new Uint8Array()),
+  ]);
+}
+
+/**
+ * The world definition seeds MaintenanceRequestPhotos rows only. Put a
+ * placeholder image at each row's storage path so the photos show on staging.
+ */
+export async function uploadDemoPhotos(admin: SupabaseClient, photos: DemoWorld["photos"]): Promise<UploadResult[]> {
+  const results: UploadResult[] = [];
+  for (const photo of photos) {
+    const { error } = await admin.storage
+      .from(PHOTOS_BUCKET)
+      .upload(photo.storage_path, samplePng(photo.storage_path), { contentType: photo.content_type, upsert: true });
+    results.push({ path: photo.storage_path, ok: !error, detail: error ? error.message : "uploaded" });
   }
   return results;
 }

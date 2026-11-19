@@ -5,7 +5,8 @@ name: Reset staging data
 # Actions -> "Reset staging data" -> Run workflow -> branch `staging`.
 #
 # It cannot touch production: scripts/staging/guard.ts refuses unless the
-# configured project is not the production one AND matches the ref typed below.
+# configured project is the staging project pinned there AND matches the ref
+# typed below.
 #
 # Repository secrets (Settings -> Secrets and variables -> Actions):
 #   STAGING_SUPABASE_URL      https://<staging-ref>.supabase.co
