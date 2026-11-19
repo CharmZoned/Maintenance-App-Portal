@@ -21,17 +21,17 @@ foundations) is built; no database or hosting change has been made yet.
 
 ## 2. Where things stand today
 
-Verified against the repo (`master` @ `90a0239`) and the live Supabase org on 2026-11-18.
+Verified against the repo (`main` @ `90a0239`) and the live Supabase org on 2026-11-18.
 
 | Area | Finding | Why it matters |
 |---|---|---|
 | UI hosting | **The portal is not deployed anywhere.** Hosting is parked in `docs/deferred-work.md` (roadmap #3). | "Push the UI to prod" has no target yet. This plan creates staging *and* production hosting. |
 | Environments in code | The app reads only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. It has no idea which environment it is in. | Needed for the staging banner and the one-click buttons. |
-| Production DB | Supabase project `bgjkjtfgrfiszbzatriq`, Pro plan, GitHub integration on, production follows git `master`. All 59 repo migrations are recorded with matching versions. | The history repair described in `docs/ops/schema-migrations.md` §E appears to be done; that doc is stale. |
+| Production DB | Supabase project `bgjkjtfgrfiszbzatriq`, Pro plan, GitHub integration on, production follows git `main`. All 59 repo migrations are recorded with matching versions. | The history repair described in `docs/ops/schema-migrations.md` §E appears to be done; that doc is stale. |
 | Staging DB | A Supabase branch named `staging` **already exists** (`ffczsojnowxthntnliac`) but is broken: last run `MIGRATIONS_FAILED`, not persistent, not linked to a git branch. It is missing `inquiry_email_controls` and `visibility_helpers_require_approved` (a security migration), and records four migrations under different version numbers than the repo. It holds seven `phase4-*@example.test` accounts that have never signed in. | The docs say staging does not exist. It does, and it does not match production. See [ADR-0003](../adr/0003-staging-database.md). |
 | Supabase config | There is **no `supabase/config.toml`** in the repo. | Auth settings — email confirmation, password rules, redirect addresses, the access-token hook — exist only as hand-made dashboard settings on production. A fresh environment does not get them, so staging would behave differently from production. (Correction, 2026-11-18: an earlier draft said RLS depends on the hook. It does not — the access rules look roles up in `user_roles`; the hook is kept for parity only.) |
 | Edge Functions | Three functions in `supabase/functions/` (Stripe intent, Stripe webhook, receipt). **None are deployed** on production. | Fine while Stripe is on hold; staging needs test keys when that changes. |
-| Git | `master` is the default branch and receives every PR. A stale `main` branch sits 42 commits behind. CI runs on PRs to `master` only. | A `staging` branch needs CI and protection too. `main` is a trap for agents. |
+| Git | The production branch (then named `master`, renamed `main` on 2026-11-19) is the default branch and receives every PR. A stale older `main` branch sits 42 commits behind. CI runs on PRs to the production branch only. | A `staging` branch needs CI and protection too. The stale `main` is a trap for agents. |
 | Repo visibility | **The GitHub repo is public.** | No password, hash, or key may be committed — this shapes how demo logins are seeded. See [ADR-0010](../adr/0010-repository-visibility.md). |
 | Local demo | `pnpm dev:local` already runs the portal on an in-process emulator with a seeded world and one login per role (`tests/emulator/seed.ts`). | The staging seed and the one-click buttons can reuse this instead of inventing a second demo world. |
 | Shared DB | The marketing website repo writes to the same production database and has applied its own migrations there. | That is what caused the migration-history drift. See [ADR-0009](../adr/0009-schema-ownership.md). |
@@ -42,12 +42,12 @@ Verified against the repo (`master` @ `90a0239`) and the live Supabase org on 20
 
 | | Local | Staging | Production |
 |---|---|---|---|
-| Git branch | any | `staging` (new default branch) | `master` |
+| Git branch | any | `staging` (new default branch) | `main` |
 | UI | `localhost:5198` via `pnpm dev:local` | Vercel, staging domain, behind a login gate | Vercel, production domain, public |
 | Database | In-process emulator | Supabase persistent branch `staging` | Supabase `bgjkjtfgrfiszbzatriq` |
 | Data | Seeded demo world | Seeded demo world, resettable | Real |
 | One-click role sign-in | Yes | Yes | **Never** — not in the bundle, accounts do not exist |
-| Deploys when | You run it | A PR merges into `staging` | The release PR merges into `master` |
+| Deploys when | You run it | A PR merges into `staging` | The release PR merges into `main` |
 | Stripe / email | None | Test keys, sandboxed mail | Live |
 
 ### 3.2 How a change travels
@@ -59,7 +59,7 @@ flowchart LR
   B --> D[Staging site<br/>Vercel]
   C --> E{You test with<br/>the 4 role buttons}
   D --> E
-  E -->|approve| F[Release PR<br/>staging to master]
+  E -->|approve| F[Release PR<br/>staging to main]
   F --> G[Production DB<br/>same migrations]
   F --> H[Production site<br/>same commit]
 ```
@@ -69,7 +69,7 @@ flowchart LR
 2. Merging to `staging` applies new migrations to the staging database and deploys the
    staging site. Both happen automatically.
 3. You open the staging site, click a role, and test.
-4. When satisfied, you approve one **Release** pull request from `staging` into `master`.
+4. When satisfied, you approve one **Release** pull request from `staging` into `main`.
    That is the "push to prod" button. It applies the same migration files to production
    and deploys the same commit to the production site.
 
@@ -149,7 +149,7 @@ Settled by the owner on 2026-11-18:
 
 | # | Decision | Outcome |
 |---|---|---|
-| [0001](../adr/0001-environments-and-promotion.md) | Release flow | `staging` branch → release PR → `master` |
+| [0001](../adr/0001-environments-and-promotion.md) | Release flow | `staging` branch → release PR → `main` |
 | [0002](../adr/0002-ui-hosting.md) | UI hosting | Vercel (existing Pro team) |
 | [0003](../adr/0003-staging-database.md) | Broken staging database | Wipe and rebuild as a persistent branch |
 | [0004](../adr/0004-database-promotion.md) | Database releases | Applied to production automatically when the release PR is approved |
@@ -165,7 +165,7 @@ Smaller items, with the default the build plan assumes until the owner says othe
 | Item | Default |
 |---|---|
 | Portal hostnames | Staging starts on the Vercel-provided address; real hostnames are needed only for Phase 4 |
-| Stale `main` branch (42 commits behind `master`) | Left alone until the owner approves deleting it |
+| Stale `main` branch (42 commits behind production) | **Resolved 2026-11-19:** the owner deleted it and renamed the production branch from `master` to `main` |
 | Staging email | Supabase's built-in mailer |
 | Stripe and the three Edge Functions | Not deployed to staging or production until the Stripe hold lifts |
 | Point-in-time recovery on production | Not purchased; revisit when real rent payments flow through the portal |
@@ -177,7 +177,7 @@ Each phase is independently shippable and leaves production untouched until Phas
 | Phase | Work | Owner action needed | Size |
 |---|---|---|---|
 | **0 — Owner setup** | Move GitHub to a paid plan, then make the repo private. | See [`BUILD_PLAN.md`](BUILD_PLAN.md) | — |
-| **1 — Repo foundations** | Create `staging` branch from `master`; make it the default; extend CI to it; add `supabase/config.toml`; add `VITE_APP_ENV` and an `env.ts` module; add `vercel.json` (SPA fallback); update the stale ops docs. | Change default branch and branch protection in GitHub settings | S |
+| **1 — Repo foundations** | Create `staging` branch from `main`; make it the default; extend CI to it; add `supabase/config.toml`; add `VITE_APP_ENV` and an `env.ts` module; add `vercel.json` (SPA fallback); update the stale ops docs. | Change default branch and branch protection in GitHub settings | S |
 | **2 — Staging database** | Rebuild the staging branch as persistent and linked to git `staging`; confirm all migrations apply from zero; confirm the access-token hook is on; add the seed script and the "Reset staging data" workflow. | Add secrets to GitHub (wipe already approved) | M |
 | **3 — Staging site** | Vercel project; staging environment variables; login gate; staging domain. Build the quick sign-in card, ribbon, role switcher, `?as=` deep link, and the production-bundle guard test. | Invite testers as Viewers; DNS record | M |
 | **4 — Production site** | Production domain and environment; Supabase Auth site URL and redirect list; enable production deploys on the Supabase integration; release-PR template; rehearse one full release end to end. | DNS record; approve first release PR | S |
@@ -200,9 +200,9 @@ Each phase is independently shippable and leaves production untouched until Phas
 |---|---|
 | Quick sign-in leaks into production | Four independent guards (§3.3); CI test on the production bundle |
 | Staging gate is switched off or misconfigured, exposing the demo password | Private-window check is part of the definition of done and the post-deploy smoke test; staging holds only synthetic data; password rotates by re-running the seed |
-| A migration works on staging but fails on production because the data differs | Supabase migration check on the release PR runs against a branch of production's schema; migrations stay additive; data-touching migrations get a dry run and a backup first |
+| A migration works on staging but fails on production because the data differs | Every waiting migration is checked against production's live data before the release PR (the `Supabase Preview` check is skipped today and validates nothing — see the build plan's revisions); migrations stay additive; data-touching migrations get a dry run and a backup first |
 | UI and database deploy at slightly different moments during a release | Expand-then-contract rule: a migration must work with the previous UI; removals ship one release later |
-| `staging` and `master` drift apart | `master` accepts merges only from `staging`; release PRs use merge commits, never squash |
+| `staging` and `main` drift apart | `main` accepts merges only from `staging`; release PRs use merge commits, never squash |
 | Fork pull requests trigger builds with staging secrets while the repo is still public | Demo variables scoped to the `staging` branch and team-authored previews only; Vercel requires approval for fork deploys |
 | Website repo applies migrations to production again | ADR-0009; drift-check workflow in Phase 5 flags it within a day |
 | Branch compute is not covered by the Supabase spend cap | One persistent branch only (~$10/month); ephemeral PR branches stay off unless ADR-0008 changes |

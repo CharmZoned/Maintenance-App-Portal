@@ -1,6 +1,6 @@
 # Staging environment — build plan
 
-**Status:** Phase 1 built on branch `claude/amazing-pasteur-tzcs1d`, awaiting merge into `staging` and owner action O3 · 2026-11-18
+**Status:** Phase 1 merged (2026-11-19). Phase 2 in progress: new staging database created (`gzwcegtwzzhtstgzphaw`) but empty; seed, reset and rebuild tooling built; waiting on the owner steps listed under Phase 2 · 2026-11-19
 **Design and reasoning:** [`DESIGN_PLAN.md`](DESIGN_PLAN.md) · **Decisions:** [`docs/adr/`](../adr/README.md)
 
 This is the ordered list of work to turn the approved design into a running staging
@@ -55,7 +55,7 @@ safeguards as `master`. No effect on production.
 - A test PR from any branch other than `staging` into `master` is blocked.
 - `pnpm build` produces a working app with no environment variable other than the two
   Supabase ones (existing behaviour unchanged).
-- The `Supabase Preview` check passes on the PR that adds `config.toml`.
+- The `Supabase Preview` check does not fail on the PR that adds `config.toml` (it reported "skipped" — see Plan revisions).
 
 ### Production settings to confirm
 
@@ -69,24 +69,81 @@ Hooks, Emails) so staging can be set to match. None blocks Phase 2.
 - Site URL and the redirect allow-list.
 - Custom SMTP or Supabase's built-in mailer.
 
+## Plan revisions — 2026-11-19
+
+Found while reviewing the repo and both databases before starting Phase 2.
+
+1. **The `Supabase Preview` check validates nothing today.** It reports "skipped" on every
+   pull request, including ones that add migrations (#78, #81, #82). A skipped check counts
+   as passing, so requiring it does no harm, but it is not the safety net the plan assumed.
+   The repo's migrations have therefore never been run from zero on real Supabase — only
+   on the in-repo emulator. Consequences:
+   - The staging database is the first real test of the migrations, and after Phase 2 it
+     is the gate before production: a migration merged to `staging` runs there first.
+   - Optional owner setting, not required: turning on **Automatic branching** in the
+     Supabase GitHub integration makes the check real (a short-lived database per pull
+     request, billed by the hour). [ADR-0008](../adr/0008-pr-previews.md) chose not to do
+     this for now.
+2. **A branch copied from production's history would be incomplete.** 24 of production's 59
+   migration records hold no SQL (they were stamped by the history repair). Any path that
+   builds a branch from production's records, rather than from the files in this repo,
+   would silently miss those 24 — the likely cause of the old branch's failure. Phase 2
+   therefore adds a "rebuild from the repo" step (2.3) that does not depend on how
+   Supabase creates the branch.
+3. **`staging` is now two migrations ahead of production** (61 files vs. 59 applied) after
+   the worker job pool work (#82). That is the intended state — changes wait on `staging`
+   for a release — but it means the first release is not a harmless rehearsal: it carries
+   a 1,274-line migration that replaces `MaintenanceRequests.cost` with two price tables.
+   Task 4.5 is changed accordingly.
+4. **The demo world must cover the job pool.** A worker with no services listed sees no
+   pooled jobs, so the Maintenance persona is seeded with services, a pooled job, and both
+   prices (2.6).
+
 ## Phase 2 — Staging database
 
 **Goal:** a staging database built entirely from the repo, holding the demo world.
 
 | # | Who | Task |
 |---|---|---|
-| 2.1 | Agent | Announce, then delete the broken branch `ffczsojnowxthntnliac`. This destroys its seven `phase4-*` accounts and cannot be undone (approved in [ADR-0003](../adr/0003-staging-database.md)). |
-| 2.2 | Agent | Create a persistent Supabase branch `staging` linked to git `staging`. Put its project ref in `[remotes.staging]` in `config.toml` and in the ops doc, then push to `staging` — Supabase applies `config.toml` to a persistent branch only once a `[remotes]` block names it. |
-| 2.3 | Agent | Confirm all 59 migrations applied from zero and the recorded versions equal the repo filenames. Fix any failure with a new forward migration, never by editing an applied file. |
+| 2.1 ✅ | Agent | Announce, then delete the broken branch `ffczsojnowxthntnliac`. **Done 2026-11-19**; its seven `phase4-*` accounts are gone (approved in [ADR-0003](../adr/0003-staging-database.md)). |
+| 2.2 | Owner + Agent | Create a persistent Supabase branch `staging` linked to git `staging`. **Created 2026-11-19: project ref `gzwcegtwzzhtstgzphaw`**, recorded in `[remotes.staging]` in `config.toml`. It came up empty (no tables, no migrations, status `MIGRATIONS_FAILED`), as revision 2 predicted, and it is not yet persistent or linked to git — both are owner dashboard settings (see the steps below). |
+| 2.3 | Agent | Rebuild from the repo and verify. Add a manually triggered "Rebuild staging database" workflow that drops and re-applies every file in `supabase/migrations/` against staging, guarded against production like the reset workflow. Run it, then confirm the recorded versions equal the repo filenames (61 as of 2026-11-19) and the schema matches the emulator's. Fix any failure with a new forward migration, never by editing an applied file. **Workflow built 2026-11-19** (`staging-rebuild.yml`); not yet run — it needs the database and `STAGING_DB_URL`. |
 | 2.4 | Agent | Verify what migrations do not carry: email confirmation and the 8-character minimum are enforced; a signed-in JWT contains `user_role`; the four storage buckets exist; the realtime publication exists. Check whether the three on-hold Edge Functions were deployed to the branch and remove them if so. |
 | 2.5 | Agent | Run Supabase security and performance advisors on staging and compare with production. |
-| 2.6 | Agent | Seed: split `tests/emulator/seed.ts` into one world definition with two targets (emulator, real Supabase). Extend the world: active and ended leases, several months of rent charges and payments, maintenance requests in every status with photos and comments, property documents, a pending account. Add `scripts/staging/seed.ts`, which aborts unless the target is the staging project ref and creates demo users already email-confirmed (the built-in mailer cannot deliver to demo addresses). |
-| 2.7 | Owner | Add secrets: `STAGING_SUPABASE_URL`, `STAGING_SERVICE_ROLE_KEY`, `STAGING_DB_URL`, `STAGING_DEMO_PASSWORD` (a long random value; it is reused in Vercel in Phase 3). |
-| 2.8 | Agent | Add the manually triggered "Reset staging data" workflow: clear domain tables, delete demo users, re-seed. Run it once. |
+| 2.6 ✅ | Agent | Seed: split `tests/emulator/seed.ts` into one world definition with two targets (emulator, real Supabase). Extend the world: active and ended leases, several months of rent charges and payments, maintenance requests in every status with photos and comments, property documents, a pending account. Add `scripts/staging/seed.ts`, which aborts unless the target is the staging project ref and creates demo users already email-confirmed (the built-in mailer cannot deliver to demo addresses). **Built 2026-11-19**; verified on the emulator and a local Postgres 16, not yet on Supabase. |
+| 2.7 | Owner | Add secrets: `STAGING_SUPABASE_URL`, `STAGING_SERVICE_ROLE_KEY`, `STAGING_DB_URL` (the **session pooler** connection string), `STAGING_DEMO_PASSWORD` (a random value of 16+ characters; it is reused in Vercel in Phase 3). Optional: `STAGING_ANON_KEY` turns on the sign-in check after seeding. Both workflows only appear in the Actions tab once their files are on the default branch (`staging`). |
+| 2.8 | Agent | Add the manually triggered "Reset staging data" workflow: clear domain tables, delete demo users, re-seed. Run it once. **Workflow built 2026-11-19** (`staging-reset.yml`); not yet run — it needs the database and the secrets. |
+
+### Owner steps to finish Phase 2
+
+In this order. The agent verifies the database after steps 4 and 5.
+
+1. **Merge the Phase 2 pull request into `staging`.** The two workflows below only appear
+   in GitHub's Actions tab once their files are on the default branch.
+2. **Supabase dashboard → Manage Branches → `staging`:** make the branch **persistent**, and
+   link it to the GitHub branch `staging`. Until it is persistent Supabase may pause or
+   delete it; until it is linked, merges into git `staging` do not reach it.
+3. **Add repository secrets** (GitHub → Settings → Secrets and variables → Actions). In the
+   Supabase dashboard, switch to the `staging` branch first — each branch has its own keys.
+
+   | Secret | Value |
+   |---|---|
+   | `STAGING_SUPABASE_URL` | `https://gzwcegtwzzhtstgzphaw.supabase.co` |
+   | `STAGING_SERVICE_ROLE_KEY` | Settings → API Keys → the `service_role` (or secret) key |
+   | `STAGING_DB_URL` | Connect → **Session pooler** → copy the URI and replace `[YOUR-PASSWORD]` with the database password. Not the direct string, and not port 6543. |
+   | `STAGING_DEMO_PASSWORD` | A new random password, 16+ characters, letters and digits. Keep a copy: it is reused in Vercel in Phase 3. |
+   | `STAGING_ANON_KEY` (optional) | Settings → API Keys → the publishable key. Turns on the sign-in check after seeding. |
+
+4. **Actions → "Rebuild staging database" → Run workflow** on branch `staging`, typing
+   `gzwcegtwzzhtstgzphaw` to confirm. This applies every migration file from zero.
+5. **Actions → "Reset staging data" → Run workflow** the same way. This loads the demo world.
+
+If step 4 fails on a migration, that is a real finding: the file works on the emulator but
+not on Supabase. It is fixed with a new forward migration, then step 4 is run again.
 
 **Checks**
 
-- Staging's migration list is identical to `supabase/migrations/`.
+- Staging's migration list is identical to `supabase/migrations/`, and its tables, functions and policies match what the emulator builds from the same files.
 - The reset workflow finishes green, twice in a row (it must be repeatable).
 - Each of the four demo accounts can sign in through the API and sees only what its role
   allows — the existing R7 permission tests are the reference.
@@ -127,7 +184,7 @@ Hooks, Emails) so staging can be set to match. None blocks Phase 2.
 | 4.2 | Owner + Agent | Configure Vercel's production environment (production Supabase URL and key, `VITE_APP_ENV=production`). |
 | 4.3 | Owner + Agent | Set production's Supabase Auth site URL and redirect list to the production hostname. This is a one-time dashboard change on production, recorded in the ops doc. |
 | 4.4 | Owner | Turn on "Deploy to production" in the Supabase GitHub integration. From then on the website repo applies no migrations ([ADR-0009](../adr/0009-schema-ownership.md)). |
-| 4.5 | Agent | Rehearsal release: one harmless additive migration and one visible UI change, taken through `staging` → test → release PR → `master`. |
+| 4.5 | Agent | First release. Before opening the release PR, list every migration waiting on `staging` and check each against production's live data (as of 2026-11-19: the worker job pool migrations, which move `MaintenanceRequests.cost` into the landlord price table and drop the column). Take a production backup first. Then `staging` → test → release PR → `master`. |
 | 4.6 | Owner | Approve the rehearsal release PR. |
 | 4.7 | Agent | Verify: production migration list gained exactly the new version; production site shows the UI change; staging and production are on the same commit. Write the release runbook from what actually happened. |
 | 4.8 | Owner | Point the marketing website's portal links at the production hostname (website repo; closes roadmap #3 in `docs/deferred-work.md`). |

@@ -12,7 +12,8 @@
     "test:browser": "playwright test --trace off",
     "test:all": "tsx tests/dashboard/run.ts all",
     "test:ui": "tsx tests/dashboard/server.ts",
-    "dev:local": "tsx tests/emulator/dev-local.ts"
+    "dev:local": "tsx tests/emulator/dev-local.ts",
+    "staging:seed": "tsx scripts/staging/seed.ts"
   },
   "dependencies": {
     "@clawnify/app": "^0.2.1",
@@ -43,9 +44,11 @@
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "pg": "^8.23.1",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",

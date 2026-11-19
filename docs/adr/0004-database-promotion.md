@@ -4,14 +4,14 @@
 
 ## Context
 
-Today a migration file is merged to `master`, then someone applies the SQL to production
+Today a migration file is merged to `main`, then someone applies the SQL to production
 by hand (Supabase MCP or the SQL editor). That manual step is what stamped mismatched
 version numbers into production's history and produced the repair work in
 `docs/ops/schema-migrations.md`.
 
 The Supabase GitHub integration is already connected and production already follows
-`master`. Its "deploy to production" option applies new migrations, declared Edge
-Functions, and declared storage buckets when `master` changes. It does not apply API or
+`main`. Its "deploy to production" option applies new migrations, declared Edge
+Functions, and declared storage buckets when `main` changes. It does not apply API or
 Auth settings, and it never runs seed files against production.
 
 ## Options
@@ -43,12 +43,22 @@ Option 1, with these rules:
   two apart. Every migration must work with the UI that is already live: add first, switch
   the UI, remove in a later release.
 - **The migration check is required.** The Supabase check on a PR runs its migrations on a
-  throwaway branch. Make it a required status check on `staging` and `master`.
+  throwaway branch. Make it a required status check on `staging` and `main`.
 - **Risky migrations get extra care.** Anything that rewrites or deletes data states its
   rollback in the PR, is rehearsed on staging against realistic volume, and is preceded by
   an on-demand production backup.
 - **Reference data ships as a migration.** If production needs a row, it is an idempotent
   `insert … on conflict do nothing` in a migration, reviewed like any other change.
+
+## Amendment — 2026-11-19
+
+The rule "the migration check is required" does not do what this ADR assumed. The
+`Supabase Preview` check reports "skipped" on every pull request because automatic
+branching is off in the Supabase GitHub integration, and a skipped check passes. The
+decision stands, with the gate restated: a migration is proven by running on the staging
+database after merge to `staging`, and by a check against production's live data before
+each release. Turning on automatic branching would make the pull-request check real; that
+remains an owner option ([ADR-0008](0008-pr-previews.md)).
 
 ## Consequences
 
