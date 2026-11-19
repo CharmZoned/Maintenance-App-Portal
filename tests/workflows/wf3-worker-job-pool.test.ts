@@ -176,13 +176,18 @@ describe("[WF3] Worker job pool", () => {
     expect(await pricesSeenBy(sam, requestId), "the worker sees their price, never the landlord's").toEqual([140, null]);
     expect(new Date(jobs![0].scheduled_for).toISOString()).toBe(when);
 
-    const { data: property } = await sam
-      .from("Properties")
-      .select("street_address, city")
-      .eq("id", world.property.id);
-    expect(property).toEqual([{ street_address: "12 Maple St", city: "Baltimore" }]);
-    const { data: unit } = await sam.from("Units").select("unit_label").eq("id", world.units.a.id);
-    expect(unit).toEqual([{ unit_label: "1A" }]);
+    const { data: locations } = await sam.rpc("list_available_job_locations");
+    expect(locations).toEqual([
+      {
+        maintenance_request_id: requestId,
+        unit_label: "1A",
+        property_name: "Maple Court",
+        street_address: "12 Maple St",
+        city: "Baltimore",
+        state: "MD",
+        zip: "21201",
+      },
+    ]);
 
     const { data: photos } = await sam
       .from("MaintenanceRequestPhotos")
@@ -208,13 +213,19 @@ describe("[WF3] Worker job pool", () => {
         .select(),
       "no chat before accepting",
     );
-    // Nothing else in the building opens up either.
-    expect((await sam.from("Units").select("id")).data?.map((u) => Number(u.id))).toEqual([world.units.a.id]);
+    // The address comes from list_available_job_locations() only: the unit and
+    // property records (notes, rent, listing details) stay closed.
+    expect((await sam.from("Units").select("id, notes")).data).toEqual([]);
+    expect((await sam.from("Properties").select("id, notes")).data).toEqual([]);
   });
 
   test("Worker with other services · does not see the job and cannot accept it", async () => {
     expect(await visibleIds(riley)).toEqual([]);
     expect((await riley.from("Properties").select("id")).data).toEqual([]);
+    expect((await riley.rpc("list_available_job_locations")).data).toEqual([]);
+    for (const client of [tenant, landlord]) {
+      expect((await client.rpc("list_available_job_locations")).data).toEqual([]);
+    }
     const res = await riley.rpc("accept_maintenance_request", { p_request_id: requestId });
     expect(res.error?.message).toMatch(/not available/);
   });
@@ -249,7 +260,7 @@ describe("[WF3] Worker job pool", () => {
   });
 
   test("Another worker · is told the job is already taken", async () => {
-    await sql(`update public."Staff" set services = '{}' where id = $1`, [world.staff.worker2.id]);
+    await sql(`update public."Staff" set services = '{Plumbing,Electrical}' where id = $1`, [world.staff.worker2.id]);
     expect(await visibleIds(riley), "an accepted job leaves the pool").toEqual([]);
     const res = await riley.rpc("accept_maintenance_request", { p_request_id: requestId });
     expect(res.error?.message).toMatch(/already been taken/);
@@ -379,11 +390,17 @@ describe("[WF3] Worker job pool", () => {
 
   test("Tenant · confirms it is fixed after the second visit", async () => {
     await signInApp("worker");
-    await data.updateWorkOrder(
-      requestId,
-      { status: "closed", resolution_notes: "Re-seated the cartridge and replaced the O-ring." },
-      { previousStatus: "in_progress" },
+    const closeAgain = () =>
+      data.updateWorkOrder(
+        requestId,
+        { status: "closed", resolution_notes: "Re-seated the cartridge and replaced the O-ring." },
+        { previousStatus: "in_progress" },
+      );
+    await expect(closeAgain(), "the photo from before the reopen does not prove the second fix").rejects.toThrow(
+      /photo of the finished work/,
     );
+    await data.uploadMaintenancePhoto(requestId, pngFile("second-visit.png"));
+    await closeAgain();
     const answered = expectOk(
       await tenant.rpc("confirm_maintenance_request_fixed", { p_request_id: requestId, p_fixed: true }),
       "tenant confirms",
@@ -460,7 +477,7 @@ describe("[WF3] Worker job pool", () => {
 
   describe("the pool", () => {
     test("when two workers accept at the same moment, exactly one gets the job", async () => {
-      await sql(`update public."Staff" set services = '{}' where id = any($1::bigint[])`, [
+      await sql(`update public."Staff" set services = '{Plumbing}' where id = any($1::bigint[])`, [
         `{${world.staff.worker.id},${world.staff.worker2.id}}`,
       ]);
       const id = await newRequest("Race for the job");
@@ -514,6 +531,118 @@ describe("[WF3] Worker job pool", () => {
       await signInApp("worker");
       for (let i = 0; i < 5; i++) await data.uploadMaintenancePhoto(id, pngFile(`w${i}.png`));
       await expect(data.uploadMaintenancePhoto(id, pngFile("w6.png"))).rejects.toThrow(/at most 5 work photos/);
+    });
+  });
+
+  describe("the completion photo is this worker's, from this hold of the job", () => {
+    test("a previous worker's photo does not let the next worker complete", async () => {
+      const id = await newRequest("Handed over mid-job");
+      await push(id, 90);
+      expectOk(await sam.rpc("accept_maintenance_request", { p_request_id: id }), "Sam accepts");
+      await signInApp("worker");
+      await data.uploadMaintenancePhoto(id, pngFile("sams-progress.png"));
+      expectOk(await sam.rpc("release_maintenance_request", { p_request_id: id, p_reason: "Out sick." }), "Sam releases");
+
+      await signInApp("admin");
+      await data.updateWorkOrder(
+        id,
+        { status: "scheduled", assigned_staff_id: world.staff.worker2.id, scheduled_at: inDays(2, 15) },
+        { previousStatus: "open" },
+      );
+
+      await signInApp("worker2");
+      await data.updateWorkOrder(id, { status: "in_progress" }, { previousStatus: "scheduled" });
+      const close = () =>
+        data.updateWorkOrder(id, { status: "closed", resolution_notes: "Finished the job." }, { previousStatus: "in_progress" });
+      await expect(close()).rejects.toThrow(/photo of the finished work/);
+      await data.uploadMaintenancePhoto(id, pngFile("rileys-finish.png"));
+      expect(await close()).toMatchObject({ status: "closed" });
+    });
+
+    test("a worker who releases and is given the job back needs a new photo", async () => {
+      const id = await newRequest("Back to the same worker");
+      await push(id, 90);
+      expectOk(await sam.rpc("accept_maintenance_request", { p_request_id: id }), "Sam accepts");
+      await signInApp("worker");
+      await data.uploadMaintenancePhoto(id, pngFile("first-go.png"));
+      expectOk(await sam.rpc("release_maintenance_request", { p_request_id: id, p_reason: "Wrong part." }), "Sam releases");
+
+      await signInApp("admin");
+      await data.updateWorkOrder(
+        id,
+        { status: "scheduled", assigned_staff_id: world.staff.worker.id, scheduled_at: inDays(2, 15) },
+        { previousStatus: "open" },
+      );
+
+      await signInApp("worker");
+      await data.updateWorkOrder(id, { status: "in_progress" }, { previousStatus: "scheduled" });
+      const close = () =>
+        data.updateWorkOrder(id, { status: "closed", resolution_notes: "Fitted the right part." }, { previousStatus: "in_progress" });
+      await expect(close()).rejects.toThrow(/photo of the finished work/);
+      await data.uploadMaintenancePhoto(id, pngFile("second-go.png"));
+      expect(await close()).toMatchObject({ status: "closed" });
+    });
+
+    test("uploads fired at the same moment still cannot pass the cap of 5", async () => {
+      const id = await newRequest("Upload race");
+      await signInApp("tenant");
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, (_, i) => data.uploadMaintenancePhoto(id, pngFile(`race-${i}.png`))),
+      );
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(5);
+      const [{ n }] = await sql<{ n: string }>(
+        `select count(*)::text as n from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`,
+        [id],
+      );
+      expect(Number(n)).toBe(5);
+    });
+  });
+
+  describe("services decide which jobs a worker sees", () => {
+    test("a worker with no services listed sees no pushed jobs at all", async () => {
+      const id = await newRequest("Not for a blank profile");
+      await push(id, 70);
+      await sql(`update public."Staff" set services = '{}' where id = $1`, [world.staff.worker2.id]);
+
+      expect(await visibleIds(riley)).not.toContain(id);
+      expect((await riley.rpc("list_available_job_locations")).data).toEqual([]);
+      expect(await pricesSeenBy(riley, id)).toEqual([null, null]);
+      expect(
+        (await riley.from("MaintenanceRequestPhotos").select("id").eq("maintenance_request_id", id)).data,
+      ).toEqual([]);
+      const res = await riley.rpc("accept_maintenance_request", { p_request_id: id });
+      expect(res.error?.message).toMatch(/not available/);
+    });
+
+    test("a name-only profile save leaves the services list exactly as it was", async () => {
+      await sql(`update public."Staff" set services = '{Electrical}', company_name = 'Wrench Co', phone = '555-0111' where id = $1`, [
+        world.staff.worker2.id,
+      ]);
+      const pooled = await newRequest("Plumbing job Riley must not see");
+      await push(pooled, 70);
+
+      const saved = expectOk(
+        await riley.rpc("update_staff_profile", { p_first_name: "Riley", p_last_name: "Wrench-Lee" }),
+        "name-only save",
+      ) as { last_name: string; services: string[]; company_name: string; phone: string };
+      expect(saved).toMatchObject({
+        last_name: "Wrench-Lee",
+        services: ["Electrical"],
+        company_name: "Wrench Co",
+        phone: "555-0111",
+      });
+      expect(await visibleIds(riley), "the save opened nothing").not.toContain(pooled);
+
+      // Clearing is explicit: '' clears company, [] means no jobs.
+      const cleared = expectOk(
+        await riley.rpc("update_staff_profile", { p_company_name: "", p_services: [] }),
+        "explicit clear",
+      ) as { last_name: string; services: string[]; company_name: string | null; phone: string };
+      expect(cleared).toMatchObject({ last_name: "Wrench-Lee", services: [], company_name: null, phone: "555-0111" });
+      expect(await visibleIds(riley)).not.toContain(pooled);
+
+      const blank = await riley.rpc("update_staff_profile", { p_first_name: "  " });
+      expect(blank.error?.message).toMatch(/cannot be blank/);
     });
   });
 

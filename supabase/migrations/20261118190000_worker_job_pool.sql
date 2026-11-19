@@ -13,14 +13,18 @@
 --     and the tenant sees neither. They live in two side tables with their own
 --     row rules; the old single MaintenanceRequests.cost column is removed.
 --   * Admin pushes a job to the pool (offered_at). Workers whose services match
---     the category see it. There is no decline: a worker accepts it or leaves it.
+--     the category see it; a worker with no services listed sees none. There is
+--     no decline: a worker accepts it or leaves it.
 --     First accept wins. Admin can still assign one worker directly.
---   * Before accepting, a worker sees the request row, its photos and the
---     property/unit address. NOT comments, status history, staff notes or the
---     tenant record: those still require assignment.
+--   * Before accepting, a worker sees the request row, its photos, their price
+--     and the address (address fields only, through
+--     list_available_job_locations(); the Units/Properties rows themselves
+--     stay closed until assignment). NOT comments, status history, staff notes
+--     or the tenant record: those still require assignment.
 --   * A worker can release a job they accepted (reason required). It goes back
 --     to the admin unassigned and is NOT re-offered automatically.
---   * A worker must upload at least one photo before completing a job.
+--   * A worker must upload their own photo, taken during their current hold of
+--     the job, before completing it.
 --   * After completion the tenant can confirm it is fixed, or say it is not.
 --   * Every non-admin gets one direct thread with the Landlord Gopher office
 --     (worker <-> office, landlord <-> office). Job chat stays on
@@ -53,7 +57,7 @@ COMMENT ON TABLE public."Staff" IS
   'People who work jobs: outside maintenance professionals (formerly also "vendors") and office staff. Login is linked through user_roles.staff_id.';
 COMMENT ON COLUMN public."Staff".company_name IS 'Company the worker trades as. NULL for an individual or office staff.';
 COMMENT ON COLUMN public."Staff".services IS
-  'Maintenance categories this worker takes (same values as MaintenanceRequests.category). Empty = sees every pushed job.';
+  'Maintenance categories this worker takes (same values as MaintenanceRequests.category). Empty = sees no pushed jobs.';
 COMMENT ON TABLE public."Vendors" IS
   'Deprecated 2026-11-18: vendors are now Staff rows (company_name, phone, services). Kept until the portal stops reading it.';
 
@@ -102,7 +106,7 @@ COMMENT ON COLUMN public."MaintenanceRequests".released_at IS
 COMMENT ON COLUMN public."MaintenanceRequests".tenant_fix_response IS
   'Tenant answer after completion: confirmed | not_fixed. Cleared when the request is reopened.';
 CREATE INDEX IF NOT EXISTS maintenance_requests_pool_idx
-  ON public."MaintenanceRequests" (scheduled_for)
+  ON public."MaintenanceRequests" (category, scheduled_for)
   WHERE offered_at IS NOT NULL AND assigned_staff_id IS NULL AND status = 'Open';
 CREATE INDEX IF NOT EXISTS maintenance_requests_released_by_idx
   ON public."MaintenanceRequests" (released_by_staff_id);
@@ -209,7 +213,8 @@ AS $function$
          AND request.status = 'Open'
          AND request.offered_at IS NOT NULL
          AND request.assigned_staff_id IS NULL
-         AND (me.services = '{}'::text[] OR request.category = ANY (me.services))
+         -- An empty services list matches nothing (never "everything").
+         AND request.category = ANY (me.services)
          AND EXISTS (
            SELECT 1 FROM public."MaintenanceRequestWorkerPrices" AS price
            WHERE price.maintenance_request_id = request.id
@@ -233,54 +238,11 @@ AS $function$
   )
 $function$;
 
-CREATE OR REPLACE FUNCTION private.job_available_for_unit(target_unit bigint)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path TO ''
-AS $function$
-  SELECT (SELECT private.is_approved_worker())
-     AND EXISTS (
-       SELECT 1
-       FROM public."MaintenanceRequests" AS request
-       WHERE request.unit_id = target_unit
-         AND request.status = 'Open'
-         AND request.offered_at IS NOT NULL
-         AND request.assigned_staff_id IS NULL
-         AND private.job_available_to_me(request.id)
-     )
-$function$;
-
-CREATE OR REPLACE FUNCTION private.job_available_for_property(target_property bigint)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path TO ''
-AS $function$
-  SELECT (SELECT private.is_approved_worker())
-     AND EXISTS (
-       SELECT 1
-       FROM public."MaintenanceRequests" AS request
-       LEFT JOIN public."Units" AS unit ON unit.id = request.unit_id
-       WHERE (request.property_id = target_property OR unit.property_id = target_property)
-         AND request.status = 'Open'
-         AND request.offered_at IS NOT NULL
-         AND request.assigned_staff_id IS NULL
-         AND private.job_available_to_me(request.id)
-     )
-$function$;
-
 REVOKE ALL ON FUNCTION private.is_approved_worker() FROM public, anon;
 REVOKE ALL ON FUNCTION private.job_available_to_me(bigint) FROM public, anon;
-REVOKE ALL ON FUNCTION private.job_available_for_unit(bigint) FROM public, anon;
-REVOKE ALL ON FUNCTION private.job_available_for_property(bigint) FROM public, anon;
 REVOKE ALL ON FUNCTION private.landlord_owns_request(bigint) FROM public, anon;
 GRANT EXECUTE ON FUNCTION private.is_approved_worker() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION private.job_available_to_me(bigint) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION private.job_available_for_unit(bigint) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION private.job_available_for_property(bigint) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION private.landlord_owns_request(bigint) TO authenticated, service_role;
 
 -- ── Who reads which price ───────────────────────────────────────────
@@ -416,27 +378,52 @@ CREATE POLICY maintenance_photos_storage_select ON storage.objects
     )
   );
 
-DROP POLICY IF EXISTS units_select ON public."Units";
-CREATE POLICY units_select ON public."Units"
-  FOR SELECT TO authenticated
-  USING (
-    ((SELECT private.current_role()) = 'admin'::public.app_role)
-    OR (SELECT private.landlord_owns_unit("Units".id))
-    OR (id = (SELECT private.current_tenant_unit_id()))
-    OR (SELECT private.staff_assigned_to_unit("Units".id))
-    OR (SELECT private.job_available_for_unit("Units".id))
-  );
+-- Address of the jobs the calling worker can accept. Units and Properties rows
+-- are NOT opened to the pool (they carry notes, rent and listing fields), so
+-- this returns the address fields only, in one set-based query.
+CREATE OR REPLACE FUNCTION public.list_available_job_locations()
+RETURNS TABLE (
+  maintenance_request_id bigint,
+  unit_label text,
+  property_name text,
+  street_address text,
+  city text,
+  state text,
+  zip text
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO ''
+AS $function$
+  SELECT request.id,
+         unit.unit_label,
+         property.property_name,
+         property.street_address,
+         property.city,
+         property.state,
+         property.zip
+  FROM public."Staff" AS me
+  JOIN public."MaintenanceRequests" AS request
+    ON request.category = ANY (me.services)
+  JOIN public."MaintenanceRequestWorkerPrices" AS price
+    ON price.maintenance_request_id = request.id
+  LEFT JOIN public."Units" AS unit ON unit.id = request.unit_id
+  LEFT JOIN public."Properties" AS property
+    ON property.id = COALESCE(request.property_id, unit.property_id)
+  WHERE (SELECT private.is_approved_worker())
+    AND me.id = (SELECT private.current_staff_id())
+    AND request.status = 'Open'
+    AND request.offered_at IS NOT NULL
+    AND request.assigned_staff_id IS NULL
+  ORDER BY request.scheduled_for, request.id
+$function$;
 
-DROP POLICY IF EXISTS properties_select ON public."Properties";
-CREATE POLICY properties_select ON public."Properties"
-  FOR SELECT TO authenticated
-  USING (
-    ((SELECT private.current_role()) = 'admin'::public.app_role)
-    OR (landlord_id = (SELECT private.current_landlord_id()))
-    OR (id = (SELECT private.current_tenant_property_id()))
-    OR (SELECT private.staff_assigned_to_property("Properties".id))
-    OR (SELECT private.job_available_for_property("Properties".id))
-  );
+COMMENT ON FUNCTION public.list_available_job_locations() IS
+  'Address fields (no notes, rent or listing data) for the pooled jobs the calling worker can accept.';
+
+REVOKE ALL ON FUNCTION public.list_available_job_locations() FROM public, anon;
+GRANT EXECUTE ON FUNCTION public.list_available_job_locations() TO authenticated, service_role;
 
 -- ── Field protection ────────────────────────────────────────────────
 -- Non-admins cannot set schedule, pool or confirmation fields by a plain
@@ -453,6 +440,7 @@ AS $function$
 DECLARE
   v_role public.app_role;
   v_flow text;
+  v_photo_since timestamptz;
 BEGIN
   IF auth.uid() IS NULL THEN
     RETURN NEW;
@@ -553,18 +541,38 @@ BEGIN
     RAISE EXCEPTION 'Only admins can Accept & schedule maintenance requests';
   END IF;
 
-  -- A worker proves the fix with a photo before completing.
+  -- A worker proves the fix with a photo before completing: their own photo,
+  -- uploaded since they took the job and since it was last reopened. A previous
+  -- worker's photo, or one from before a reopen, does not count.
   IF v_role = 'maintenance'::public.app_role
     AND NEW.status = 'Closed'
     AND OLD.status IS DISTINCT FROM 'Closed'
-    AND NOT EXISTS (
+  THEN
+    SELECT GREATEST(
+      COALESCE(OLD.accepted_at, '-infinity'::timestamptz),
+      COALESCE(OLD.released_at, '-infinity'::timestamptz),
+      COALESCE(
+        (
+          SELECT max(history.created_at)
+          FROM public."MaintenanceRequestStatusHistory" AS history
+          WHERE history.maintenance_request_id = NEW.id
+            AND history.from_status = 'Closed'
+            AND history.to_status <> 'Closed'
+        ),
+        '-infinity'::timestamptz
+      )
+    ) INTO v_photo_since;
+
+    IF NOT EXISTS (
       SELECT 1
       FROM public."MaintenanceRequestPhotos" AS photo
       WHERE photo.maintenance_request_id = NEW.id
         AND photo.uploaded_by_role = 'maintenance'::public.app_role
-    )
-  THEN
-    RAISE EXCEPTION 'Add at least one photo of the finished work before completing this job';
+        AND photo.uploaded_by_user_id = auth.uid()
+        AND photo.created_at > v_photo_since
+    ) THEN
+      RAISE EXCEPTION 'Add at least one photo of the finished work before completing this job';
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -669,6 +677,13 @@ DECLARE
   v_count integer;
 BEGIN
   v_is_work := COALESCE(NEW.uploaded_by_role = 'maintenance'::public.app_role, false);
+
+  -- Lock the request so two overlapping uploads count one after the other
+  -- (without this both can read 4 and both insert, passing the cap).
+  PERFORM 1
+  FROM public."MaintenanceRequests" AS request
+  WHERE request.id = NEW.maintenance_request_id
+  FOR NO KEY UPDATE;
 
   SELECT count(*)::integer INTO v_count
   FROM public."MaintenanceRequestPhotos" AS photo
@@ -974,12 +989,15 @@ END;
 $function$;
 
 -- Worker (or any staff login): edit own profile. Email is not editable here.
+-- An argument left out (NULL) leaves that column unchanged, so a name-only save
+-- can never wipe the services list. To clear company or phone pass ''; to take
+-- no jobs pass an empty services list.
 CREATE OR REPLACE FUNCTION public.update_staff_profile(
-  p_first_name text,
-  p_last_name text,
+  p_first_name text DEFAULT NULL,
+  p_last_name text DEFAULT NULL,
   p_company_name text DEFAULT NULL,
   p_phone text DEFAULT NULL,
-  p_services text[] DEFAULT '{}'::text[]
+  p_services text[] DEFAULT NULL
 )
 RETURNS public."Staff"
 LANGUAGE plpgsql
@@ -990,8 +1008,6 @@ DECLARE
   v_staff bigint;
   v_first text;
   v_last text;
-  v_company text;
-  v_phone text;
   v_services text[];
   v_row public."Staff";
 BEGIN
@@ -1000,27 +1016,28 @@ BEGIN
     RAISE EXCEPTION 'Only an approved staff login can update a staff profile' USING ERRCODE = '42501';
   END IF;
 
-  v_first := NULLIF(btrim(COALESCE(p_first_name, '')), '');
-  v_last := NULLIF(btrim(COALESCE(p_last_name, '')), '');
-  IF v_first IS NULL OR v_last IS NULL THEN
-    RAISE EXCEPTION 'first_name and last_name are required';
+  v_first := btrim(p_first_name);
+  v_last := btrim(p_last_name);
+  IF v_first = '' OR v_last = '' THEN
+    RAISE EXCEPTION 'first_name and last_name cannot be blank';
   END IF;
   IF char_length(v_first) > 80 OR char_length(v_last) > 80 THEN
     RAISE EXCEPTION 'Name fields must be at most 80 characters';
   END IF;
 
-  v_company := NULLIF(btrim(COALESCE(p_company_name, '')), '');
-  v_phone := NULLIF(btrim(COALESCE(p_phone, '')), '');
-
-  SELECT COALESCE(array_agg(DISTINCT service ORDER BY service), '{}'::text[]) INTO v_services
-  FROM unnest(COALESCE(p_services, '{}'::text[])) AS service;
+  IF p_services IS NOT NULL THEN
+    SELECT COALESCE(array_agg(DISTINCT service ORDER BY service), '{}'::text[]) INTO v_services
+    FROM unnest(p_services) AS service;
+  END IF;
 
   UPDATE public."Staff" AS staff
-  SET first_name = v_first,
-      last_name = v_last,
-      company_name = v_company,
-      phone = v_phone,
-      services = v_services
+  SET first_name = COALESCE(v_first, staff.first_name),
+      last_name = COALESCE(v_last, staff.last_name),
+      company_name = CASE WHEN p_company_name IS NULL THEN staff.company_name
+                          ELSE NULLIF(btrim(p_company_name), '') END,
+      phone = CASE WHEN p_phone IS NULL THEN staff.phone
+                   ELSE NULLIF(btrim(p_phone), '') END,
+      services = CASE WHEN p_services IS NULL THEN staff.services ELSE v_services END
   WHERE staff.id = v_staff
   RETURNING * INTO v_row;
   IF NOT FOUND THEN

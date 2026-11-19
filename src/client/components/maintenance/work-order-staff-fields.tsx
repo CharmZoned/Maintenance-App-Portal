@@ -3,6 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { StaffMember } from "@/lib/data";
+import { formatDate } from "@/lib/utils";
 import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceCategory,
@@ -49,6 +50,11 @@ export interface WorkOrderStaffFieldsProps {
   staff: StaffMember[];
   values: WorkOrderStaffFormValues;
   onChange: (patch: Partial<WorkOrderStaffFormValues>) => void;
+}
+
+/** Exact price with cents (formatMoney rounds to whole dollars). */
+function formatPrice(amount: number): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(amount);
 }
 
 /** Staff/admin editable core + status companion fields. */
@@ -316,33 +322,38 @@ export function WorkOrderStaffFields({
       </label>
 
       <div className="grid grid-cols-2 gap-3">
+        {/* Workers cannot change the date or their price: show both as text, not disabled inputs. */}
         {!isAdmin && (
+          <>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">Scheduled date</p>
+              <p className="mt-1 text-sm text-foreground">{scheduledAt ? formatDate(scheduledAt) : "Not scheduled"}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">Price</p>
+              <p className="mt-1 text-sm text-foreground">
+                {workerPrice ? formatPrice(Number(workerPrice)) : "Not set"}
+              </p>
+            </div>
+          </>
+        )}
+        {isAdmin && (
           <div>
-            <Label>Scheduled date</Label>
-            <Input type="date" value={scheduledAt} disabled />
+            <Label htmlFor="wo-worker-price">Worker price</Label>
+            <Input
+              id="wo-worker-price"
+              inputMode="decimal"
+              value={workerPrice}
+              onChange={(e) => onChange({ workerPrice: e.target.value })}
+            />
           </div>
         )}
-        <div>
-          <Label htmlFor="wo-worker-price">{isAdmin ? "Worker price" : "Price"}</Label>
-          <Input
-            id="wo-worker-price"
-            type="number"
-            min="0"
-            step="0.01"
-            value={workerPrice}
-            onChange={(e) => onChange({ workerPrice: e.target.value })}
-            // Only an admin sets prices (admin-write price tables).
-            disabled={!isAdmin}
-          />
-        </div>
         {isAdmin && (
           <div>
             <Label htmlFor="wo-landlord-price">Landlord price</Label>
             <Input
               id="wo-landlord-price"
-              type="number"
-              min="0"
-              step="0.01"
+              inputMode="decimal"
               value={landlordPrice}
               onChange={(e) => onChange({ landlordPrice: e.target.value })}
             />

@@ -143,9 +143,9 @@ Staff/tenant maintenance model. Status CHECK (live): `Open | Scheduled | In Prog
 
 ### Worker job pool (`20261118190000_worker_job_pool.sql`)
 
-Owner decisions 2026-11-18. **Not applied to live yet** — apply after review, per [`ops/schema-migrations.md`](./ops/schema-migrations.md).
+Owner decisions 2026-11-18/19. **Not applied to live yet.** Ships through a PR into `staging`, then the release PR to `master`, per [`ops/schema-migrations.md`](./ops/schema-migrations.md).
 
-- **Workers = Staff.** Maintenance staff and vendors are the same thing. `Staff` gains `company_name`, `phone`, `services text[]` (same values as request `category`; empty = takes every category). `Vendors` and `MaintenanceRequests.vendor_id` are deprecated and left in place until the portal stops reading them.
+- **Workers = Staff.** Maintenance staff and vendors are the same thing. `Staff` gains `company_name`, `phone`, `services text[]` (same values as request `category`). **An empty `services` list matches no jobs** — never "all jobs" — so a new or blank profile sees nothing until services are set. `Vendors` and `MaintenanceRequests.vendor_id` are deprecated and left in place until the portal stops reading them.
 - **Available is derived, not a status:** `status = 'Open' AND offered_at IS NOT NULL AND assigned_staff_id IS NULL`. New request columns: `offered_at`, `offered_by_user_id`, `accepted_at`, `released_at`, `released_by_staff_id`, `tenant_fix_response` (`confirmed` | `not_fixed`), `tenant_fix_responded_at`, `tenant_fix_note`. CHECK `requests_offered_details`: a pooled job always has `scheduled_for`.
 - **Two prices, two tables.** Landlord Gopher keeps the difference between what the worker is paid and what the landlord is billed, so neither side may see the other's number. `MaintenanceRequests.cost` is **dropped** (existing values carry over as the landlord price):
 
@@ -165,10 +165,10 @@ Owner decisions 2026-11-18. **Not applied to live yet** — apply after review, 
 | `accept_maintenance_request(p_request_id)` | approved worker | First accept wins: assigns the caller, status → `Scheduled`. No decline exists |
 | `release_maintenance_request(p_request_id, p_reason)` | assigned worker | Unassigns, status → `Open`, **not** re-offered. Reason is written as an `internal` comment (tenant never sees it) |
 | `confirm_maintenance_request_fixed(p_request_id, p_fixed, p_note)` | reporting tenant | Only on `Closed`. Reopening clears the answer |
-| `update_staff_profile(p_first_name, p_last_name, p_company_name, p_phone, p_services)` | any approved staff login | Own Staff row only; email not editable |
+| `update_staff_profile(p_first_name?, p_last_name?, p_company_name?, p_phone?, p_services?)` | any approved staff login | Own Staff row only; email not editable. An argument left out leaves that column unchanged (a name-only save cannot touch `services`); pass `''` to clear company/phone, `{}` to take no jobs |
 
-- **What a worker sees before accepting:** the request row (problem, date/time), its worker price, its photos (table + storage), and the unit/property address — via `private.job_available_to_me` / `job_available_for_unit` / `job_available_for_property`. Comments, status history, staff notes and the tenant record still require assignment (`private.can_select_maintenance_request` is unchanged).
-- **Completion photo:** a `maintenance` login cannot set `Closed` until the request has a photo with `uploaded_by_role = 'maintenance'`. Photo cap is now 5 worker photos + 5 from everyone else (was 5 total).
+- **What a worker sees before accepting:** the request row (problem, date/time), its worker price, and its photos (table + storage) — via `private.job_available_to_me`. The address comes from `public.list_available_job_locations()`, which returns address fields only (unit label, property name, street, city, state, zip). The `Units` and `Properties` rows themselves (notes, rent, listing fields) are **not** opened to the pool. Comments, status history, staff notes and the tenant record still require assignment (`private.can_select_maintenance_request` is unchanged).
+- **Completion photo:** a `maintenance` login cannot set `Closed` without **their own** photo (`uploaded_by_user_id = auth.uid()`, role `maintenance`) uploaded after they took the job (`accepted_at` / `released_at`) and after the request last left `Closed`. A previous worker's photo, or one from before a reopen, does not count. Photo cap is 5 worker photos + 5 from everyone else (was 5 total); the cap trigger locks the request row so overlapping uploads cannot pass it.
 - **Chat:** job chat stays on `MaintenanceRequestComments` (`tenant_visible` = tenant + worker + office; `internal` = worker + office). New `OfficeMessages` is one direct thread per non-admin user with the office (all admins), keyed by `thread_user_id`; in Realtime. `OfficeThreadReads` and `MaintenanceThreadReads` hold per-user last-read times for unread dots.
 - Tests: `tests/workflows/wf3-worker-job-pool.test.ts` (WF3).
 

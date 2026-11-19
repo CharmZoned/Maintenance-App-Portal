@@ -792,13 +792,25 @@ export interface Database {
         Args: { p_request_id: number; p_fixed: boolean; p_note?: string | null };
         Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
       };
+      list_available_job_locations: {
+        Args: Record<string, never>;
+        Returns: {
+          maintenance_request_id: number;
+          unit_label: string | null;
+          property_name: string | null;
+          street_address: string | null;
+          city: string | null;
+          state: string | null;
+          zip: string | null;
+        }[];
+      };
       update_staff_profile: {
         Args: {
-          p_first_name: string;
-          p_last_name: string;
+          p_first_name?: string | null;
+          p_last_name?: string | null;
           p_company_name?: string | null;
           p_phone?: string | null;
-          p_services?: string[];
+          p_services?: string[] | null;
         };
         Returns: Database["public"]["Tables"]["Staff"]["Row"];
       };

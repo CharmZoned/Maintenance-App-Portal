@@ -24,7 +24,12 @@ import {
   type WorkOrderStaffFormValues,
 } from "./work-order-staff-fields";
 import { WorkOrderTenantDetail } from "./work-order-tenant-detail";
-import { MAX_MAINTENANCE_PHOTOS, photoSlotsLeft, takePhotoFiles } from "./work-order-status";
+import {
+  MAX_MAINTENANCE_PHOTOS,
+  changedPriceFields,
+  photoSlotsLeft,
+  takePhotoFiles,
+} from "./work-order-status";
 
 interface WorkOrderDialogProps {
   open: boolean;
@@ -240,12 +245,15 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     notes,
   };
 
-  function priceFields(): { worker_price: number | null; landlord_price: number | null } {
-    const parse = (raw: string) => {
-      const n = parseFloat(raw);
-      return Number.isFinite(n) ? n : null;
-    };
-    return { worker_price: parse(workerPrice), landlord_price: parse(landlordPrice) };
+  /** Only the prices the admin changed; throws (shown as the save error) on an invalid value. */
+  function priceFields() {
+    return changedPriceFields(
+      { workerPrice, landlordPrice },
+      {
+        worker_price: workOrder?.worker_price ?? null,
+        landlord_price: workOrder?.landlord_price ?? null,
+      },
+    );
   }
 
   function onStaffFormChange(patch: Partial<WorkOrderStaffFormValues>) {
@@ -479,9 +487,10 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     const id = workOrder.id;
     const remaining = photoSlotsLeft(photos, app.canEditWorkOrders && !app.isAdmin);
     try {
-      await Promise.all(
-        photoFiles.slice(0, remaining).map((file) => app.uploadMaintenancePhoto(id, file)),
-      );
+      // One at a time: parallel inserts race the per-request photo cap.
+      for (const file of photoFiles.slice(0, remaining)) {
+        await app.uploadMaintenancePhoto(id, file);
+      }
       if (workOrderId !== id) return;
       setPhotoFiles([]);
       await loadMedia(id);
