@@ -387,9 +387,9 @@ describe("buildReadyHome", () => {
     if (doc?.kind === "document") {
       expect(doc.model.title).toBe("New document from Landlord Gopher · Boiler service report.pdf");
     }
-    expect(onlyDoc.activity.flatMap((day) => day.items).some((item) => item.event.includes("Boiler service report.pdf"))).toBe(
-      true,
-    );
+    expect(
+      onlyDoc.activity.days.flatMap((day) => day.items).some((item) => item.event.includes("Boiler service report.pdf")),
+    ).toBe(true);
   });
 });
 
@@ -399,7 +399,8 @@ describe("LandlordHomePage states", () => {
     expect(html).toContain("Loading home");
     expect(html).toContain("Good ");
     expect(html).toContain("Lena");
-    expect(html).toContain("Report an issue");
+    expect(html).toContain("Message Landlord Gopher");
+    expect(html).not.toContain("Report an issue");
   });
 
   it("shows the portfolio error copy and a retry", () => {
@@ -420,5 +421,90 @@ describe("LandlordHomePage states", () => {
     );
     expect(html).toContain(`No properties linked yet · ${monthYear}`);
     expect(html).not.toContain("Report an issue");
+  });
+});
+
+describe("landlord home review fixes", () => {
+  it("counts an unread thread that sits past the three shown", () => {
+    const model = buildReadyHome({
+      now,
+      name: "Lena",
+      properties: [maple],
+      orders: [
+        order({ id: 1, title: "Newest closed", status: "closed", created_at: "2026-11-16T08:00:00", property_id: 1 }),
+        order({ id: 2, title: "Second closed", status: "closed", created_at: "2026-11-15T08:00:00", property_id: 1 }),
+        order({ id: 3, title: "Third closed", status: "closed", created_at: "2026-11-14T08:00:00", property_id: 1 }),
+        order({ id: 4, title: "Older open", status: "open", created_at: "2026-11-04T08:00:00", property_id: 1 }),
+      ],
+      charges: [],
+      leases: [],
+      units: [],
+      documents: [],
+      pending: [],
+      marketed: null,
+    });
+
+    expect(model.messages.unavailable).toBe(false);
+    expect(model.messages.unread).toBe(1);
+    expect(model.messages.threads.map((thread) => thread.id)).toEqual(["wo:1", "wo:2", "wo:3"]);
+    expect(model.messages.threads.every((thread) => !thread.unread)).toBe(true);
+  });
+
+  it("treats a failed request load as unavailable instead of an empty inbox", () => {
+    const model = buildReadyHome({
+      now,
+      name: "Lena",
+      properties: [maple],
+      orders: null,
+      charges: [],
+      leases: [],
+      units: [],
+      documents: [],
+      pending: [],
+      marketed: null,
+    });
+
+    expect(model.messages.unavailable).toBe(true);
+    expect(model.messages.threads).toEqual([]);
+    expect(model.messages.unread).toBe(0);
+    expect(model.activity.unavailable).toBe(true);
+    expect(model.activity.days).toEqual([]);
+    expect(model.maintenance.unavailable).toBe(true);
+
+    const html = visibleText(renderReady(model));
+    expect(html).toContain("Messages couldn't be loaded.");
+    expect(html).toContain("Recent activity couldn't be loaded.");
+    expect(html).not.toContain("No conversations yet.");
+    expect(html).not.toContain("Nothing new across your properties.");
+    expect(html).not.toContain("All read");
+  });
+
+  it("skips zero balances and dates that cannot be counted", () => {
+    const model = buildReadyHome({
+      now,
+      name: "Lena",
+      properties: [maple],
+      orders: [],
+      charges: [
+        charge({ id: 1, status: "overdue", amount: 80, amount_paid: 80, due_date: "2026-11-01" }),
+        charge({ id: 2, status: "overdue", amount: 40, amount_paid: 0, due_date: "" }),
+        charge({ id: 3, status: "open", amount: 40, amount_paid: 0, due_date: "not-a-date" }),
+      ],
+      leases: [
+        lease({ id: 8, end_date: "not-a-date" }),
+        lease({ id: 9, end_date: "2026-12-01", unit_name: "1A" }),
+      ],
+      units: [],
+      documents: [],
+      pending: [],
+      marketed: null,
+    });
+
+    const titles = model.attention.flatMap((item) => (item.kind === "link" ? [item.title] : []));
+    expect(titles.some((title) => title.includes("NaN"))).toBe(false);
+    expect(titles).toContain(`rent overdue · ${formatMoney(40)} outstanding`);
+    expect(model.attention.map((item) => item.id)).toEqual(["rent-2", "lease-9"]);
+    const overdue = model.attention[0];
+    if (overdue.kind === "link") expect(overdue.context).not.toContain("NaN");
   });
 });

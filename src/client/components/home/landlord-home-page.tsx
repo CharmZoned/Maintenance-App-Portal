@@ -151,8 +151,8 @@ export type ReadyHomeModel = {
     spendCompact: string | null;
     rows: MaintenanceRowModel[];
   };
-  messages: { unread: number; threads: ThreadRowModel[] };
-  activity: { label: string; items: ActivityItemModel[] }[];
+  messages: { unavailable: boolean; unread: number; threads: ThreadRowModel[] };
+  activity: { unavailable: boolean; days: { label: string; items: ActivityItemModel[] }[] };
 };
 
 type PendingPayment = { amount: number; method: string; propertyId: number | null };
@@ -280,10 +280,13 @@ export function buildReadyHome(input: {
     }),
     maintenance: maintenanceCard(orders, input.now),
     messages: messageCard(orders, input.now),
-    activity: groupActivity(
-      activityItems({ now: input.now, orders, documents }),
-      input.now,
-    ),
+    activity:
+      orders == null
+        ? { unavailable: true, days: [] }
+        : {
+            unavailable: false,
+            days: groupActivity(activityItems({ now: input.now, orders, documents }), input.now),
+          },
   };
 }
 
@@ -295,7 +298,6 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
     listWorkOrders,
     listCharges,
     listLeases,
-    listUnits,
     listPropertyDocuments,
     getPropertyDocumentDownloadUrl,
     setError,
@@ -322,8 +324,15 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
     setBundleLoading(true);
     (async () => {
       const period = currentPeriodFrom(now);
-      const [orders, charges, leases, units, documents, extras] = await Promise.all([
-        listWorkOrders({ skip_staff_notes: true }).then(
+      // Open requests cover counts, attention, maintenance, and messages.
+      // A short closed slice is enough for recent completions in activity.
+      // Ended leases and the full unit graph are not used by these cards.
+      const [openOrders, recentClosed, charges, leases, documents, pending] = await Promise.all([
+        listWorkOrders({ open_only: true, skip_staff_notes: true }).then(
+          (rows) => rows,
+          () => null,
+        ),
+        listWorkOrders({ status: "closed", limit: ACTIVITY_CAP, skip_staff_notes: true }).then(
           (rows) => rows,
           () => null,
         ),
@@ -331,11 +340,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
           (rows) => rows,
           () => null,
         ),
-        listLeases().then(
-          (rows) => rows,
-          () => null,
-        ),
-        listUnits().then(
+        listLeases({ status: "active" }).then(
           (rows) => rows,
           () => null,
         ),
@@ -343,17 +348,17 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
           (rows) => rows,
           () => null,
         ),
-        loadRentExtras(),
+        loadPendingPayments(),
       ]);
       if (cancelled) return;
       setBundle({
-        orders,
+        orders: openOrders == null ? null : [...openOrders, ...(recentClosed ?? [])],
         charges,
         leases,
-        units,
+        units: null,
         documents,
-        pending: extras.pending,
-        marketed: extras.marketed,
+        pending,
+        marketed: null,
       });
       setBundleLoading(false);
     })();
@@ -369,7 +374,6 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
     listWorkOrders,
     listCharges,
     listLeases,
-    listUnits,
     listPropertyDocuments,
   ]);
 
@@ -398,14 +402,12 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
   };
 
   const greeting = greetingTitle(now, name);
-  const onReport = () => navigate("/maintenance");
   const onMessage = () => navigate("/messages");
-  const emptyPortfolio = !portfolioLoading && !portfolioError && properties.length === 0;
   const unitCount = properties.reduce((sum, property) => sum + (property.unit_count ?? 0), 0);
 
   let body: ReactNode;
   if (portfolioLoading) {
-    body = <LoadingHome greeting={greeting} onReport={onReport} onMessage={onMessage} />;
+    body = <LoadingHome greeting={greeting} onMessage={onMessage} />;
   } else if (portfolioError && properties.length === 0) {
     body = (
       <ErrorHome
@@ -413,7 +415,6 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
         subtitle={portfolioSubtitle("error", { properties: 0, units: 0 }, now)}
         onRetry={retry}
         onMessage={onMessage}
-        onReport={onReport}
       />
     );
   } else if (properties.length === 0) {
@@ -429,7 +430,6 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       <LoadingHome
         greeting={greeting}
         subtitle={portfolioSubtitle("ready", { properties: properties.length, units: unitCount }, now)}
-        onReport={onReport}
         onMessage={onMessage}
       />
     );
@@ -460,12 +460,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
   return (
     <PageShell title="Home" width="max-w-none">
       <div className="pb-24 md:pb-0">{body}</div>
-      <PhoneActions
-        report={!emptyPortfolio}
-        messageOnly={emptyPortfolio}
-        onReport={onReport}
-        onMessage={onMessage}
-      />
+      <PhoneActions onMessage={onMessage} />
     </PageShell>
   );
 }
@@ -473,19 +468,17 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
 function LoadingHome({
   greeting,
   subtitle,
-  onReport,
   onMessage,
 }: {
   greeting: string;
   subtitle?: string;
-  onReport: () => void;
   onMessage: () => void;
 }) {
   return (
     <div role="status" aria-busy="true" aria-label="Loading home" className="flex flex-col gap-6">
       <span className="sr-only">Loading home</span>
       <div>
-        <HomeIntro greeting={greeting} subtitle={subtitle} onReport={onReport} onMessage={onMessage} />
+        <HomeIntro greeting={greeting} subtitle={subtitle} onMessage={onMessage} />
         {subtitle ? null : <Bone className="mt-2 h-3.5 w-60" />}
       </div>
       <div aria-hidden className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -510,18 +503,16 @@ function ErrorHome({
   greeting,
   subtitle,
   onRetry,
-  onReport,
   onMessage,
 }: {
   greeting: string;
   subtitle: string;
   onRetry: () => void;
-  onReport: () => void;
   onMessage: () => void;
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <HomeIntro greeting={greeting} subtitle={subtitle} onReport={onReport} onMessage={onMessage} />
+      <HomeIntro greeting={greeting} subtitle={subtitle} onMessage={onMessage} />
       <div className="flex justify-center py-10">
         <ErrorRetry
           className="w-full max-w-[32.5rem]"
@@ -577,12 +568,7 @@ export function ReadyHome({
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <HomeIntro
-        greeting={model.greeting}
-        subtitle={model.subtitle}
-        onReport={() => navigate("/maintenance")}
-        onMessage={() => navigate("/messages")}
-      />
+      <HomeIntro greeting={model.greeting} subtitle={model.subtitle} onMessage={() => navigate("/messages")} />
       <ul aria-label="Portfolio" className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {model.kpis.map((tile) => (
           <li key={tile.id} className="min-w-0">
@@ -613,7 +599,12 @@ export function ReadyHome({
             properties={model.properties}
             navigate={navigate}
           />
-          <ActivityCard className="order-6 md:order-7 md:col-span-2 xl:order-none" days={model.activity} navigate={navigate} />
+          <ActivityCard
+            className="order-6 md:order-7 md:col-span-2 xl:order-none"
+            activity={model.activity}
+            navigate={navigate}
+            onRetry={onRetry}
+          />
         </div>
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
           <RentCard className="order-2 xl:order-none" rent={model.rent} onRetry={onRetry} />
@@ -623,7 +614,12 @@ export function ReadyHome({
             navigate={navigate}
             onRetry={onRetry}
           />
-          <MessagesCard className="order-5 xl:order-none" messages={model.messages} navigate={navigate} />
+          <MessagesCard
+            className="order-5 xl:order-none"
+            messages={model.messages}
+            navigate={navigate}
+            onRetry={onRetry}
+          />
           <SupportCard className="order-7 md:order-6 xl:order-none" onMessage={() => navigate("/messages")} />
         </div>
       </div>
@@ -634,12 +630,10 @@ export function ReadyHome({
 function HomeIntro({
   greeting,
   subtitle,
-  onReport,
   onMessage,
 }: {
   greeting: string;
   subtitle?: string;
-  onReport?: () => void;
   onMessage: () => void;
 }) {
   return (
@@ -649,55 +643,19 @@ function HomeIntro({
       description={subtitle}
       action={
         <div className="hidden md:block">
-          <HomeActions report={Boolean(onReport)} onReport={onReport} onMessage={onMessage} />
+          <Button type="button" variant="brand" size="touch" onClick={onMessage}>
+            Message Landlord Gopher
+          </Button>
         </div>
       }
     />
   );
 }
 
-function HomeActions({
-  report,
-  onReport,
-  onMessage,
-}: {
-  report: boolean;
-  onReport?: () => void;
-  onMessage: () => void;
-}) {
+function PhoneActions({ onMessage }: { onMessage: () => void }) {
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      {report && onReport ? (
-        <Button type="button" variant="secondary" size="touch" className="order-2 xl:order-1" onClick={onReport}>
-          Report an issue
-        </Button>
-      ) : null}
-      <Button type="button" variant="brand" size="touch" className="order-1 xl:order-2" onClick={onMessage}>
-        Message Landlord Gopher
-      </Button>
-    </div>
-  );
-}
-
-function PhoneActions({
-  report,
-  messageOnly,
-  onReport,
-  onMessage,
-}: {
-  report: boolean;
-  messageOnly: boolean;
-  onReport: () => void;
-  onMessage: () => void;
-}) {
-  return (
-    <div className="fixed inset-x-0 bottom-[3.25rem] z-30 flex gap-2 border-t border-border bg-background px-4 py-3 md:hidden">
-      {report && !messageOnly ? (
-        <Button type="button" variant="secondary" size="touch" onClick={onReport}>
-          Report an issue
-        </Button>
-      ) : null}
-      <Button type="button" variant="brand" size="touch" className={messageOnly || !report ? "w-full" : undefined} onClick={onMessage}>
+    <div className="fixed inset-x-0 bottom-[3.25rem] z-30 border-t border-border bg-background px-4 py-3 md:hidden">
+      <Button type="button" variant="brand" size="touch" className="w-full" onClick={onMessage}>
         Message Landlord Gopher
       </Button>
     </div>
@@ -986,10 +944,12 @@ function MaintenanceCard({
 function MessagesCard({
   messages,
   navigate,
+  onRetry,
   className,
 }: {
   messages: ReadyHomeModel["messages"];
   navigate: (to: string) => void;
+  onRetry: () => void;
   className?: string;
 }) {
   return (
@@ -998,13 +958,20 @@ function MessagesCard({
         <h2 id="home-messages" className="min-w-0 flex-1 lg-section text-foreground">
           Messages
         </h2>
-        {messages.threads.length > 0 ? (
+        {!messages.unavailable && messages.threads.length > 0 ? (
           <Badge variant={messages.unread > 0 ? "warning" : "success"}>
             {messages.unread > 0 ? `${messages.unread} unread` : "All read"}
           </Badge>
         ) : null}
       </div>
-      {messages.threads.length === 0 ? (
+      {messages.unavailable ? (
+        <div className="mt-3">
+          <p className="lg-body text-muted-foreground">Messages couldn&apos;t be loaded.</p>
+          <Button type="button" variant="secondary" size="touch" className="mt-3" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      ) : messages.threads.length === 0 ? (
         <p className="mt-3 lg-body text-muted-foreground">No conversations yet.</p>
       ) : (
         <ul className="mt-2 divide-y divide-border">
@@ -1041,12 +1008,14 @@ function MessagesCard({
 }
 
 function ActivityCard({
-  days,
+  activity,
   navigate,
+  onRetry,
   className,
 }: {
-  days: ReadyHomeModel["activity"];
+  activity: ReadyHomeModel["activity"];
   navigate: (to: string) => void;
+  onRetry: () => void;
   className?: string;
 }) {
   return (
@@ -1054,11 +1023,18 @@ function ActivityCard({
       <h2 id="home-activity" className="lg-section text-foreground">
         Recent activity
       </h2>
-      {days.length === 0 ? (
+      {activity.unavailable ? (
+        <div className="mt-3">
+          <p className="lg-body text-muted-foreground">Recent activity couldn&apos;t be loaded.</p>
+          <Button type="button" variant="secondary" size="touch" className="mt-3" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      ) : activity.days.length === 0 ? (
         <p className="mt-3 lg-body text-muted-foreground">Nothing new across your properties.</p>
       ) : (
         <div className="mt-3 flex flex-col gap-4">
-          {days.map((day) => (
+          {activity.days.map((day) => (
             <div key={day.label}>
               <LandlordScopeHeading label={day.label} />
               <ul>
@@ -1214,22 +1190,28 @@ function rankAttention(input: {
   for (const charge of input.charges ?? []) {
     if (charge.status === "paid" || charge.status === "waived") continue;
     const outstanding = Math.max(0, Number(charge.amount) - Number(charge.amount_paid));
+    if (!Number.isFinite(outstanding) || outstanding <= 0) continue;
     const lateByStatus = charge.status === "overdue";
-    const lateDays = Math.max(0, daysBetween(dayKey(charge.due_date), today));
-    if (!lateByStatus && lateDays <= 0) continue;
-    if (outstanding <= 0 && !lateByStatus) continue;
-    const days = Math.max(lateDays, lateByStatus ? 1 : 0);
+    const lateDays = daysBetween(dayKey(charge.due_date), today);
+    const daysKnown = Number.isFinite(lateDays);
+    if (!daysKnown && !lateByStatus) continue;
+    if (daysKnown && !lateByStatus && lateDays <= 0) continue;
+    const days = daysKnown ? Math.max(lateDays, lateByStatus ? 1 : 0) : null;
     const unit = charge.unit_name?.trim();
     const tenant = person(charge.tenant_first_name, charge.tenant_last_name);
     const property = charge.property_name?.trim() || "Property";
+    const lateLabel = days == null ? "Overdue" : `Late ${days} ${days === 1 ? "day" : "days"}`;
     items.push({
       kind: "link",
       id: `rent-${charge.id}`,
-      score: 1000 + days,
+      score: 1000 + (days ?? 0),
       tone: "warning",
       icon: "alert",
-      title: `${unit ? `Unit ${unit} ` : ""}rent ${days} ${days === 1 ? "day" : "days"} late · ${formatMoney(outstanding)} outstanding`,
-      context: [property, tenant, `Late ${days} ${days === 1 ? "day" : "days"}`].filter(Boolean).join(" · "),
+      title:
+        days == null
+          ? `${unit ? `Unit ${unit} ` : ""}rent overdue · ${formatMoney(outstanding)} outstanding`
+          : `${unit ? `Unit ${unit} ` : ""}rent ${days} ${days === 1 ? "day" : "days"} late · ${formatMoney(outstanding)} outstanding`,
+      context: [property, tenant, lateLabel].filter(Boolean).join(" · "),
       href: charge.property_id != null ? `/properties/${charge.property_id}` : "/properties",
     });
   }
@@ -1237,7 +1219,7 @@ function rankAttention(input: {
   for (const lease of input.leases ?? []) {
     if (lease.status !== "active" || !lease.end_date) continue;
     const remaining = daysBetween(today, dayKey(lease.end_date));
-    if (remaining < 0 || remaining > LEASE_SOON_DAYS) continue;
+    if (!Number.isFinite(remaining) || remaining < 0 || remaining > LEASE_SOON_DAYS) continue;
     const unit = lease.unit_name?.trim();
     const tenant = person(lease.tenant_first_name, lease.tenant_last_name);
     const when = new Date(`${dayKey(lease.end_date)}T00:00:00`).toLocaleDateString(undefined, {
@@ -1498,11 +1480,13 @@ function maintenanceCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel[
 }
 
 function messageCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel["messages"] {
-  const list = orders ?? [];
-  const byId = new Map(list.map((order) => [order.id, order]));
-  const threads = threadsFromWorkOrders(list, { now }).slice(0, MESSAGE_CAP);
+  if (orders == null) return { unavailable: true, unread: 0, threads: [] };
+  const byId = new Map(orders.map((order) => [order.id, order]));
+  const all = threadsFromWorkOrders(orders, { now });
+  const threads = all.slice(0, MESSAGE_CAP);
   return {
-    unread: threads.filter((thread) => thread.unread).length,
+    unavailable: false,
+    unread: all.filter((thread) => thread.unread).length,
     threads: threads.map((thread) => {
       const order = thread.requestId != null ? byId.get(thread.requestId) : undefined;
       const tenant = order ? person(order.tenant_first_name, order.tenant_last_name) : "";
@@ -1693,26 +1677,19 @@ function firstName(displayName: string | null | undefined, email: string): strin
   return bit.charAt(0).toUpperCase() + bit.slice(1);
 }
 
-async function loadRentExtras(): Promise<{ pending: PendingPayment[] | null; marketed: Map<number, boolean> | null }> {
+async function loadPendingPayments(): Promise<PendingPayment[] | null> {
   try {
     const data = await import("@/lib/data");
-    const [pending, marketed] = await Promise.all([
-      data.listPaymentsAwaitingVerification().then(
-        (rows) =>
-          rows.map((row) => ({
-            amount: row.amount,
-            method: row.method,
-            propertyId: row.charge?.property_id ?? null,
-          })),
-        () => null,
-      ),
-      data.listUnitMarketingFlags().then(
-        (rows) => new Map(rows.map((row) => [row.unit_id, row.marketed] as const)),
-        () => null,
-      ),
-    ]);
-    return { pending, marketed };
+    return await data.listPaymentsAwaitingVerification().then(
+      (rows) =>
+        rows.map((row) => ({
+          amount: row.amount,
+          method: row.method,
+          propertyId: row.charge?.property_id ?? null,
+        })),
+      () => null,
+    );
   } catch {
-    return { pending: null, marketed: null };
+    return null;
   }
 }
