@@ -27,7 +27,7 @@ export function NotificationsHost({
   onUnreadChange?: (unread: boolean) => void;
   onNavigate: (to: string) => void;
 }) {
-  const { listWorkOrders } = useApp();
+  const { listWorkOrders, isLandlord } = useApp();
   const [items, setItems] = useState<NotificationItemData[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const readIdsRef = useRef(readIds);
@@ -109,6 +109,7 @@ export function NotificationsHost({
       onClose={handleClose}
       onMarkAllRead={markAllRead}
       onSelect={selectItem}
+      chrome={isLandlord ? "landlord" : "default"}
     />
   );
 }
