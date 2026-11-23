@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { LandlordScopeHeading } from "@/components/landlord";
-import { EmptyState } from "@/components/patterns";
+import { EmptyState, ErrorRetry } from "@/components/patterns";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NotificationItem } from "./notification-item";
@@ -19,6 +19,9 @@ type Props = {
    * Other roles keep the N5 chrome.
    */
   chrome?: "default" | "landlord";
+  /** Last refresh failed. Empty + failed must not read as "all caught up". */
+  loadFailed?: boolean;
+  onRetry?: () => void;
 };
 
 const DAY_ORDER = ["Today", "Yesterday", "Earlier"] as const;
@@ -62,13 +65,17 @@ export function NotificationsPanel({
   onSelect,
   variant = "panel",
   chrome = "default",
+  loadFailed = false,
+  onRetry,
 }: Props) {
+  const unread = items.some((i) => i.unread);
   const closeRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const wasOpenRef = useRef(false);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const wasUnreadRef = useRef(unread);
 
   // Focus Close only on false→true; restore focus on close. Escape via stable ref.
   useEffect(() => {
@@ -119,47 +126,36 @@ export function NotificationsPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  if (!open) return null;
+  // Mark all as read unmounts its button. Move focus to Close so it does not
+  // fall through to document.body while the dialog stays open.
+  useEffect(() => {
+    if (!open || chrome !== "landlord") {
+      wasUnreadRef.current = unread;
+      return;
+    }
+    const moveToClose = wasUnreadRef.current && !unread;
+    wasUnreadRef.current = unread;
+    if (!moveToClose) return;
+    const frame = requestAnimationFrame(() => closeRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open, chrome, unread]);
 
-  const unread = items.some((i) => i.unread);
+  if (!open) return null;
 
   function selectItem(item: NotificationItemData) {
     onSelect?.(item);
     onClose();
   }
 
-  const list = (
-    <div className="min-h-0 flex-1 overflow-auto">
-      {items.length === 0 ? (
-        <EmptyState message="You're all caught up. Alerts for request updates will land here." />
-      ) : (
-        items.map((item) => (
-          <NotificationItem
-            key={item.id}
-            item={item}
-            onClick={onSelect ? () => selectItem(item) : undefined}
-          />
-        ))
-      )}
-    </div>
-  );
-
-  const stubNote = items.some((i) => i.stub) ? (
-    <p className="shrink-0 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
-      Stub · live push/email notifications are not wired yet.
-    </p>
-  ) : null;
-
   if (chrome === "landlord") {
     const groups = groupNotifications(items);
-    const focusMarkAll = unread;
-    const focusEmptyClose = items.length === 0;
+    const showLoadError = loadFailed && items.length === 0;
     return (
       <>
         {variant === "panel" ? (
           <button
             type="button"
-            className="absolute inset-0 z-40 bg-transparent"
+            className="fixed inset-0 z-40 bg-transparent"
             aria-label="Dismiss notifications"
             tabIndex={-1}
             onClick={onClose}
@@ -183,7 +179,7 @@ export function NotificationsPanel({
               <h2 className="lg-heading text-foreground">Notifications</h2>
             </div>
             <Button
-              ref={focusMarkAll || focusEmptyClose ? undefined : closeRef}
+              ref={closeRef}
               type="button"
               variant="ghost"
               size="touch-icon"
@@ -195,7 +191,6 @@ export function NotificationsPanel({
             </Button>
             {unread ? (
               <Button
-                ref={focusMarkAll ? closeRef : undefined}
                 type="button"
                 variant="ghost"
                 size="touch"
@@ -206,7 +201,11 @@ export function NotificationsPanel({
               </Button>
             ) : null}
           </div>
-          {items.length === 0 ? (
+          {showLoadError ? (
+            <div className="min-h-0 flex-1 px-6 pt-6">
+              <ErrorRetry onRetry={onRetry} />
+            </div>
+          ) : items.length === 0 ? (
             <>
               <div className="flex min-h-0 flex-1 flex-col px-6">
                 <div className="flex flex-[1.15] items-center justify-center px-6 py-10">
@@ -219,7 +218,6 @@ export function NotificationsPanel({
               </div>
               <div className="shrink-0 px-6 pb-8">
                 <Button
-                  ref={focusEmptyClose ? closeRef : undefined}
                   type="button"
                   variant="secondary"
                   size="touch"
@@ -257,6 +255,32 @@ export function NotificationsPanel({
       </>
     );
   }
+
+  const list = (
+    <div className="min-h-0 flex-1 overflow-auto">
+      {items.length === 0 ? (
+        loadFailed ? (
+          <ErrorRetry onRetry={onRetry} />
+        ) : (
+          <EmptyState message="You're all caught up. Alerts for request updates will land here." />
+        )
+      ) : (
+        items.map((item) => (
+          <NotificationItem
+            key={item.id}
+            item={item}
+            onClick={onSelect ? () => selectItem(item) : undefined}
+          />
+        ))
+      )}
+    </div>
+  );
+
+  const stubNote = items.some((i) => i.stub) ? (
+    <p className="shrink-0 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+      Stub · live push/email notifications are not wired yet.
+    </p>
+  ) : null;
 
   if (variant === "sheet") {
     return (

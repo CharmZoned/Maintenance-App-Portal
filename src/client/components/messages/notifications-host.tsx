@@ -29,6 +29,7 @@ export function NotificationsHost({
 }) {
   const { listWorkOrders, isLandlord } = useApp();
   const [items, setItems] = useState<NotificationItemData[]>([]);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [readIds, setReadIds] = useState<Set<string>>(() => new Set());
   const readIdsRef = useRef(readIds);
   readIdsRef.current = readIds;
@@ -59,9 +60,11 @@ export function NotificationsHost({
         readIdsRef.current.has(row.id) ? { ...row, unread: false } : row,
       );
       setItems(next);
+      setLoadFailed(false);
       lastFetchedAt.current = Date.now();
     } catch {
-      setItems([]);
+      // Keep the last good rows. An empty failure must not look caught-up.
+      setLoadFailed(true);
     } finally {
       inFlight.current = false;
     }
@@ -110,6 +113,8 @@ export function NotificationsHost({
       onMarkAllRead={markAllRead}
       onSelect={selectItem}
       chrome={isLandlord ? "landlord" : "default"}
+      loadFailed={loadFailed}
+      onRetry={() => void refresh()}
     />
   );
 }
