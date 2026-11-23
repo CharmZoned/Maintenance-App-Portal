@@ -654,6 +654,8 @@ function DocumentsPanel({
   const groups = grouped[0]?.groups ?? [];
   const building = groups.find((group) => group.key === "building");
   const byUnit = new Map(groups.filter((group) => group.key.startsWith("unit:")).map((group) => [group.key, group]));
+  const knownUnitKeys = new Set(units.map((unit) => `unit:${unit.id}`));
+  const extraGroups = groups.filter((group) => group.key !== "building" && !knownUnitKeys.has(group.key));
 
   return (
     <section className="space-y-4">
@@ -690,6 +692,17 @@ function DocumentsPanel({
           />
         );
       })}
+      {extraGroups.map((group) => (
+        <DocumentGroup
+          key={group.key}
+          label={group.label}
+          docs={group.documents}
+          empty="No documents in this group yet."
+          downloadingId={downloadingId}
+          onDownload={onDownload}
+          onMessage={onMessage}
+        />
+      ))}
     </section>
   );
 }
