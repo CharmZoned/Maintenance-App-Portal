@@ -124,6 +124,8 @@ describe("landlord request detail", () => {
     expect(html).toContain("Tap a photo to see it full size.");
     expect(html).toContain("https://example.test/faucet.jpg");
     expect(html).toContain("Status timeline");
+    expect(html).toContain("bg-brand-tint text-brand-text\">Assigned");
+    expect(html).not.toContain("bg-info-tint text-info\">Assigned");
     expect(html).toContain("Tina Renter reported this");
     expect(html).toContain(`Visit scheduled for ${scheduled}`);
     expect(html).toContain("The drip is getting worse.");
@@ -211,5 +213,89 @@ describe("landlord request detail", () => {
     expect(missing).toContain("Back to Maintenance");
     expect(missing).toContain("Message Landlord Gopher");
     expect(missing).not.toContain("Write to Landlord Gopher");
+  });
+
+  it("keeps an earlier scheduled visit off the live order date", () => {
+    const current = formatDocumentDate("2026-11-17");
+    const visit = `Visit scheduled for ${current}`;
+    const earlier = {
+      id: 2,
+      maintenance_request_id: 10,
+      from_status: "Open",
+      to_status: "Scheduled",
+      changed_by_role: "admin",
+      note: "First visit was 10 Nov",
+      created_at: "2026-11-10T15:00:00.000Z",
+    };
+    const latest = {
+      id: 3,
+      maintenance_request_id: 10,
+      from_status: "Scheduled",
+      to_status: "Scheduled",
+      changed_by_role: "admin",
+      note: null,
+      created_at: "2026-11-16T13:30:00.000Z",
+    };
+    const noted = render({ history: [earlier, latest] });
+    expect(noted).toContain("First visit was 10 Nov");
+    expect(noted.split(visit).length - 1).toBe(1);
+
+    const blank = render({
+      history: [{ ...earlier, note: null }, latest],
+    });
+    expect(blank.split(visit).length - 1).toBe(1);
+    expect(blank).toContain("lg-body-medium text-foreground mt-1.5\">Scheduled");
+  });
+
+  it("formats a noon-UTC scheduled_at from the calendar-day prefix", () => {
+    for (const iso of ["2026-11-17T12:00:00.000Z", "2026-11-17T12:00:00+00:00"]) {
+      const day = formatDocumentDate(iso.slice(0, 10));
+      const html = render({
+        order: order({ id: 10, title: "Kitchen faucet leaking", scheduled_at: iso }),
+      });
+      expect(day).not.toBe("");
+      expect(html).toContain(`Visit scheduled for ${day}`);
+      expect(html).toContain(`lg-body min-w-0 text-foreground">${day}`);
+    }
+  });
+
+  it("ignores worker_price when landlord_price is null or different", () => {
+    const closed = {
+      id: 9,
+      maintenance_request_id: 11,
+      from_status: "In Progress",
+      to_status: "Closed",
+      changed_by_role: "maintenance",
+      note: null,
+      created_at: "2026-11-13T19:45:00.000Z",
+    };
+    const base = {
+      id: 11,
+      title: "Bathroom fan",
+      status: "closed" as const,
+      vendor_name: "Harbor Electric",
+      vendor_id: 3,
+      resolution_notes: "Fan motor replaced",
+      completed_at: "2026-11-13T19:45:00.000Z",
+      scheduled_at: null,
+      worker_price: 77,
+    };
+
+    const missing = render({
+      history: [closed],
+      comments: [],
+      order: order({ ...base, landlord_price: null }),
+    });
+    expect(missing).not.toContain("$77");
+    expect(missing).toContain("Fan motor replaced · Harbor Electric");
+
+    const different = render({
+      history: [closed],
+      comments: [],
+      order: order({ ...base, landlord_price: 180 }),
+    });
+    expect(different).toContain("$180 · Harbor Electric");
+    expect(different).toContain("Fan motor replaced · $180 · Harbor Electric");
+    expect(different).not.toContain("$77");
   });
 });

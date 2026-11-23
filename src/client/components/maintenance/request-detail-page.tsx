@@ -1093,8 +1093,10 @@ const HEADER_CHIP: Record<RequestStatus, string> = {
 
 function timelineBadgeVariant(
   status: RequestStatus,
-): "info" | "warning" | "success" | "neutral" {
+): "info" | "brand" | "warning" | "success" | "neutral" {
   switch (status) {
+    case "Assigned":
+      return "brand";
     case "In progress":
       return "warning";
     case "On hold":
@@ -1132,17 +1134,22 @@ function landlordTimeline(
     },
   ];
 
+  const latestScheduledId = latestScheduledEventId(history);
   for (const ev of history) {
     if (ev.from_status == null || ev.note?.trim().toLowerCase() === "created") continue;
     const db = workOrderStatusFromDb(ev.to_status);
     const actor = roleLabel(ev.changed_by_role || "") || "Landlord Gopher";
     const stamp = timelineWhen(ev.created_at);
+    const note = ev.note?.trim() ?? "";
     items.push({
       key: `status-${ev.id}`,
       at: ev.created_at,
       seq: 1,
-      status: historyBadge(db, order),
-      body: historyBody(db, order, actor),
+      status: historyBadge(db),
+      body: historyBody(db, order, actor, {
+        note,
+        attachSchedule: db === "scheduled" && ev.id === latestScheduledId,
+      }),
       when: db === "scheduled" ? `${actor} · ${stamp}` : stamp,
     });
   }
@@ -1161,7 +1168,24 @@ function landlordTimeline(
   return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.seq - b.seq));
 }
 
-function historyBadge(db: WorkOrderStatus, order: WorkOrder): RequestStatus {
+/** Latest scheduled transition wins when timestamps tie. */
+function latestScheduledEventId(history: MaintenanceStatusEvent[]): number | null {
+  let latest: MaintenanceStatusEvent | null = null;
+  for (const ev of history) {
+    if (ev.from_status == null || ev.note?.trim().toLowerCase() === "created") continue;
+    if (workOrderStatusFromDb(ev.to_status) !== "scheduled") continue;
+    if (
+      !latest ||
+      ev.created_at > latest.created_at ||
+      (ev.created_at === latest.created_at && ev.id > latest.id)
+    ) {
+      latest = ev;
+    }
+  }
+  return latest?.id ?? null;
+}
+
+function historyBadge(db: WorkOrderStatus): RequestStatus {
   switch (db) {
     case "closed":
       return "Completed";
@@ -1172,15 +1196,23 @@ function historyBadge(db: WorkOrderStatus, order: WorkOrder): RequestStatus {
     case "scheduled":
       return "Assigned";
     default:
-      return order.assigned_staff_id ? "Assigned" : "New";
+      return "New";
   }
 }
 
-function historyBody(db: WorkOrderStatus, order: WorkOrder, actor: string): string {
+function historyBody(
+  db: WorkOrderStatus,
+  order: WorkOrder,
+  actor: string,
+  event: { note: string; attachSchedule: boolean },
+): string {
+  // A stored note is the row. Live order fields must not rewrite earlier visits.
+  if (event.note) return event.note;
   const vendor = order.vendor_name?.trim() ?? "";
   switch (db) {
     case "scheduled": {
-      const when = order.scheduled_at ? formatDocumentDate(order.scheduled_at) : "";
+      if (!event.attachSchedule) return "Scheduled";
+      const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
       if (when) return `Visit scheduled for ${when}`;
       return vendor ? `${actor} assigned ${vendor}` : "Scheduled";
     }
@@ -1227,7 +1259,7 @@ function detailRows(
   } else {
     rows.push({
       label: "Scheduled",
-      value: order.scheduled_at ? formatDocumentDate(order.scheduled_at) || "—" : "—",
+      value: order.scheduled_at ? stableDocumentDate(order.scheduled_at) || "—" : "—",
     });
   }
   rows.push({ label: "Reported by", value: reportedValue(reporter, order.created_at) });
@@ -1239,7 +1271,7 @@ function landlordStatusCaption(order: WorkOrder): string | undefined {
   const vendor = order.vendor_name?.trim() ?? "";
   if (status === "New") return "Needs assignment";
   if (status === "Assigned") {
-    const when = order.scheduled_at ? formatDocumentDate(order.scheduled_at) : "";
+    const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
     if (vendor && when) return `${vendor} · visit ${when}`;
     if (vendor) return vendor;
     if (when) return `Visit ${when}`;
@@ -1339,8 +1371,23 @@ function formatLandlordPrice(amount: number): string {
 
 const NOON_UTC_DATE = /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.\d+)?(?:Z|\+00:00)$/;
 
+/**
+ * Date-only writes are stored as noon UTC. Keep the calendar day from the
+ * ISO prefix, same as formatActivityStamp, so the day does not shift by zone.
+ */
+function dateOnlyKey(iso: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE.test(iso)) return iso.slice(0, 10);
+  return null;
+}
+
+function stableDocumentDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const day = dateOnlyKey(iso);
+  return formatDocumentDate(day ?? iso);
+}
+
 function hasClock(iso: string): boolean {
-  return !/^\d{4}-\d{2}-\d{2}$/.test(iso) && !NOON_UTC_DATE.test(iso);
+  return dateOnlyKey(iso) == null;
 }
 
 function clockLabel(iso: string): string {
@@ -1354,7 +1401,8 @@ function clockLabel(iso: string): string {
 }
 
 function isTodayIso(iso: string): boolean {
-  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00` : iso);
+  const day = dateOnlyKey(iso);
+  const d = day ? new Date(`${day}T00:00:00`) : new Date(iso);
   if (Number.isNaN(d.getTime())) return false;
   const now = new Date();
   return (
@@ -1367,13 +1415,15 @@ function isTodayIso(iso: string): boolean {
 function timelineWhen(iso: string): string {
   const time = clockLabel(iso);
   if (isTodayIso(iso)) return time ? `Today ${time}` : "Today";
-  const date = formatDocumentDate(iso);
+  const day = dateOnlyKey(iso);
+  const date = formatDocumentDate(day ?? iso);
   if (time && date) return `${date} · ${time}`;
   return date || time;
 }
 
 function detailWhen(iso: string): string {
-  const date = formatDocumentDate(iso);
+  const day = dateOnlyKey(iso);
+  const date = formatDocumentDate(day ?? iso);
   const time = clockLabel(iso);
   if (date && time) return `${date}, ${time}`;
   return date || time;
