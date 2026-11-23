@@ -7,6 +7,7 @@ import {
   DEMO_ACCOUNTS,
   DEMO_ROLE_ORDER,
   demoPassword,
+  formatDemoSignInError,
   type DemoRoleKey,
 } from "@/lib/demo-accounts";
 import { APP_ENV, STAGING_TOOLS_ALLOWED } from "@/lib/env";
@@ -116,7 +117,7 @@ export function StagingRibbon({ viewingRole = null, onSwitchRole }: StagingRibbo
     try {
       await onSwitchRole(role);
     } catch (err) {
-      setSwitchError(err instanceof Error ? err.message : "Could not switch role");
+      setSwitchError(formatDemoSignInError(err));
     } finally {
       setSwitching(false);
     }

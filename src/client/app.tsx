@@ -173,13 +173,20 @@ export function App() {
     async (role: DemoRoleKey) => {
       const password = demoPassword();
       if (!password) {
-        throw new Error("VITE_DEMO_PASSWORD is not set");
+        throw new Error(
+          "Demo password is not configured (VITE_DEMO_PASSWORD). For staging, set it in the host env; for local, use pnpm dev:local.",
+        );
+      }
+      if (!auth.configured) {
+        throw new Error(
+          "Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Copy .env.example or use pnpm dev:local.",
+        );
       }
       await auth.logout();
       await auth.login(DEMO_ACCOUNTS[role].email, password);
       goDemoHome(role);
     },
-    [auth.login, auth.logout, goDemoHome],
+    [auth.configured, auth.login, auth.logout, goDemoHome],
   );
 
   const withStagingChrome = (node: ReactNode) => (

@@ -115,9 +115,6 @@ export function LoginPage({
 
   return (
     <AuthShell>
-      {mode === "login" && QuickSignIn ? (
-        <QuickSignIn onSignIn={onLogin} onSignedIn={onDemoSignedIn} autoRole={autoRole} />
-      ) : null}
       <form onSubmit={submit}>
         <AuthCard title={subtitle} wide={mode === "signup"}>
           {!configured && (
@@ -261,6 +258,14 @@ export function LoginPage({
           </button>
         </AuthCard>
       </form>
+      {mode === "login" && QuickSignIn ? (
+        <QuickSignIn
+          onSignIn={onLogin}
+          onSignedIn={onDemoSignedIn}
+          autoRole={autoRole}
+          configured={configured}
+        />
+      ) : null}
     </AuthShell>
   );
 }

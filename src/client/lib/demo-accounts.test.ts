@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEMO_ACCOUNTS,
   DEMO_ROLE_ORDER,
+  formatDemoSignInError,
   homePathForDemoRole,
   parseDemoRole,
 } from "./demo-accounts";
@@ -31,5 +32,17 @@ describe("demo-accounts", () => {
 
   it("lists four roles for the card and switcher", () => {
     expect(DEMO_ROLE_ORDER).toEqual(["admin", "landlord", "tenant", "maintenance"]);
+  });
+
+  it("rewrites opaque fetch/network and credential failures", () => {
+    expect(formatDemoSignInError(new Error("fetch failed"))).toMatch(/Can't reach the auth backend/);
+    expect(formatDemoSignInError(new Error("Failed to fetch"))).toMatch(/pnpm dev:local/);
+    expect(formatDemoSignInError(new Error("Load failed"))).toMatch(/VITE_SUPABASE_URL/);
+    expect(formatDemoSignInError(new Error("Invalid login credentials"))).toMatch(
+      /VITE_DEMO_PASSWORD/,
+    );
+    expect(formatDemoSignInError(new Error("Email not confirmed"))).toMatch(
+      /Email not confirmed.*Reset staging data/s,
+    );
   });
 });

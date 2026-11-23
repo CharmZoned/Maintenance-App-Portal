@@ -66,7 +66,7 @@ A function holding the service-role key issues a session for the chosen demo use
 
 ### Behaviour
 
-- Card titled "Staging quick sign-in" above the normal form, four buttons, each showing the
+- Card titled "Staging quick sign-in" below the normal form, four buttons, each showing the
   role, the persona name, and what they can see (for example "Tenant · Tina · Unit 1A").
 - Click → sign in → route to that role's home (`ROLE_HOME` in `safe-redirect.ts`: admin
   `/dashboard`, landlord and tenant `/home`, maintenance `/maintenance`). Failure shows the Supabase error inline

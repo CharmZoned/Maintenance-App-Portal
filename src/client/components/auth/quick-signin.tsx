@@ -8,11 +8,18 @@ import {
   DEMO_ACCOUNTS,
   DEMO_ROLE_ORDER,
   demoPassword,
+  formatDemoSignInError,
   type DemoRoleKey,
 } from "@/lib/demo-accounts";
 import { STAGING_TOOLS_ALLOWED } from "@/lib/env";
 import { AuthNotice } from "./auth-card";
 import { cn } from "@/lib/utils";
+
+const MISSING_DEMO_PASSWORD =
+  "Demo password is not configured (VITE_DEMO_PASSWORD). For staging, set it in the host env; for local, use pnpm dev:local.";
+
+const MISSING_SUPABASE_ENV =
+  "Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Copy .env.example or use pnpm dev:local.";
 
 export type QuickSignInProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
@@ -20,19 +27,29 @@ export type QuickSignInProps = {
   onSignedIn?: (role: DemoRoleKey) => void;
   /** When set, auto-sign-in once for `/login?as=<role>`. */
   autoRole?: DemoRoleKey | null;
+  /** False when Vite Supabase env vars are missing — buttons stay disabled with a clear warning. */
+  configured?: boolean;
 };
 
-export function QuickSignIn({ onSignIn, onSignedIn, autoRole }: QuickSignInProps) {
+export function QuickSignIn({
+  onSignIn,
+  onSignedIn,
+  autoRole,
+  configured = true,
+}: QuickSignInProps) {
   const [busyRole, setBusyRole] = useState<DemoRoleKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoTried = useRef(false);
   const password = demoPassword();
+  const canSignIn = Boolean(password) && configured;
 
   async function signInAs(role: DemoRoleKey) {
+    if (!configured) {
+      setError(MISSING_SUPABASE_ENV);
+      return;
+    }
     if (!password) {
-      setError(
-        "Demo password is not configured (VITE_DEMO_PASSWORD). For staging, set it in the host env; for local, use pnpm dev:local.",
-      );
+      setError(MISSING_DEMO_PASSWORD);
       return;
     }
     setBusyRole(role);
@@ -41,10 +58,7 @@ export function QuickSignIn({ onSignIn, onSignedIn, autoRole }: QuickSignInProps
       await onSignIn(DEMO_ACCOUNTS[role].email, password);
       onSignedIn?.(role);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Sign-in failed";
-      setError(
-        `${message} — if the demo accounts are missing, run “Reset staging data” (or restart pnpm dev:local).`,
-      );
+      setError(formatDemoSignInError(err));
     } finally {
       setBusyRole(null);
     }
@@ -62,7 +76,7 @@ export function QuickSignIn({ onSignIn, onSignedIn, autoRole }: QuickSignInProps
   return (
     <div
       data-quick-signin
-      className="mb-4 flex w-full max-w-[342px] flex-col gap-3 rounded-lg border border-pink-300 bg-pink-50 px-4 py-4"
+      className="mt-4 flex w-full max-w-[342px] flex-col gap-3 rounded-lg border border-pink-300 bg-pink-50 px-4 py-4"
     >
       <div>
         <p className="text-sm font-semibold text-pink-950">Staging quick sign-in</p>
@@ -71,10 +85,10 @@ export function QuickSignIn({ onSignIn, onSignedIn, autoRole }: QuickSignInProps
 
       {error && <AuthNotice tone="danger">{error}</AuthNotice>}
 
-      {!password && (
-        <AuthNotice tone="warning">
-          Set <code>VITE_DEMO_PASSWORD</code> to enable the buttons.
-        </AuthNotice>
+      {!configured && <AuthNotice tone="warning">{MISSING_SUPABASE_ENV}</AuthNotice>}
+
+      {configured && !password && (
+        <AuthNotice tone="warning">{MISSING_DEMO_PASSWORD}</AuthNotice>
       )}
 
       <div className="grid grid-cols-1 gap-2">
@@ -86,7 +100,7 @@ export function QuickSignIn({ onSignIn, onSignedIn, autoRole }: QuickSignInProps
               key={key}
               type="button"
               data-quick-signin-role={key}
-              disabled={Boolean(busyRole) || !password}
+              disabled={Boolean(busyRole) || !canSignIn}
               onClick={() => void signInAs(key)}
               className={cn(
                 "rounded-md border border-pink-200 bg-white px-3 py-2.5 text-left transition-colors",

@@ -80,3 +80,30 @@ export function demoPassword(): string | undefined {
   const value = import.meta.env.VITE_DEMO_PASSWORD?.trim();
   return value || undefined;
 }
+
+/** Turn opaque auth/network failures into actionable staging/local guidance. */
+export function formatDemoSignInError(err: unknown): string {
+  const raw =
+    err instanceof Error && err.message.trim()
+      ? err.message.trim()
+      : typeof err === "object" &&
+          err !== null &&
+          "message" in err &&
+          typeof (err as { message: unknown }).message === "string" &&
+          (err as { message: string }).message.trim()
+        ? (err as { message: string }).message.trim()
+        : "Sign-in failed";
+  const lower = raw.toLowerCase();
+  if (
+    lower === "fetch failed" ||
+    lower === "failed to fetch" ||
+    lower.includes("network request failed") ||
+    lower.includes("load failed")
+  ) {
+    return "Can't reach the auth backend (network). For local, use pnpm dev:local so the emulator is running; for staging, check VITE_SUPABASE_URL / anon key and that the project is up.";
+  }
+  if (lower.includes("invalid login credentials")) {
+    return "Invalid login credentials — demo password may not match the seed, or demo accounts are missing. Set VITE_DEMO_PASSWORD to the seeded value, then run “Reset staging data” (or restart pnpm dev:local).";
+  }
+  return `${raw} — if the demo accounts are missing, run “Reset staging data” (or restart pnpm dev:local).`;
+}
