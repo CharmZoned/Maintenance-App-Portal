@@ -45,7 +45,12 @@ import { NotificationsHost } from "./components/messages/notifications-host";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
 import { PaymentsPage } from "./components/payments";
-import { DEMO_ACCOUNTS, demoPassword, type DemoRoleKey } from "./lib/demo-accounts";
+import {
+  DEMO_ACCOUNTS,
+  demoPassword,
+  homePathForDemoRole,
+  type DemoRoleKey,
+} from "./lib/demo-accounts";
 import {
   displayNameFromEmail,
   navItemsForAudience,
@@ -156,6 +161,14 @@ export function App() {
       ? auth.gate.role.role
       : null;
 
+  const goDemoHome = useCallback(
+    (role: DemoRoleKey) => {
+      // Clear `?as=` (and any leftover login params) so logout does not auto-sign in again.
+      navigate(homePathForDemoRole(role), { replace: true, search: "" });
+    },
+    [navigate],
+  );
+
   const switchDemoRole = useCallback(
     async (role: DemoRoleKey) => {
       const password = demoPassword();
@@ -164,8 +177,9 @@ export function App() {
       }
       await auth.logout();
       await auth.login(DEMO_ACCOUNTS[role].email, password);
+      goDemoHome(role);
     },
-    [auth.login, auth.logout],
+    [auth.login, auth.logout, goDemoHome],
   );
 
   const withStagingChrome = (node: ReactNode) => (
@@ -212,6 +226,7 @@ export function App() {
         onLogin={auth.login}
         onSignup={auth.signup}
         onForgot={() => setAuthScreen("reset-request")}
+        onDemoSignedIn={goDemoHome}
       />,
     );
   }

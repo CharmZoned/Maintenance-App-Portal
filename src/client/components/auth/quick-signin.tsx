@@ -16,11 +16,13 @@ import { cn } from "@/lib/utils";
 
 export type QuickSignInProps = {
   onSignIn: (email: string, password: string) => Promise<void>;
+  /** Called after a successful demo sign-in so the app can route to that role's home and clear `?as=`. */
+  onSignedIn?: (role: DemoRoleKey) => void;
   /** When set, auto-sign-in once for `/login?as=<role>`. */
   autoRole?: DemoRoleKey | null;
 };
 
-export function QuickSignIn({ onSignIn, autoRole }: QuickSignInProps) {
+export function QuickSignIn({ onSignIn, onSignedIn, autoRole }: QuickSignInProps) {
   const [busyRole, setBusyRole] = useState<DemoRoleKey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const autoTried = useRef(false);
@@ -37,6 +39,7 @@ export function QuickSignIn({ onSignIn, autoRole }: QuickSignInProps) {
     setError(null);
     try {
       await onSignIn(DEMO_ACCOUNTS[role].email, password);
+      onSignedIn?.(role);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Sign-in failed";
       setError(

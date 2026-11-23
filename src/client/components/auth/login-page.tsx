@@ -25,11 +25,20 @@ interface Props {
     extras: SignupExtras,
   ) => Promise<"session" | "confirm">;
   onForgot: () => void;
+  /** After staging quick sign-in — navigate to the demo role home and clear `?as=`. */
+  onDemoSignedIn?: (role: DemoRoleKey) => void;
   error: string | null;
   configured: boolean;
 }
 
-export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Props) {
+export function LoginPage({
+  onLogin,
+  onSignup,
+  onForgot,
+  onDemoSignedIn,
+  error,
+  configured,
+}: Props) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -107,7 +116,7 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
   return (
     <AuthShell>
       {mode === "login" && QuickSignIn ? (
-        <QuickSignIn onSignIn={onLogin} autoRole={autoRole} />
+        <QuickSignIn onSignIn={onLogin} onSignedIn={onDemoSignedIn} autoRole={autoRole} />
       ) : null}
       <form onSubmit={submit}>
         <AuthCard title={subtitle} wide={mode === "signup"}>

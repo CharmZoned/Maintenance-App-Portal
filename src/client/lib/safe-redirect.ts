@@ -87,7 +87,11 @@ export function isMaintenanceAllowedRoute(route: Route): boolean {
   );
 }
 
-/** Clamp a pathname to the audience shell (admin staff: no clamp). */
+/**
+ * Clamp a pathname to the audience shell.
+ * Staff keeps known routes (bookmarks); unknown paths (e.g. `/login`) go to the
+ * staff home so staging quick sign-in does not land on not-found.
+ */
 export function clampPathForAudience(pathname: string, audience: PortalAudience): string {
   const route = parseRoute(pathname);
   if (audience === "tenant") {
@@ -99,7 +103,7 @@ export function clampPathForAudience(pathname: string, audience: PortalAudience)
   if (audience === "maintenance") {
     return isMaintenanceAllowedRoute(route) ? pathname : ROLE_HOME.maintenance;
   }
-  return pathname;
+  return route.name === "not-found" ? ROLE_HOME.staff : pathname;
 }
 
 /** True when pathname is a real portal route (same rules as the SPA router). */
@@ -182,7 +186,8 @@ export function readLoginRedirectParams(
   origin: string,
 ): { target: string | null; hadParams: boolean } {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  const hadParams = params.has("redirect") || params.has("intent");
+  // `as` is staging quick-sign-in — strip after login so logout does not re-trigger.
+  const hadParams = params.has("redirect") || params.has("intent") || params.has("as");
   const target = resolvePostLoginPath({
     redirect: params.get("redirect"),
     intent: params.get("intent"),
@@ -191,12 +196,13 @@ export function readLoginRedirectParams(
   return { target, hadParams };
 }
 
-/** Strip redirect/intent from a search string; returns "" or "?…". */
+/** Strip redirect/intent/`as` from a search string; returns "" or "?…". */
 export function stripLoginRedirectParams(search: string): string {
   const raw = search.startsWith("?") ? search.slice(1) : search;
   const params = new URLSearchParams(raw);
   params.delete("redirect");
   params.delete("intent");
+  params.delete("as");
   const qs = params.toString();
   return qs ? `?${qs}` : "";
 }
