@@ -61,6 +61,9 @@ describe("landlord pattern components", () => {
     expect(intro).toContain("Documents");
     expect(intro).toContain("Keep every lease, notice and shared document in one place.");
     expect(intro).toContain("<h1");
+    expect(intro).toContain("lg-heading");
+    expect(intro).toContain("md:lg-display");
+    expect(intro).not.toContain("md:text-[2.125rem]");
 
     expect(renderToStaticMarkup(createElement(LandlordPropertyHeading, { name: "Maple Court" }))).toContain(
       "Maple Court",

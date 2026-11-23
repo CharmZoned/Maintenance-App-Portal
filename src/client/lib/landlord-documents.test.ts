@@ -64,6 +64,11 @@ describe("landlord document helpers", () => {
       "Other",
     );
     expect(documentBadge(doc({ title: "Lease addendum", file_name: "Lease addendum.pdf" }))).toBe("Other");
+    expect(documentBadge(doc({ title: "Notice of lease termination", file_name: "Notice of lease termination.pdf" }))).toBe(
+      "Notice",
+    );
+    expect(documentBadge(doc({ title: "Community rules", file_name: "Community rules.pdf" }))).toBe("Other");
+    expect(documentBadge(doc({ title: "Parking rules", file_name: "Parking rules.pdf" }))).toBe("Other");
   });
 
   it("names whole-building and unit scope", () => {

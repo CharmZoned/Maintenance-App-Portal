@@ -26,9 +26,7 @@ export function LandlordPageIntro({
     <header className={cn("flex flex-col gap-2", className)}>
       <p className="lg-label uppercase text-muted-foreground">{eyebrow}</p>
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
-        <h1 className="lg-heading text-foreground md:text-[2.125rem] md:leading-[2.625rem]">
-          {title}
-        </h1>
+        <h1 className="lg-heading text-foreground md:lg-display">{title}</h1>
         {description ? (
           <p className="order-2 lg-body text-muted-foreground md:hidden">{description}</p>
         ) : null}

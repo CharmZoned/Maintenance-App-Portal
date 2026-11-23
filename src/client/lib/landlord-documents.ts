@@ -87,17 +87,18 @@ export function documentFileKind(
 }
 
 /**
- * No category column on PropertyDocuments. Addenda are Other (checked before
- * "lease") so "Lease addendum" does not wear the Lease badge. House rules are
- * Notice, matching the documents frames.
+ * No category column on PropertyDocuments. Addenda are Other so "Lease
+ * addendum" is not a Lease. Notice is checked before lease so "Notice of
+ * lease termination" stays a Notice. Only "house rules" is a Notice — bare
+ * "rules" (community rules, parking rules) stays Other.
  */
 export function documentBadge(
   doc: Pick<PropertyDocument, "title" | "file_name" | "notes">,
 ): LandlordDocumentBadge {
   const hay = `${doc.title} ${doc.file_name} ${doc.notes ?? ""}`.toLowerCase();
   if (/\b(addendum|addenda|amendment|rider)\b/.test(hay)) return "Other";
+  if (/\b(notice|house\s+rules|fire\s+safety|announcement)\b/.test(hay)) return "Notice";
   if (/\b(lease|rental\s+agreement)\b/.test(hay)) return "Lease";
-  if (/\b(notice|house\s+rules|rules|fire\s+safety|announcement)\b/.test(hay)) return "Notice";
   return "Other";
 }
 
