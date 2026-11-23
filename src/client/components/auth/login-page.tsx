@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SIGNUP_ADDRESS_MAX, SIGNUP_NAME_MAX } from "@/hooks/use-auth";
+import { parseDemoRole, type DemoRoleKey } from "@/lib/demo-accounts";
+import { STAGING_TOOLS_ALLOWED } from "@/lib/env";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { intentLoginLabel } from "@/lib/safe-redirect";
 import { AuthCard, AuthField, AuthNotice, AuthShell } from "./auth-card";
 import { PasswordInput } from "./password-input";
 import { cn } from "@/lib/utils";
+import type { QuickSignInProps } from "./quick-signin";
 
 export type SignupExtras = {
   fullName: string;
@@ -22,11 +25,20 @@ interface Props {
     extras: SignupExtras,
   ) => Promise<"session" | "confirm">;
   onForgot: () => void;
+  /** After staging quick sign-in — navigate to the demo role home and clear `?as=`. */
+  onDemoSignedIn?: (role: DemoRoleKey) => void;
   error: string | null;
   configured: boolean;
 }
 
-export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Props) {
+export function LoginPage({
+  onLogin,
+  onSignup,
+  onForgot,
+  onDemoSignedIn,
+  error,
+  configured,
+}: Props) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -41,7 +53,25 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
   const [localError, setLocalError] = useState<string | null>(null);
   // Capture once — login URL intent does not change while this screen is mounted.
   const [intent] = useState(() => new URLSearchParams(window.location.search).get("intent"));
+  const [autoRole] = useState<DemoRoleKey | null>(() =>
+    parseDemoRole(new URLSearchParams(window.location.search).get("as")),
+  );
+  const [QuickSignIn, setQuickSignIn] = useState<ComponentType<QuickSignInProps> | null>(null);
   const subtitle = mode === "signup" ? "Create an account" : intentLoginLabel(intent);
+
+  // ADR-0006: only dynamically import when the build env is explicitly staging/local.
+  useEffect(() => {
+    const env = import.meta.env.VITE_APP_ENV;
+    if (env !== "staging" && env !== "local") return;
+    if (!STAGING_TOOLS_ALLOWED) return;
+    let cancelled = false;
+    void import("./quick-signin").then((mod) => {
+      if (!cancelled) setQuickSignIn(() => mod.QuickSignIn);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -228,6 +258,14 @@ export function LoginPage({ onLogin, onSignup, onForgot, error, configured }: Pr
           </button>
         </AuthCard>
       </form>
+      {mode === "login" && QuickSignIn ? (
+        <QuickSignIn
+          onSignIn={onLogin}
+          onSignedIn={onDemoSignedIn}
+          autoRole={autoRole}
+          configured={configured}
+        />
+      ) : null}
     </AuthShell>
   );
 }

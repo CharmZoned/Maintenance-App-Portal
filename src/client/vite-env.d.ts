@@ -7,6 +7,10 @@ interface ImportMetaEnv {
   readonly VITE_APP_ENV?: string;
   /** Demo-account password for one-click sign-in. Staging, preview and local only — never set in production. */
   readonly VITE_DEMO_PASSWORD?: string;
+  /** Short build id shown on the staging ribbon (commit SHA prefix). */
+  readonly VITE_BUILD_ID?: string;
+  /** Optional git branch for preview ribbon label (`PREVIEW · <branch>`). */
+  readonly VITE_GIT_BRANCH?: string;
 }
 
 interface ImportMeta {

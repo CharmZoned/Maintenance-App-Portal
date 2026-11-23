@@ -5,7 +5,10 @@ import { cn } from "@/lib/utils";
 /** Centered auth shell — brand + card (Figma 08 Auth). */
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-10">
+    <div
+      className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-10"
+      style={{ paddingTop: "calc(2.5rem + var(--staging-ribbon-offset, 0px))" }}
+    >
       {children}
     </div>
   );

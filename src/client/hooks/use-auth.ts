@@ -101,7 +101,15 @@ export function useAuth() {
     setAuthError(null);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      setAuthError(error.message);
+      // AuthRetryableFetchError often surfaces as opaque "fetch failed" / "Failed to fetch".
+      const lower = error.message.trim().toLowerCase();
+      const message =
+        lower === "fetch failed" ||
+        lower === "failed to fetch" ||
+        lower.includes("load failed")
+          ? "Can't reach Supabase (network). For local, use pnpm dev:local; for staging, check VITE_SUPABASE_URL / anon key."
+          : error.message;
+      setAuthError(message);
       throw error;
     }
   }, []);

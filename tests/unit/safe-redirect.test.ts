@@ -124,12 +124,22 @@ describe("login redirect query helpers", () => {
     });
   });
 
-  test("stripLoginRedirectParams removes only redirect and intent", () => {
+  test("stripLoginRedirectParams removes redirect, intent, and as", () => {
     expect(stripLoginRedirectParams("?redirect=/rent&foo=1&intent=staff")).toBe("?foo=1");
     expect(stripLoginRedirectParams("?redirect=/rent")).toBe("");
+    expect(stripLoginRedirectParams("?as=admin&foo=1")).toBe("?foo=1");
+    expect(stripLoginRedirectParams("?as=tenant")).toBe("");
     expect(stripLoginRedirectParams("")).toBe("");
   });
+
+  test("readLoginRedirectParams treats as as a login param to strip", () => {
+    expect(readLoginRedirectParams("?as=admin", ORIGIN)).toEqual({
+      target: null,
+      hadParams: true,
+    });
+  });
 });
+
 
 describe("clampPathForAudience / resolveReadyLanding", () => {
   test("tenant, landlord, and maintenance clamps match shell homes", () => {
@@ -149,6 +159,8 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
     expect(clampPathForAudience("/maintenance/3", "landlord")).toBe("/maintenance/3");
     expect(clampPathForAudience("/messages", "landlord")).toBe("/messages");
     expect(clampPathForAudience("/rent", "staff")).toBe("/rent");
+    expect(clampPathForAudience("/login", "staff")).toBe(ROLE_HOME.staff);
+    expect(clampPathForAudience("/login", "tenant")).toBe(ROLE_HOME.tenant);
     expect(clampPathForAudience("/dashboard", "maintenance")).toBe(ROLE_HOME.maintenance);
     expect(clampPathForAudience("/rent", "maintenance")).toBe(ROLE_HOME.maintenance);
     expect(clampPathForAudience("/maintenance", "maintenance")).toBe("/maintenance");
@@ -219,5 +231,23 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
         audience: "maintenance",
       }),
     ).toEqual({ path: ROLE_HOME.maintenance, search: "", shouldNavigate: true });
+
+    expect(
+      resolveReadyLanding({
+        search: "?as=admin",
+        origin: ORIGIN,
+        pathname: "/login",
+        audience: "staff",
+      }),
+    ).toEqual({ path: ROLE_HOME.staff, search: "", shouldNavigate: true });
+
+    expect(
+      resolveReadyLanding({
+        search: "?as=tenant",
+        origin: ORIGIN,
+        pathname: "/login",
+        audience: "tenant",
+      }),
+    ).toEqual({ path: ROLE_HOME.tenant, search: "", shouldNavigate: true });
   });
 });

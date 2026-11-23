@@ -26,7 +26,15 @@ const vite = spawn(
   ["exec", "vite", "--host", "127.0.0.1", "--port", String(DEV_APP_PORT), "--strictPort"],
   {
     stdio: "inherit",
-    env: { ...process.env, VITE_SUPABASE_URL: emulator.url, VITE_SUPABASE_ANON_KEY: ANON_KEY },
+    env: {
+      ...process.env,
+      VITE_SUPABASE_URL: emulator.url,
+      VITE_SUPABASE_ANON_KEY: ANON_KEY,
+      // Staging tools (quick sign-in + pink ribbon) — ADR-0006 / build plan 3.7.
+      VITE_APP_ENV: "local",
+      VITE_DEMO_PASSWORD: PASSWORD,
+      VITE_BUILD_ID: "local",
+    },
   },
 );
 

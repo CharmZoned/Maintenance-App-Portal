@@ -159,10 +159,10 @@ not on Supabase. It is fixed with a new forward migration, then step 4 is run ag
 | 3.2 | Owner + Agent | Create the `staging` custom environment tracking the `staging` branch. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_APP_ENV=staging`, `VITE_DEMO_PASSWORD` for staging and preview. Leave `VITE_DEMO_PASSWORD` unset for production. |
 | 3.3 | Owner | Turn on Vercel Authentication (Standard Protection). Create a protection-bypass token for automation and store it as a GitHub secret. |
 | 3.4 | Agent | Add the staging and preview addresses to the staging auth redirect list in `[remotes.staging.auth]`. |
-| 3.5 | Agent | Build the quick sign-in card: four buttons, lazy-loaded only outside production, on the login page above the normal form. |
-| 3.6 | Agent | Build `/login?as=<role>`, the staging ribbon with build id and role switcher, the `[STAGING]` tab title, alternate favicon, and `noindex`. Previews show `PREVIEW · <branch>`. |
-| 3.7 | Agent | Wire the same card into `pnpm dev:local` so it is testable without staging. |
-| 3.8 | Agent | Tests: unit tests for the environment guard; a browser test that clicks each button on the emulator and lands on the right home; a CI step that builds for production and fails if `data-quick-signin` appears in `dist/`. |
+| 3.5 ✅ | Agent | Build the quick sign-in card: four buttons, lazy-loaded only outside production, on the login page below the normal form. |
+| 3.6 ✅ | Agent | Build `/login?as=<role>`, the staging ribbon with build id and role switcher, the `[STAGING]` tab title, and `noindex`. Previews show `PREVIEW · <branch>`. (Alternate favicon still optional.) |
+| 3.7 ✅ | Agent | Wire the same card into `pnpm dev:local` so it is testable without staging. |
+| 3.8 | Agent | Tests: unit tests for the environment guard (done) + demo-account alignment; a browser test that clicks each button on the emulator and lands on the right home (still open); a CI step that builds for production and fails if `data-quick-signin` appears in `dist/` (done). |
 
 **Checks**
 

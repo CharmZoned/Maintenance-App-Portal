@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { reportLocation } from "@clawnify/app/client";
 import { useAppState } from "./hooks/use-app-state";
 import { useAuth } from "./hooks/use-auth";
@@ -35,6 +35,7 @@ import {
   MobileTabBar,
   PortalNav,
   ShellChromeProvider,
+  StagingChromeGate,
   useAdminNavCounts,
 } from "./components/chrome";
 import { FoundationGalleryPage } from "./components/foundation/foundation-gallery-page";
@@ -44,6 +45,12 @@ import { NotificationsHost } from "./components/messages/notifications-host";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
 import { PaymentsPage } from "./components/payments";
+import {
+  DEMO_ACCOUNTS,
+  demoPassword,
+  homePathForDemoRole,
+  type DemoRoleKey,
+} from "./lib/demo-accounts";
 import {
   displayNameFromEmail,
   navItemsForAudience,
@@ -147,26 +154,68 @@ export function App() {
     navigate(landing.path, { replace: true, search: landing.search });
   }, [ready, isTenant, isLandlord, isMaintenance, path, navigate]);
 
+  const viewingRole =
+    auth.gate.state === "ready" ||
+    auth.gate.state === "unapproved" ||
+    auth.gate.state === "forbidden"
+      ? auth.gate.role.role
+      : null;
+
+  const goDemoHome = useCallback(
+    (role: DemoRoleKey) => {
+      // Clear `?as=` (and any leftover login params) so logout does not auto-sign in again.
+      navigate(homePathForDemoRole(role), { replace: true, search: "" });
+    },
+    [navigate],
+  );
+
+  const switchDemoRole = useCallback(
+    async (role: DemoRoleKey) => {
+      const password = demoPassword();
+      if (!password) {
+        throw new Error(
+          "Demo password is not configured (VITE_DEMO_PASSWORD). For staging, set it in the host env; for local, use pnpm dev:local.",
+        );
+      }
+      if (!auth.configured) {
+        throw new Error(
+          "Supabase is not configured (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Copy .env.example or use pnpm dev:local.",
+        );
+      }
+      await auth.logout();
+      await auth.login(DEMO_ACCOUNTS[role].email, password);
+      goDemoHome(role);
+    },
+    [auth.configured, auth.login, auth.logout, goDemoHome],
+  );
+
+  const withStagingChrome = (node: ReactNode) => (
+    <>
+      <StagingChromeGate viewingRole={viewingRole} onSwitchRole={switchDemoRole} />
+      {node}
+    </>
+  );
+
   if (auth.gate.state === "loading") {
-    return (
+    return withStagingChrome(
       <div className="flex min-h-screen items-center justify-center text-muted-foreground">
         Restoring session…
-      </div>
+      </div>,
     );
   }
 
   if (auth.gate.state === "unauthenticated") {
     if (authScreen === "reset-request") {
-      return (
+      return withStagingChrome(
         <ResetRequestPage
           error={auth.authError}
           onBack={() => setAuthScreen("login")}
           onSubmit={auth.requestPasswordReset}
-        />
+        />,
       );
     }
     if (authScreen === "reset-confirm") {
-      return (
+      return withStagingChrome(
         <ResetConfirmPage
           error={auth.authError}
           onSubmit={auth.updatePassword}
@@ -174,40 +223,41 @@ export function App() {
             window.history.replaceState(null, "", "/dashboard");
             setAuthScreen("login");
           }}
-        />
+        />,
       );
     }
-    return (
+    return withStagingChrome(
       <LoginPage
         configured={auth.configured}
         error={auth.authError}
         onLogin={auth.login}
         onSignup={auth.signup}
         onForgot={() => setAuthScreen("reset-request")}
-      />
+        onDemoSignedIn={goDemoHome}
+      />,
     );
   }
 
   if (auth.gate.state === "error") {
-    return (
+    return withStagingChrome(
       <BlockedPage
         title="Couldn’t load your role"
         message={auth.gate.message}
         onRetry={() => void auth.retryRole()}
         onLogout={() => void auth.logout()}
-      />
+      />,
     );
   }
 
   if (auth.gate.state === "no_role") {
-    return (
+    return withStagingChrome(
       <BlockedPage
         title="Your account isn’t set up yet"
         message="You’re signed in, but no portal role is linked yet. Message us and we’ll sort it out. Admins can assign a role on the Users page."
         onRetry={() => void auth.retryRole()}
         retryLabel="Check again"
         onLogout={() => void auth.logout()}
-      />
+      />,
     );
   }
 
@@ -243,14 +293,14 @@ export function App() {
                 title: "Account not approved",
                 message: `Your account status is “${status}”. Contact an admin if you believe this is a mistake. After they change your status, use Check again.`,
               };
-    return (
+    return withStagingChrome(
       <BlockedPage
         title={blocked.title}
         message={blocked.message}
         onRetry={() => void auth.retryRole()}
         retryLabel="Check again"
         onLogout={() => void auth.logout()}
-      />
+      />,
     );
   }
 
@@ -264,14 +314,14 @@ export function App() {
           : role === "maintenance" && auth.gate.role.staff_id == null
             ? "Ask an admin to link a Staff row, then use Check again."
             : "This portal is for admin, maintenance staff, linked tenants, or linked landlords.";
-    return (
+    return withStagingChrome(
       <BlockedPage
         title="Your account isn’t set up yet"
         message={`Signed in as ${role}. ${hint}`}
         onRetry={() => void auth.retryRole()}
         retryLabel="Check again"
         onLogout={() => void auth.logout()}
-      />
+      />,
     );
   }
 
@@ -287,7 +337,7 @@ export function App() {
 
   // reset-password while already authenticated (from email link)
   if (authScreen === "reset-confirm" && window.location.pathname === "/reset-password") {
-    return (
+    return withStagingChrome(
       <ResetConfirmPage
         error={auth.authError}
         onSubmit={auth.updatePassword}
@@ -297,7 +347,7 @@ export function App() {
           // replaceState-then-navigate no-op leaving route stuck on /reset-password).
           navigate(homePath, { replace: true, search: "" });
         }}
-      />
+      />,
     );
   }
 
@@ -521,10 +571,16 @@ export function App() {
     </main>
   );
 
-  return (
+  return withStagingChrome(
     <AppContext.Provider value={state}>
       <ShellChromeProvider value={chrome}>
-        <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row">
+        <div
+          className="flex min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row"
+          style={{
+            height: "calc(100vh - var(--staging-ribbon-offset, 0px))",
+            marginTop: "var(--staging-ribbon-offset, 0px)",
+          }}
+        >
           {isStaffShell ? (
             <AdminWorkspace
               items={navItems}
@@ -555,7 +611,7 @@ export function App() {
           <NoticeBanner />
         </div>
       </ShellChromeProvider>
-    </AppContext.Provider>
+    </AppContext.Provider>,
   );
 }
 
