@@ -18,6 +18,10 @@
 
 export const PASSWORD = "Password123!";
 
+/**
+ * Demo logins. The four quick-sign-in roles (admin / landlord / tenant /
+ * worker→maintenance) must stay aligned with `src/client/lib/demo-accounts.ts`.
+ */
 export const PERSONAS = {
   admin: { email: "admin@test.local", label: "Admin" },
   worker: { email: "worker@test.local", label: "Worker (Sam Fixit)" },

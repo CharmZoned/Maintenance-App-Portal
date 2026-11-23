@@ -44,6 +44,15 @@ jobs:
       - name: Typecheck and build
         run: pnpm typecheck & tp=$!; pnpm build & bp=$!; wait $tp && wait $bp
 
+      # ADR-0006: default (production) build must not ship staging quick sign-in.
+      - name: Production bundle excludes quick sign-in
+        run: |
+          if grep -R -F 'data-quick-signin' dist >/dev/null 2>&1; then
+            echo "::error::Production dist contains data-quick-signin — staging quick sign-in leaked into the default build."
+            exit 1
+          fi
+          echo "Production dist has no data-quick-signin marker."
+
       - name: Test
         run: pnpm test
 
