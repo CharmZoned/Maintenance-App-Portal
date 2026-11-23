@@ -11,6 +11,7 @@ import { PageShell } from "@/components/page-shell";
 import { ErrorRetry, SkeletonRow } from "@/components/patterns";
 import {
   LandlordDocumentRow,
+  LandlordPageIntro,
   LandlordPropertyHeading,
   LandlordScopeHeading,
 } from "@/components/landlord";
@@ -24,10 +25,10 @@ import type { PropertyDocument } from "@/types";
 /**
  * Landlord Documents (Figma `2037:487` and the documents frames on `2036:467`).
  *
- * Read-only. Share, upload, and delete stay off this screen. Download is the
- * only file action. "Shared with me" / "I shared" use `uploaded_by_role`:
- * a landlord upload is "I shared"; every other role is "Shared with me".
- * Rows have no uploader id, so two landlords on one property cannot be split.
+ * Read-only. Download is the only file action. "Shared with me" hides rows
+ * uploaded with role `landlord`. "I shared" stays off this screen until
+ * landlords can upload — that insert is staff-only today, so the tab would
+ * stay empty and read as if sharing already worked.
  */
 
 const EYEBROW = "Your property records";
@@ -37,7 +38,6 @@ const DESCRIPTION = "Keep every lease, notice and shared document in one place."
 const SHARE_FILTERS = [
   { id: "all", label: "All" },
   { id: "with-me", label: "Shared with me" },
-  { id: "mine", label: "I shared" },
 ] as const;
 
 type ShareFilter = (typeof SHARE_FILTERS)[number]["id"];
@@ -54,10 +54,6 @@ function byCreatedAsc(a: PropertyDocument, b: PropertyDocument): number {
 }
 
 function filteredEmptyMessage(share: ShareFilter, propertyName: string | null): string {
-  const place = propertyName ? ` for ${propertyName}` : "";
-  if (share === "mine") {
-    return `You haven't shared any documents${place} yet. Try another tab or property.`;
-  }
   if (share === "with-me") {
     return propertyName
       ? `Nothing has been shared with you for ${propertyName} yet. Try another tab or property.`
@@ -117,6 +113,12 @@ export function LandlordDocumentsPage() {
       .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
   }, [properties, docs]);
 
+  useEffect(() => {
+    if (propertyId === ALL_PROPERTIES) return;
+    const known = propertyOptions.some((property) => String(property.id) === propertyId);
+    if (!known) setPropertyId(ALL_PROPERTIES);
+  }, [propertyId, propertyOptions]);
+
   const selectedPropertyName =
     propertyId === ALL_PROPERTIES
       ? null
@@ -127,7 +129,6 @@ export function LandlordDocumentsPage() {
   const sections = useMemo(() => {
     const filtered = docs.filter((doc) => {
       if (propertyId !== ALL_PROPERTIES && String(doc.property_id) !== propertyId) return false;
-      if (share === "mine") return sharedByLandlord(doc);
       if (share === "with-me") return !sharedByLandlord(doc);
       return true;
     });
@@ -166,15 +167,7 @@ export function LandlordDocumentsPage() {
     <PageShell title={TITLE} width="max-w-6xl">
       <div className="flex flex-col gap-9">
         <div className="flex flex-col gap-7">
-          {/* Display title only — PageShell owns the Documents heading. */}
-          <header className="flex flex-col gap-2">
-            <p className="lg-label uppercase text-muted-foreground">{EYEBROW}</p>
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
-              <p className="lg-heading text-foreground md:text-[2.125rem] md:leading-[2.625rem]">{TITLE}</p>
-              <p className="order-2 lg-body text-muted-foreground md:hidden">{DESCRIPTION}</p>
-            </div>
-            <p className="hidden lg-body text-muted-foreground md:block">{DESCRIPTION}</p>
-          </header>
+          <LandlordPageIntro eyebrow={EYEBROW} title={TITLE} description={DESCRIPTION} />
 
           <div className="flex flex-col gap-4">
             <div role="group" aria-label="Which documents" className="flex flex-wrap gap-1">
@@ -228,18 +221,10 @@ export function LandlordDocumentsPage() {
             </div>
           </div>
         ) : loadFailed ? (
-          <div className="mx-auto flex w-full max-w-[360px] flex-col items-start gap-3">
-            <ErrorRetry message="Documents could not load. Please try again." className="w-full" />
-            <Button
-              type="button"
-              variant="outline"
-              size="touch"
-              className="border-destructive text-destructive hover:bg-destructive-tint"
-              onClick={() => setReloadKey((key) => key + 1)}
-            >
-              Retry
-            </Button>
-          </div>
+          <ErrorRetry
+            message="Documents could not load. Please try again."
+            onRetry={() => setReloadKey((key) => key + 1)}
+          />
         ) : visibleCount === 0 && !filtersActive ? (
           <p className="px-6 py-10 text-center lg-body text-muted-foreground">
             No documents yet. Share a lease, notice or other file to get started.
