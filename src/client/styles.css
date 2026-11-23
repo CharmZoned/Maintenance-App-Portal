@@ -410,10 +410,18 @@
   color: var(--foreground);
 }
 
+/* Utilities so landlord page titles can use `lg-heading md:lg-display`
+   without copying the sizes. Same rules the admin intro already uses. */
+@utility lg-display {
+  @apply text-[2.125rem] font-semibold leading-[2.625rem]; /* 34/42 */
+}
+@utility lg-heading {
+  @apply text-2xl font-semibold leading-8; /* 24/32 */
+}
+
 @layer components {
-  /* Figma text styles used by the admin pages (Inter, no tracking). */
-  .lg-display { @apply text-[2.125rem] font-semibold leading-[2.625rem]; }      /* 34/42 */
-  .lg-heading { @apply text-2xl font-semibold leading-8; }                       /* 24/32 */
+  /* Figma text styles used by the admin pages (Inter, no tracking).
+     Display and heading live as @utility above so `md:lg-display` works. */
   .lg-section { @apply text-lg font-semibold leading-[1.625rem]; }               /* 18/26 */
   .lg-body { @apply text-sm font-normal leading-[1.375rem]; }                    /* 14/22 */
   .lg-body-medium { @apply text-sm font-medium leading-[1.375rem]; }             /* 14/22 */
