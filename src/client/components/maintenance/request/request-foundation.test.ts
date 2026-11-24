@@ -14,10 +14,12 @@ import type { MaintenanceComment, MaintenanceStatusEvent, WorkOrder } from "@/ty
 import {
   RequestActionsPanel,
   RequestHeader,
+  headerNextStep,
   RequestNotAvailableState,
   RequestPhotosCard,
   RequestTimeline,
   sectionsForRole,
+  statusMenuItems,
   viewerRoleFrom,
   workerPrimaryAction,
 } from "./index";
@@ -127,11 +129,103 @@ describe("role visibility", () => {
     expect(viewerRoleFrom({ isAdmin: false, isTenant: false, isLandlord: false, canEditWorkOrders: true })).toBe("maintenance");
   });
 
+  it("only treats a non-admin editor as the worker; anyone else is read-only", () => {
+    const flags = { isAdmin: false, isTenant: false, isLandlord: false, canEditWorkOrders: false };
+    expect(viewerRoleFrom(flags)).toBe("viewer");
+    expect(viewerRoleFrom({ ...flags, isAdmin: true })).toBe("admin");
+    expect(viewerRoleFrom({ ...flags, isAdmin: true, canEditWorkOrders: true })).toBe("admin");
+    expect(viewerRoleFrom({ ...flags, isTenant: true })).toBe("tenant");
+    expect(viewerRoleFrom({ ...flags, isLandlord: true })).toBe("landlord");
+    const readOnly = sectionsForRole("viewer");
+    expect(readOnly).toMatchObject({ cost: null, vendor: false, internalNotes: false });
+    for (const key of [
+      "actionsPanel",
+      "internalToggle",
+      "costVendorEditable",
+      "composer",
+      "addPhotos",
+      "editAndDelete",
+      "workerStatusActions",
+      "changeStatus",
+    ] as const) {
+      expect(readOnly[key], key).toBe(false);
+    }
+    // No messages and no internal entries for the read-only viewer.
+    const entries = buildTimeline(
+      wo(),
+      [],
+      [
+        {
+          id: 1,
+          maintenance_request_id: 6,
+          body: "Tenant note",
+          visibility: "tenant_visible",
+          author_role: "tenant",
+          author_staff_id: null,
+          author_tenant_id: 11,
+          created_at: "2026-11-14T10:00:00Z",
+        },
+      ],
+      {},
+      "viewer",
+    );
+    expect(entries.some((e) => e.kind === "message")).toBe(false);
+  });
+
+  it("ticks the stored status in Change status, not the display label", () => {
+    // An `open` row with an assignee displays "Assigned" but is not `scheduled`.
+    const order = wo({ status: "open", assigned_staff_id: 4 });
+    expect(toRequestStatus(order)).toBe("Assigned");
+    const items = statusMenuItems(order.status);
+    const current = items.filter((i) => i.isCurrent).map((i) => i.value);
+    expect(current).toEqual(["open"]);
+    const scheduled = items.find((i) => i.value === "scheduled");
+    expect(scheduled).toMatchObject({ label: "Assigned", isCurrent: false });
+    expect(items.map((i) => i.label)).toEqual(["New", "Assigned", "In progress", "On hold", "Completed"]);
+    expect(items.filter((i) => i.needsInput).map((i) => i.value)).toEqual(["on_hold", "closed"]);
+    expect(statusMenuItems("scheduled").find((i) => i.isCurrent)?.value).toBe("scheduled");
+  });
+
   it("advances the worker with one primary button", () => {
     expect(workerPrimaryAction("Assigned")).toBe("start");
     expect(workerPrimaryAction("In progress")).toBe("complete");
     expect(workerPrimaryAction("On hold")).toBe("resume");
     expect(workerPrimaryAction("Completed")).toBeNull();
+  });
+});
+
+describe("header next step fallback", () => {
+  it("is status-aware when requestNextStep has nothing", () => {
+    expect(headerNextStep("In progress", "Started today · Sam Fixit", "Sam Fixit")).toBe("Started today · Sam Fixit");
+    expect(headerNextStep("New", undefined, null)).toBe("Not assigned yet");
+    expect(headerNextStep("Assigned", undefined, "Sam Fixit")).toBe("Assigned to Sam Fixit");
+    expect(headerNextStep("Assigned", "  ", null)).toBe("Not scheduled yet");
+    expect(headerNextStep("In progress", undefined, "Sam Fixit")).toBe("Assigned to Sam Fixit");
+    expect(headerNextStep("In progress", undefined, null)).toBeNull();
+    for (const status of ["On hold", "Completed"] as const) {
+      expect(headerNextStep(status, undefined, null), status).toBeNull();
+      expect(headerNextStep(status, undefined, "Sam Fixit"), status).toBeNull();
+    }
+  });
+
+  it("renders no step for On hold without a reason instead of Not assigned yet", () => {
+    const html = renderToStaticMarkup(
+      createElement(RequestHeader, {
+        title: "Kitchen faucet dripping",
+        requestNumber: "MR-001006",
+        status: "On hold",
+        priority: null,
+        location: "Unit 1A · Maple Court",
+        reportedBy: "Tina Renter",
+        reportedWhen: "Sat 14 Nov",
+        assigneeName: null,
+        backLabel: "Maintenance",
+        onBack: () => undefined,
+      }),
+    );
+    expect(html).toContain("On hold");
+    expect(html).not.toContain("Not assigned yet");
+    expect(html).not.toContain("Assigned to");
   });
 });
 

@@ -78,7 +78,10 @@ export interface RequestActionsPanelProps {
   role: RequestViewerRole;
   visibility: RequestSectionVisibility;
   status: RequestStatus;
-  /** Stored status (kept for callers; the menu marks the current label). */
+  /**
+   * Stored DB status. The Change status menu ticks this value, not the display
+   * label: an `open` row with an assignee reads "Assigned" but is not `scheduled`.
+   */
   dbStatus: WorkOrderStatus;
   busy?: boolean;
   /** Admin: vendor name, or null for "None" / "Add vendor". Shown only when visibility.vendor. */
@@ -172,6 +175,7 @@ function WorkerActions({ status, busy, onChangeStatus, onAcceptJob, costLabel, v
 
 function AdminActions({
   status,
+  dbStatus,
   busy,
   visibility,
   vendorLabel,
@@ -201,7 +205,7 @@ function AdminActions({
         </Button>
       ) : null}
       {onChangeStatus ? (
-        <RequestStatusMenu current={status} disabled={busy} onChangeStatus={onChangeStatus}>
+        <RequestStatusMenu current={dbStatus} disabled={busy} onChangeStatus={onChangeStatus}>
           <Button
             variant={changeIsPrimary ? "default" : "secondary"}
             // Phone: the sticky bar already is "Change status" unless Assign leads there.
@@ -265,6 +269,29 @@ function AdminActions({
 
 const STATUS_MENU_ORDER: WorkOrderStatus[] = ["open", "scheduled", "in_progress", "on_hold", "closed"];
 
+export interface StatusMenuItem {
+  value: WorkOrderStatus;
+  label: RequestStatus;
+  /** Ticked and not selectable. */
+  isCurrent: boolean;
+  /** Opens a small dialog first (On hold…, Completed…). */
+  needsInput: boolean;
+}
+
+/**
+ * The Change status items for a row's stored status. "Current" compares the
+ * DB value: an `open` row with an assignee displays "Assigned", but picking
+ * Assigned (`scheduled`) is still a real change, so it must stay selectable.
+ */
+export function statusMenuItems(current: WorkOrderStatus): StatusMenuItem[] {
+  return statusOptions(STATUS_MENU_ORDER).map((option) => ({
+    value: option.value,
+    label: option.label,
+    isCurrent: option.value === current,
+    needsInput: option.value === "on_hold" || option.value === "closed",
+  }));
+}
+
 /**
  * Admin "Change status ▾" menu (spec §2.5): New, Assigned, In progress,
  * On hold…, Completed…. The current status is ticked and not selectable; the
@@ -277,7 +304,8 @@ export function RequestStatusMenu({
   onChangeStatus,
   children,
 }: {
-  current: RequestStatus;
+  /** The row's stored DB status. */
+  current: WorkOrderStatus;
   disabled?: boolean;
   onChangeStatus?: (next: WorkOrderStatus) => void;
   /** The trigger (a Button). */
@@ -289,9 +317,7 @@ export function RequestStatusMenu({
         {children}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[12rem]">
-        {statusOptions(STATUS_MENU_ORDER).map((option) => {
-          const isCurrent = option.label === current;
-          const needsInput = option.value === "on_hold" || option.value === "closed";
+        {statusMenuItems(current).map(({ isCurrent, needsInput, ...option }) => {
           return (
             <DropdownMenuItem
               key={option.value}

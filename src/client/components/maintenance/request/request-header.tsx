@@ -30,13 +30,39 @@ export interface RequestHeaderProps {
   reportedWhen: string;
   /**
    * Assigned person's NAME (never "Assigned (staff)"); null when unassigned.
-   * Used in the summary line only when no nextStep is given.
+   * Used in the summary line only when no nextStep is given (New / Assigned).
    */
   assigneeName: string | null;
   backLabel: string;
   onBack: () => void;
   /** Hide the phone-only title (e.g. when a caller already renders it). */
   hidePhoneTitle?: boolean;
+}
+
+/**
+ * The words beside the status pill. Uses the given next step; without one the
+ * fallback depends on the status: New / Assigned say who has it (or that
+ * nobody / no date yet), In progress names the worker when known, and On hold
+ * / Completed (or In progress with nobody named) show no step rather than a
+ * misleading "Not assigned yet".
+ */
+export function headerNextStep(
+  status: RequestStatus,
+  nextStep: string | undefined,
+  assigneeName: string | null,
+): string | null {
+  const given = nextStep?.trim();
+  if (given) return given;
+  switch (status) {
+    case "New":
+      return assigneeName ? `Assigned to ${assigneeName}` : "Not assigned yet";
+    case "Assigned":
+      return assigneeName ? `Assigned to ${assigneeName}` : "Not scheduled yet";
+    case "In progress":
+      return assigneeName ? `Assigned to ${assigneeName}` : null;
+    default:
+      return null;
+  }
 }
 
 export function RequestBackLink({ label, onBack }: { label: string; onBack: () => void }) {
@@ -67,7 +93,7 @@ export function RequestHeader({
   hidePhoneTitle = false,
 }: RequestHeaderProps) {
   const number = requestNumber.startsWith("#") ? requestNumber : `#${requestNumber}`;
-  const step = nextStep?.trim() || (assigneeName ? `Assigned to ${assigneeName}` : "Not assigned yet");
+  const step = headerNextStep(status, nextStep, assigneeName);
   const reported = reportedBy
     ? `Reported by ${reportedBy}${reportedWhen ? `, ${reportedWhen}` : ""}`
     : reportedWhen
@@ -90,7 +116,7 @@ export function RequestHeader({
       )}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
         <StatusChip status={status} />
-        <span className="text-sm leading-5 text-muted-foreground">{step}</span>
+        {step ? <span className="text-sm leading-5 text-muted-foreground">{step}</span> : null}
         {priority ? <PriorityChip level={priority} /> : null}
       </div>
       {locationLine ? <p className="text-sm leading-5 text-muted-foreground">{locationLine}</p> : null}

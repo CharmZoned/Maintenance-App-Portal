@@ -315,8 +315,9 @@ export function RequestDetailView({
       buildTimeline(
         order,
         history,
-        // Landlord: status events only (spec §2.4; request messaging out of scope).
-        role === "landlord" ? [] : comments,
+        // Landlord (and the read-only viewer): status events only (spec §2.4;
+        // request messaging out of scope).
+        role === "landlord" || role === "viewer" ? [] : comments,
         {
           staffById: staffMap,
           tenantName: reporter || undefined,
@@ -454,6 +455,7 @@ export function RequestDetailView({
           role={role}
           visibility={visibility}
           status={status}
+          dbStatus={order.status}
           composer={composer}
           busy={busy}
           onAssign={onAssign}
@@ -535,6 +537,7 @@ function PhoneActionBar({
   role,
   visibility,
   status,
+  dbStatus,
   composer,
   busy,
   onAssign,
@@ -544,6 +547,8 @@ function PhoneActionBar({
   role: RequestViewerRole;
   visibility: RequestSectionVisibility;
   status: RequestStatus;
+  /** Stored status: the Change status menu ticks this, not the display label. */
+  dbStatus: WorkOrderStatus;
   /** Phone: the message box sits in this sticky bar, above the primary action. */
   composer: RequestTimelineComposer | null;
   busy: boolean;
@@ -559,7 +564,7 @@ function PhoneActionBar({
           Assign and schedule
         </Button>
       ) : (
-        <RequestStatusMenu current={status} disabled={busy} onChangeStatus={onChangeStatus}>
+        <RequestStatusMenu current={dbStatus} disabled={busy} onChangeStatus={onChangeStatus}>
           <Button size="touch" className="w-full" disabled={busy}>
             Change status
             <ChevronDown aria-hidden />
@@ -728,15 +733,15 @@ export function RequestDetailPage({
   const [editEntry, setEditEntry] = useState(false);
   const completionPhotoInput = useRef<HTMLInputElement>(null);
 
-  const listWorkOrders = app.listWorkOrders;
+  const getWorkOrder = app.getWorkOrder;
   const listPhotos = app.listMaintenancePhotos;
   const listComments = app.listMaintenanceComments;
   const listHistory = app.listMaintenanceStatusHistory;
   const listStaff = app.listStaff;
-  const listJobLocations = app.listAvailableJobLocations;
+  const getJobLocation = app.getAvailableJobLocation;
 
-  // No single-id API: listWorkOrders (RLS-trimmed per role) then find. A row the
-  // viewer may not read is simply absent → "not available", not an error.
+  // One request by id (RLS-trimmed per role). A row the viewer may not read
+  // comes back null → "not available", not an error.
   const loadSeq = useRef(0);
   const load = useCallback(
     async (opts: { silent?: boolean } = {}) => {
@@ -746,14 +751,12 @@ export function RequestDetailPage({
         setLoadError(false);
       }
       try {
-        const list = await listWorkOrders();
+        let found = await getWorkOrder(id);
         if (loadSeq.current !== mine) return;
-        let found = list.find((w) => w.id === id) ?? null;
         if (found && isWorker && found.status === "open" && found.assigned_staff_id == null && !found.property_name) {
           // Pooled job: Units/Properties stay closed until accepted; the RPC gives the address.
-          const pooledId = found.id;
           try {
-            const spot = (await listJobLocations()).find((l) => l.maintenance_request_id === pooledId);
+            const spot = await getJobLocation(found.id);
             if (spot) {
               found = {
                 ...found,
@@ -801,7 +804,7 @@ export function RequestDetailPage({
         if (loadSeq.current === mine && !opts.silent) setLoading(false);
       }
     },
-    [id, isAdmin, isWorker, listJobLocations, listWorkOrders, listPhotos, listComments, listHistory, listStaff],
+    [id, isAdmin, isWorker, getJobLocation, getWorkOrder, listPhotos, listComments, listHistory, listStaff],
   );
 
   const retryPhotos = useCallback(async () => {

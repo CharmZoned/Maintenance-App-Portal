@@ -28,8 +28,12 @@ import { requestDayInSentence, requestStatusFromDb, type RequestStatus } from "@
  * (scheduled_at, follow-up date) is ever used as an entry's time.
  */
 
-/** Who is looking at the request page. Worker = the `maintenance` app role. */
-export type RequestViewerRole = "admin" | "maintenance" | "tenant" | "landlord";
+/**
+ * Who is looking at the request page. Worker = the `maintenance` app role.
+ * `viewer` is the safe read-only fallback when the app flags name no known
+ * role (status events only, like the landlord, and no prices).
+ */
+export type RequestViewerRole = "admin" | "maintenance" | "tenant" | "landlord" | "viewer";
 
 /**
  * Role tag shown next to a name. Admins read "Admin" to staff and
@@ -398,8 +402,8 @@ function chronological<T extends { created_at: string; id: number }>(rows: reado
  * @param activity  listMaintenanceStatusHistory(order.id)
  * @param messages  listMaintenanceComments(order.id)
  * @param people    names the page could resolve (see TimelinePeople)
- * @param role      the viewer; tenant / landlord never receive internal entries,
- *                  and the landlord receives no messages at all
+ * @param role      the viewer; tenant / landlord / viewer never receive internal
+ *                  entries, and the landlord and viewer receive no messages at all
  * @param options   formatting hooks (tests pin the day label)
  */
 export function buildTimeline(
@@ -475,7 +479,7 @@ export function buildTimeline(
   }
 
   // ── Messages (not for the landlord: request messaging is out of scope) ──
-  if (role !== "landlord") {
+  if (role !== "landlord" && role !== "viewer") {
     for (const c of messages) {
       const internal = c.visibility === "internal";
       if (internal && !staff) continue;

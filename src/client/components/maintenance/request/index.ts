@@ -1,4 +1,4 @@
-export { RequestHeader, RequestBackLink, type RequestHeaderProps } from "./request-header";
+export { RequestHeader, RequestBackLink, headerNextStep, type RequestHeaderProps } from "./request-header";
 export {
   RequestPhotosCard,
   photosCounterLabel,
@@ -13,6 +13,8 @@ export {
 export {
   RequestActionsPanel,
   RequestStatusMenu,
+  statusMenuItems,
+  type StatusMenuItem,
   workerPrimaryAction,
   workerCanHold,
   WORKER_ACTION_LABEL,

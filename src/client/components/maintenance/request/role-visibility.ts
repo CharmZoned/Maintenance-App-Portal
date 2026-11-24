@@ -85,6 +85,20 @@ const VISIBILITY: Record<RequestViewerRole, RequestSectionVisibility> = {
     workerStatusActions: false,
     changeStatus: false,
   },
+  // Unknown role: read-only. No actions, no message box, no photos, no prices.
+  viewer: {
+    actionsPanel: false,
+    internalNotes: false,
+    internalToggle: false,
+    vendor: false,
+    cost: null,
+    costVendorEditable: false,
+    composer: false,
+    addPhotos: false,
+    editAndDelete: false,
+    workerStatusActions: false,
+    changeStatus: false,
+  },
 };
 
 export function sectionsForRole(role: RequestViewerRole): RequestSectionVisibility {
@@ -93,7 +107,9 @@ export function sectionsForRole(role: RequestViewerRole): RequestSectionVisibili
 
 /**
  * Viewer role from the app flags (useApp()). The app exposes isAdmin / isTenant /
- * isLandlord and canEditWorkOrders; a signed-in non-admin editor is the worker.
+ * isLandlord and canEditWorkOrders. Only a non-admin who may edit work orders
+ * is the worker; anyone else (role not known, or no edit right) gets the
+ * read-only `viewer` role rather than worker controls.
  */
 export function viewerRoleFrom(app: {
   isAdmin: boolean;
@@ -104,7 +120,8 @@ export function viewerRoleFrom(app: {
   if (app.isAdmin) return "admin";
   if (app.isTenant) return "tenant";
   if (app.isLandlord) return "landlord";
-  return "maintenance";
+  if (app.canEditWorkOrders) return "maintenance";
+  return "viewer";
 }
 
 /**

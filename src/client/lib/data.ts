@@ -1434,6 +1434,19 @@ export async function listWorkOrders(params?: {
   return hydrateWorkOrderRows(rows ?? [], Boolean(params?.skip_staff_notes));
 }
 
+/**
+ * One request by id, with the same columns and joins as listWorkOrders. RLS
+ * still applies: a row the viewer may not read comes back as null (the request
+ * page shows "not available"), never as an error.
+ */
+export async function getWorkOrder(id: number): Promise<WorkOrder | null> {
+  const { data: row, error } = await supabase.from("MaintenanceRequests").select("*").eq("id", id).maybeSingle();
+  if (error) throwSb(error);
+  if (!row) return null;
+  const [order] = await hydrateWorkOrderRows([row], false);
+  return order ?? null;
+}
+
 type MaintenanceRequestRow = Tables<"MaintenanceRequests">;
 
 /** Joins the names, notes and prices a `WorkOrder` carries onto raw request rows. */
@@ -2122,6 +2135,34 @@ export async function listMaintenanceStatusHistory(
   }));
 }
 
+/**
+ * When each request last moved to In progress, from ONE status-history query
+ * for all the ids (list rows: "Started today"). Requests with no such row map
+ * to null. RLS trims the history to what the viewer may read.
+ */
+export async function listInProgressSince(
+  requestIds: readonly number[],
+): Promise<Map<number, string | null>> {
+  const ids = Array.from(new Set(requestIds));
+  const out = new Map<number, string | null>(ids.map((id) => [id, null]));
+  if (ids.length === 0) return out;
+  const { data, error } = await supabase
+    .from("MaintenanceRequestStatusHistory")
+    .select("maintenance_request_id, to_status, created_at")
+    .in("maintenance_request_id", ids)
+    .order("created_at", { ascending: true });
+  if (error) throwSb(error);
+  for (const row of data ?? []) {
+    // Stored labels vary in case ("In Progress" / "in_progress"): compare the mapped value.
+    if (workOrderStatusFromDb(row.to_status) !== "in_progress") continue;
+    const prev = out.get(row.maintenance_request_id) ?? null;
+    if (prev == null || Date.parse(row.created_at) >= Date.parse(prev)) {
+      out.set(row.maintenance_request_id, row.created_at);
+    }
+  }
+  return out;
+}
+
 // ── Worker job pool (RPCs from 20261118190000_worker_job_pool.sql) ──
 
 /** Worker: take a job offered to the pool. The RPC assigns it and sets status Scheduled. */
@@ -2147,6 +2188,28 @@ export async function listAvailableJobLocations(): Promise<AvailableJobLocation[
     property_name: (row.property_name as string | null) ?? null,
     street_address: (row.street_address as string | null) ?? null,
   }));
+}
+
+/**
+ * Worker: the address of ONE pooled job. The RPC returns a table, so the id is
+ * filtered server-side; the client check keeps it correct if a backend ignores
+ * the filter. Null when the job is not in the viewer's pool.
+ */
+export async function getAvailableJobLocation(requestId: number): Promise<AvailableJobLocation | null> {
+  const { data, error } = await supabase
+    .rpc("list_available_job_locations")
+    .eq("maintenance_request_id", requestId);
+  if (error) throwSb(error);
+  const row = ((data ?? []) as Record<string, unknown>[]).find(
+    (r) => Number(r.maintenance_request_id) === requestId,
+  );
+  if (!row) return null;
+  return {
+    maintenance_request_id: Number(row.maintenance_request_id),
+    unit_label: (row.unit_label as string | null) ?? null,
+    property_name: (row.property_name as string | null) ?? null,
+    street_address: (row.street_address as string | null) ?? null,
+  };
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────
