@@ -16,6 +16,7 @@ import { ApprovalCard } from "./approval-card";
 import { PersonRow } from "./person-row";
 import { TeamRow } from "./team-row";
 import { VendorRow } from "./vendor-row";
+import { LandlordsTab } from "./landlords-tab";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -68,6 +69,8 @@ export function PeoplePage({
   const [tenantDialog, setTenantDialog] = useState(false);
   const [landlordDialog, setLandlordDialog] = useState(false);
   const [editingLandlord, setEditingLandlord] = useState<Landlord | undefined>();
+  /** Bumped when the landlord dialog closes so the Landlords tab refreshes. */
+  const [landlordReload, setLandlordReload] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{
     user: UserAccountRow;
@@ -125,6 +128,11 @@ export function PeoplePage({
     }
     setTab(pending.length > 0 ? "approvals" : "tenants");
   }, [state, pending.length, search]);
+
+  function openNewLandlord() {
+    setEditingLandlord(undefined);
+    setLandlordDialog(true);
+  }
 
   function selectTab(id: PeopleTabId) {
     setTab(id);
@@ -283,6 +291,22 @@ export function PeoplePage({
             </div>
           )}
         </div>
+      ) : tab === "landlords" && isAdmin ? (
+        <LandlordsTab
+          navigate={navigate}
+          reloadKey={landlordReload}
+          onAdd={canMutatePortfolio ? openNewLandlord : undefined}
+          onEdit={
+            canMutatePortfolio
+              ? (id) => {
+                  const l = landlords.find((x) => x.id === id);
+                  if (!l) return;
+                  setEditingLandlord(l);
+                  setLandlordDialog(true);
+                }
+              : undefined
+          }
+        />
       ) : tab === "landlords" ? (
         <div className="space-y-3">
           <p className="text-[13px] text-muted-foreground">
@@ -395,7 +419,10 @@ export function PeoplePage({
       />
       <LandlordDialog
         open={landlordDialog}
-        onOpenChange={setLandlordDialog}
+        onOpenChange={(o) => {
+          setLandlordDialog(o);
+          if (!o) setLandlordReload((n) => n + 1);
+        }}
         landlord={editingLandlord}
       />
       <ConfirmDelete
