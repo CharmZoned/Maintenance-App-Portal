@@ -5,7 +5,6 @@ import type { StaffMember } from "@/lib/data";
 import type { WorkOrder } from "@/types";
 import {
   formatActivityStamp,
-  inProgressSince,
   priorityLevel,
   requestNextStep,
   toRequestStatus,
