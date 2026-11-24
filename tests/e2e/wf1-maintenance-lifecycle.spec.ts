@@ -29,7 +29,7 @@ function requestRow(page: Page, title: string) {
 /** One click from the role's list lands on the request page. */
 async function openFromList(page: Page, title: string) {
   await requestRow(page, title).click();
-  await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+  await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
   await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
 }
 
@@ -108,7 +108,7 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
     await requestRow(page, TITLE).click();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+    await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
 
     await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
     await expect(page.getByText(DESCRIPTION)).toBeVisible();
@@ -146,7 +146,7 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
     await page.getByRole("textbox", { name: "Message" }).fill(TENANT_REPLY);
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page.getByText(TENANT_REPLY)).toBeVisible();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+    await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
     await shot(page, testInfo, "Tenant reads the update and replies on the page");
   });
 
@@ -158,10 +158,10 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
 
     await page.getByRole("button", { name: "Mark completed" }).filter({ visible: true }).first().click();
     const dialog = page.getByRole("dialog", { name: "Mark completed" });
-    await expect(dialog.getByText("Add a photo of the finished work first.")).toBeVisible();
+    await expect(dialog.getByText("Add a photo of the finished work.")).toBeVisible();
     await dialog.locator('input[type="file"]').setInputFiles({ ...PNG, name: "fixed.png" });
-    await expect(page.getByText("Photo added.")).toBeVisible();
-    await dialog.locator("#resolution-notes").fill(RESOLUTION);
+    await expect(dialog.getByRole("img", { name: "Your photo 1" })).toBeVisible();
+    await dialog.getByLabel("What fixed it?").fill(RESOLUTION);
     await shot(page, testInfo, "Worker records what fixed it");
     await dialog.getByRole("button", { name: "Mark completed" }).click();
 

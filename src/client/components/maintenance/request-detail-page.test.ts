@@ -6,16 +6,20 @@ import {
   assignableStaff,
   costLabelFor,
   dayStamp,
+  landlordBilledLabel,
+  officeHrefForRequest,
   placeLabel,
   requestNumberLabel,
+  workerHoldsJob,
   type RequestDetailViewProps,
 } from "@/components/maintenance/request-detail-page";
+import { tenantFixState, tenantFixSummary } from "@/components/maintenance/request/tenant-fix-check";
 import {
   RequestErrorState,
   RequestLoadingState,
   RequestNotAvailableState,
 } from "@/components/maintenance/request/request-states";
-import { notAvailableActionFor } from "@/components/maintenance/request/role-visibility";
+import { backLinkFromSearch, notAvailableActionFor } from "@/components/maintenance/request/role-visibility";
 import type { StaffMember } from "@/lib/data";
 import { photosCounterLabel } from "@/components/maintenance/request/request-photos-card";
 import type { MaintenanceComment, MaintenancePhoto, MaintenanceStatusEvent, WorkOrder } from "@/types";
@@ -193,9 +197,83 @@ describe("one request page for every role", () => {
     expect(html).not.toContain(">Send<");
     expect(html).not.toContain(">Actions<");
     expect(html).not.toContain('type="file"');
-    expect(html).toContain("$55.00");
+    // In progress: the landlord price is still an estimate, so no cost is shown.
+    expect(html).not.toContain("$55.00");
     expect(html).not.toContain("$42.00");
     expect(html).toContain("Sam Fixit started work");
+  });
+
+  it("landlord: the request title is the page h1, with a way to message the office", () => {
+    const html = render({ role: "landlord", onMessageOffice: () => undefined });
+    expect(html).toMatch(/<h1[^>]*>Kitchen faucet leaking<\/h1>/);
+    expect(html).toContain("Message the office about this request");
+    expect(render({ role: "landlord" })).not.toContain("Message the office");
+  });
+
+  it("landlord: a New job shows no cost; a completed one shows what was Billed", () => {
+    const fresh = render({ role: "landlord", order: order({ status: "open", assigned_staff_id: null, landlord_price: 190 }) });
+    expect(fresh).not.toContain("$190.00");
+    expect(fresh).not.toContain(">Cost<");
+    const done = render({
+      role: "landlord",
+      order: order({ status: "closed", resolution_notes: "Fixed.", completed_at: "2026-11-24T10:00:00.000Z" }),
+    });
+    expect(done).toContain(">Billed<");
+    expect(done).toContain("$55.00");
+  });
+
+  it("worker on a job they do not hold: no message box, no photo upload, no tenant name", () => {
+    const html = render({
+      role: "maintenance",
+      order: order({ status: "open", assigned_staff_id: null }),
+      viewerStaffId: 4,
+    });
+    expect(html).not.toContain("Accept job"); // self-claim off: no onAcceptJob
+    expect(html).not.toContain("<textarea");
+    expect(html).not.toContain('type="file"');
+    expect(html).not.toContain("Add photos");
+    expect(html).not.toContain("Tina Renter");
+    expect(html).toContain("This job isn’t assigned to you yet.");
+  });
+
+  it("worker holding the job, self-claim on: Release job", () => {
+    const html = render({ role: "maintenance", order: order({ status: "scheduled" }), viewerStaffId: 4, onReleaseJob: () => undefined });
+    expect(html).toContain("Release job");
+    expect(render({ role: "maintenance", order: order({ status: "scheduled" }), viewerStaffId: 4 })).not.toContain(
+      "Release job",
+    );
+  });
+
+  it("tenant, completed: Is it fixed? with both answers; then the confirmed state", () => {
+    const done = order({ status: "closed", resolution_notes: "Fixed.", completed_at: "2026-11-24T10:00:00.000Z" });
+    const ask = render({ role: "tenant", order: done, onConfirmFixed: () => undefined, onStillProblem: () => undefined });
+    expect(ask).toContain("Is it fixed?");
+    expect(ask).toContain("Yes, it’s fixed");
+    expect(ask).toContain("Still a problem");
+    expect(ask).toContain("Sam Fixit marked this completed");
+
+    const confirmed = render({
+      role: "tenant",
+      order: { ...done, tenant_fix_response: "confirmed", tenant_fix_responded_at: "2026-11-24T11:00:00.000Z" },
+      onConfirmFixed: () => undefined,
+      onStillProblem: () => undefined,
+    });
+    expect(confirmed).toContain("You confirmed it’s fixed");
+    expect(confirmed).not.toContain("Is it fixed?");
+  });
+
+  it("staff see the tenant's answer in Details", () => {
+    const done = order({
+      status: "closed",
+      resolution_notes: "Fixed.",
+      completed_at: "2026-11-24T10:00:00.000Z",
+      tenant_fix_response: "confirmed",
+      tenant_fix_responded_at: "2026-11-24T11:00:00.000Z",
+    });
+    const html = render({ order: done });
+    expect(html).toContain("Tenant check");
+    expect(html).toContain("Tenant confirmed it’s fixed");
+    expect(html).not.toContain("Is it fixed?");
   });
 
   it("worker: Start work / Put on hold, no edit or delete, worker price only", () => {
@@ -281,6 +359,60 @@ describe("request page helpers", () => {
     expect(dayStamp("2026-11-23T12:00:00.000Z", now)).toBe("Yesterday");
     expect(dayStamp("2026-11-17", now)).not.toBe("");
     expect(dayStamp(null, now)).toBe("");
+  });
+});
+
+describe("request page: completion, offers and links", () => {
+  it("landlord billed amount only once completed", () => {
+    expect(landlordBilledLabel({ status: "in_progress", landlord_price: 55 })).toBeNull();
+    expect(landlordBilledLabel({ status: "closed", landlord_price: null })).toBeNull();
+    expect(landlordBilledLabel({ status: "closed", landlord_price: 55 })).toBe("$55.00");
+  });
+
+  it("office link carries property, unit, number and title", () => {
+    const href = officeHrefForRequest(order());
+    const about = new URLSearchParams(href.split("?")[1]).get("about");
+    expect(href.startsWith("/messages?office=me")).toBe(true);
+    expect(about).toBe("Maple Court · Unit 1A · MR-001000 · Kitchen faucet leaking");
+  });
+
+  it("a worker holds a job only when it is assigned to them", () => {
+    expect(workerHoldsJob({ assigned_staff_id: null }, 4)).toBe(false);
+    expect(workerHoldsJob({ assigned_staff_id: 5 }, 4)).toBe(false);
+    expect(workerHoldsJob({ assigned_staff_id: 4 }, 4)).toBe(true);
+    expect(workerHoldsJob({ assigned_staff_id: 4 }, null)).toBe(true);
+  });
+
+  it("tenant fix state and summary", () => {
+    expect(tenantFixState({ status: "in_progress", tenant_fix_response: null })).toBeNull();
+    expect(tenantFixState({ status: "closed", tenant_fix_response: null })).toBe("ask");
+    expect(tenantFixState({ status: "closed", tenant_fix_response: "not_fixed" })).toBe("not_fixed");
+    const day = () => "Tue 24 Nov";
+    expect(tenantFixSummary({ status: "closed", tenant_fix_response: null, tenant_fix_responded_at: null }, day)).toBe(
+      "Waiting for the tenant to confirm",
+    );
+    expect(
+      tenantFixSummary({ status: "closed", tenant_fix_response: "confirmed", tenant_fix_responded_at: "x" }, day),
+    ).toBe("Tenant confirmed it’s fixed, Tue 24 Nov");
+  });
+
+  it("back link follows a safe ?from= and keeps its filters", () => {
+    const origin = "https://portal.test";
+    const from = (path: string) => `?from=${encodeURIComponent(path)}`;
+    expect(backLinkFromSearch("admin", from("/maintenance?status=New&view=board"), origin)).toEqual({
+      label: "Maintenance",
+      to: "/maintenance?status=New&view=board",
+    });
+    expect(backLinkFromSearch("admin", from("/calendar?week=2026-11-23"), origin)).toEqual({
+      label: "Calendar",
+      to: "/calendar?week=2026-11-23",
+    });
+    expect(backLinkFromSearch("maintenance", from("/maintenance"), origin)).toEqual({ label: "My jobs", to: "/maintenance" });
+    // Unsafe or unknown: the role's own list.
+    for (const bad of ["https://evil.test/maintenance", "//evil.test", "javascript:alert(1)", "/nope", "/maintenance/12"]) {
+      expect(backLinkFromSearch("tenant", from(bad), origin)).toEqual({ label: "Requests", to: "/maintenance" });
+    }
+    expect(backLinkFromSearch("tenant", "", origin)).toEqual({ label: "Requests", to: "/maintenance" });
   });
 });
 

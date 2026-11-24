@@ -330,11 +330,12 @@ describe("buildReadyHome", () => {
 
     const html = visibleText(renderReady(model));
     expect(html).toContain("Nothing needs you right now.");
-    expect(html).toContain("Late rent, leases ending soon and anything waiting on you will show up here.");
+    expect(html).toContain("Urgent repairs, late rent, leases ending soon and anything waiting on you will show up here.");
     expect(html).toContain("All clear");
     expect(html).toContain("No payments awaiting verification");
     expect(html).toContain("The rent roll isn't in this portal yet.");
-    expect(html).toContain("Support contact not configured.");
+    expect(html).toContain("Office phone:");
+    expect(html).toContain("To be confirmed");
     expect(html).not.toContain("Document shared");
   });
 
@@ -403,6 +404,22 @@ describe("LandlordHomePage states", () => {
     expect(html).not.toContain("Report an issue");
   });
 
+  it("does not greet the owner by a role-word email while their name loads", () => {
+    const html = visibleText(
+      renderToStaticMarkup(
+        createElement(AppContext.Provider, {
+          value: { loading: true, error: null, properties: [] } as unknown as AppStateValue,
+          children: createElement(ShellChromeProvider, {
+            value: { email: "landlord@example.com", role: "landlord", displayName: null, onSignOut: () => undefined },
+            children: createElement(LandlordHomePage, { navigate: () => undefined }),
+          }),
+        }),
+      ),
+    );
+    expect(html).not.toContain(", Landlord.");
+    expect(html).toMatch(/Good (morning|afternoon|evening)\./);
+  });
+
   it("shows the portfolio error copy and a retry", () => {
     const html = visibleText(renderPage({ loading: false, error: "offline", properties: [] }));
     expect(html).toContain(
@@ -425,29 +442,50 @@ describe("LandlordHomePage states", () => {
 });
 
 describe("landlord home review fixes", () => {
-  it("counts an unread thread that sits past the three shown", () => {
-    const model = buildReadyHome({
+  it("shows the owner's office conversation with the shared unread count — not request rows", () => {
+    const base = {
       now,
       name: "Lena",
       properties: [maple],
-      orders: [
-        order({ id: 1, title: "Newest closed", status: "closed", created_at: "2026-11-16T08:00:00", property_id: 1 }),
-        order({ id: 2, title: "Second closed", status: "closed", created_at: "2026-11-15T08:00:00", property_id: 1 }),
-        order({ id: 3, title: "Third closed", status: "closed", created_at: "2026-11-14T08:00:00", property_id: 1 }),
-        order({ id: 4, title: "Older open", status: "open", created_at: "2026-11-04T08:00:00", property_id: 1 }),
-      ],
+      orders: [order({ id: 4, title: "Open request", status: "open" as const, created_at: "2026-11-04T08:00:00", property_id: 1 })],
       charges: [],
       leases: [],
       units: [],
       documents: [],
       pending: [],
       marketed: null,
+      userId: "u-lena",
+    };
+    const unread = buildReadyHome({
+      ...base,
+      inbox: [
+        {
+          key: "office:u-lena",
+          kind: "office",
+          threadUserId: "u-lena",
+          last: {
+            at: "2026-11-16T08:00:00Z",
+            body: "It was $120.",
+            authorRole: "admin",
+            authorUserId: "u-admin",
+            authorTenantId: null,
+            authorStaffId: null,
+          },
+          unread: true,
+        },
+      ],
     });
+    expect(unread.messages.unavailable).toBe(false);
+    expect(unread.messages.unread).toBe(1);
+    expect(unread.messages.threads).toMatchObject([
+      { id: "office:u-lena", name: "Landlord Gopher office", preview: "Landlord Gopher: It was $120.", unread: true },
+    ]);
+    // No per-property message counts: an owner's one conversation is with the office.
+    expect(unread.properties.every((property) => property.unread === 0)).toBe(true);
 
-    expect(model.messages.unavailable).toBe(false);
-    expect(model.messages.unread).toBe(1);
-    expect(model.messages.threads.map((thread) => thread.id)).toEqual(["wo:1", "wo:2", "wo:3"]);
-    expect(model.messages.threads.every((thread) => !thread.unread)).toBe(true);
+    const empty = buildReadyHome({ ...base, inbox: [] });
+    expect(empty.messages.unread).toBe(0);
+    expect(empty.messages.threads).toMatchObject([{ id: "office:u-lena", time: "", unread: false }]);
   });
 
   it("treats a failed request load as unavailable instead of an empty inbox", () => {
@@ -506,5 +544,60 @@ describe("landlord home review fixes", () => {
     expect(model.attention.map((item) => item.id)).toEqual(["rent-2", "lease-9"]);
     const overdue = model.attention[0];
     if (overdue.kind === "link") expect(overdue.context).not.toContain("NaN");
+  });
+});
+
+describe("landlord home: billed spend and urgent requests", () => {
+  const base = {
+    now,
+    name: "Lena",
+    properties: [maple],
+    charges: [],
+    leases: [],
+    units: [],
+    documents: [],
+    pending: [],
+    marketed: null,
+  };
+
+  it("shows the Billed figure from completed requests, the same as the Maintenance page", () => {
+    const model = buildReadyHome({
+      ...base,
+      orders: [order({ id: 4, title: "Leak", status: "open", created_at: "2026-11-10T08:00:00", landlord_price: 400 })],
+      billed: [
+        order({ id: 1, title: "Tap", status: "closed", created_at: "2026-11-02T08:00:00", completed_at: "2026-11-12T08:00:00", landlord_price: 120 }),
+        order({ id: 2, title: "Fan", status: "closed", created_at: "2026-03-02T08:00:00", completed_at: "2026-03-04T08:00:00", landlord_price: 80 }),
+        order({ id: 3, title: "Elsewhere", status: "closed", created_at: "2026-11-02T08:00:00", completed_at: "2026-11-12T08:00:00", landlord_price: 999, property_id: 99 }),
+      ],
+    });
+    expect(model.maintenance.billedLine).toBe(`Billed: ${formatMoney(120)} this month · ${formatMoney(200)} this year`);
+    const html = visibleText(renderReady(model));
+    expect(html).toContain(`Billed: ${formatMoney(120)} this month`);
+    expect(html).not.toContain("Spend isn't on these requests yet.");
+  });
+
+  it("says when billed amounts could not be loaded instead of showing zero", () => {
+    const model = buildReadyHome({ ...base, orders: [], billed: null });
+    expect(model.maintenance.billedLine).toBeNull();
+    expect(visibleText(renderReady(model))).toContain("Billed amounts couldn't be loaded.");
+  });
+
+  it("puts open Emergency and High requests in Needs your attention, linked to the request", () => {
+    const model = buildReadyHome({
+      ...base,
+      orders: [
+        order({ id: 6, title: "Outlet sparks", status: "open", priority: "high", created_at: "2026-11-15T08:00:00", property_name: "Maple Court", unit_name: "2B", request_number: "MR-001006" }),
+        order({ id: 7, title: "Gas smell", status: "on_hold", priority: "urgent", created_at: "2026-11-14T08:00:00", property_name: "Maple Court" }),
+        order({ id: 8, title: "Done already", status: "closed", priority: "urgent", created_at: "2026-11-14T08:00:00" }),
+        order({ id: 9, title: "Squeaky door", status: "open", priority: "normal", created_at: "2026-11-14T08:00:00" }),
+      ],
+      charges: [charge({ id: 10, status: "overdue", amount: 725, amount_paid: 0, due_date: "2026-11-01", unit_name: "1B" })],
+    });
+    const links = model.attention.flatMap((item) => (item.kind === "link" ? [item] : []));
+    expect(links.map((item) => item.id)).toEqual(["priority-7", "rent-10", "priority-6"]);
+    expect(links[0]).toMatchObject({ title: "Emergency · Gas smell", href: "/maintenance/7" });
+    expect(links[0].context).toContain("On hold");
+    expect(links[2]).toMatchObject({ title: "High priority · Outlet sparks", href: "/maintenance/6" });
+    expect(links[2].context).toBe("#MR-001006 · Maple Court · Unit 2B · New");
   });
 });

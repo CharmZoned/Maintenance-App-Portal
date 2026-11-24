@@ -1,9 +1,18 @@
-import { useRef, useState, type DragEvent } from "react";
-import { ImageIcon, Plus, RefreshCw } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { MaintenancePhoto } from "@/types";
 import { PhotoLightbox } from "./photo-lightbox";
+import {
+  AddPhotoTile,
+  FailedTile,
+  PhotoImage,
+  PhotoPlaceholder,
+  UploadingTile,
+  useSinglePhotoPicker,
+  type PendingPhoto,
+} from "./photo-tiles";
 
 /**
  * Photos card (Figma "UPGRADED — Request" Photos; spec §2.3).
@@ -29,7 +38,17 @@ export interface RequestPhotosCardProps {
   canAdd: boolean;
   uploading?: boolean;
   /** Files picked from (or dropped on) the add tile; the caller trims with takePhotoFiles and uploads. */
-  onAdd?: (files: FileList) => void;
+  onAdd?: (files: File[]) => void;
+  /** This session's uploads still in flight or failed ("Upload failed — Retry"). */
+  pending?: PendingPhoto[];
+  onRetryPending?: (key: string) => void;
+  onDiscardPending?: (key: string) => void;
+  /**
+   * A saved photo whose file never arrived (`missing`): the viewer may upload it
+   * again when this returns true (their own upload). Others see "Upload failed".
+   */
+  canRetryMissing?: (photo: MaintenancePhoto) => boolean;
+  onRetryMissing?: (photo: MaintenancePhoto, file: File) => void;
   /**
    * Tap-to-enlarge handled by the page. Leave unset to use the card's own
    * lightbox (PhotoLightbox: arrows, Esc, swipe, focus back to the thumbnail).
@@ -69,13 +88,6 @@ export function photosCounterLabel(opts: { total: number; max: number; slotsLeft
   return total <= max ? `${total} of ${max}` : `${total} ${noun}`;
 }
 
-function onlyImages(files: FileList): FileList | null {
-  if (typeof DataTransfer === "undefined") return files;
-  const dt = new DataTransfer();
-  for (const file of Array.from(files)) if (file.type.startsWith("image/")) dt.items.add(file);
-  return dt.files.length > 0 ? dt.files : null;
-}
-
 export function RequestPhotosCard({
   photos,
   max,
@@ -83,6 +95,11 @@ export function RequestPhotosCard({
   canAdd,
   uploading = false,
   onAdd,
+  pending = [],
+  onRetryPending,
+  onDiscardPending,
+  canRetryMissing,
+  onRetryMissing,
   onOpenPhoto,
   uploaderName,
   loading = false,
@@ -90,25 +107,23 @@ export function RequestPhotosCard({
   onRetry,
   className,
 }: RequestPhotosCardProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const thumbRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [openIndex, setOpenIndex] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState(false);
+  const retryTarget = useRef<MaintenancePhoto | null>(null);
+  const picker = useSinglePhotoPicker((file) => {
+    if (retryTarget.current) onRetryMissing?.(retryTarget.current, file);
+    retryTarget.current = null;
+  });
 
   const showAdd = canAdd && slotsLeft > 0 && Boolean(onAdd) && !loading && !loadError;
+  // A saved row whose file never arrived is not a photo anyone can open.
+  const viewable = useMemo(() => photos.filter((p) => !p.missing), [photos]);
+  const broken = useMemo(() => photos.filter((p) => p.missing), [photos]);
   const total = photos.length;
 
   function openPhoto(photo: MaintenancePhoto, index: number) {
     if (onOpenPhoto) onOpenPhoto(photo, index);
     else setOpenIndex(index);
-  }
-
-  function onDrop(e: DragEvent<HTMLButtonElement>) {
-    e.preventDefault();
-    setDragOver(false);
-    if (uploading || !e.dataTransfer.files.length) return;
-    const images = onlyImages(e.dataTransfer.files);
-    if (images) onAdd?.(images);
   }
 
   return (
@@ -143,11 +158,11 @@ export function RequestPhotosCard({
             </Button>
           ) : null}
         </div>
-      ) : total === 0 && !showAdd ? (
+      ) : total === 0 && pending.length === 0 && !showAdd ? (
         <p className="mt-4 text-sm leading-5 text-muted-foreground">No photos yet.</p>
       ) : (
         <ul className="mt-4 flex flex-wrap gap-3">
-          {photos.map((photo, index) => (
+          {viewable.map((photo, index) => (
             <li key={photo.id}>
               <button
                 ref={(el) => {
@@ -156,61 +171,59 @@ export function RequestPhotosCard({
                 type="button"
                 onClick={() => openPhoto(photo, index)}
                 className="relative block size-24 overflow-hidden rounded-sm border border-border bg-muted outline-none transition-opacity duration-150 hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/40"
-                aria-label={`Open photo ${index + 1} of ${total}`}
+                aria-label={`Open photo ${index + 1} of ${viewable.length}`}
                 title={photo.caption?.trim() || undefined}
               >
-                <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                  <ImageIcon className="size-6" aria-hidden />
-                </span>
-                {photo.url ? <Thumbnail key={photo.url} url={photo.url} /> : null}
+                <PhotoPlaceholder />
+                {photo.url ? <PhotoImage key={photo.url} url={photo.url} /> : null}
               </button>
             </li>
           ))}
-          {showAdd ? (
+          {broken.map((photo) => {
+            const canRetry = Boolean(onRetryMissing && canRetryMissing?.(photo));
+            return (
+              <li key={photo.id}>
+                <FailedTile
+                  label={photo.caption?.trim() || "Photo"}
+                  disabled={uploading}
+                  onRetry={
+                    canRetry
+                      ? () => {
+                          retryTarget.current = photo;
+                          picker.open();
+                        }
+                      : undefined
+                  }
+                />
+              </li>
+            );
+          })}
+          {pending.map((item) => (
+            <li key={item.key}>
+              {item.status === "uploading" ? (
+                <UploadingTile photo={item} />
+              ) : (
+                <FailedTile
+                  label={item.name}
+                  previewUrl={item.previewUrl}
+                  onRetry={onRetryPending ? () => onRetryPending(item.key) : undefined}
+                  onRemove={onDiscardPending ? () => onDiscardPending(item.key) : undefined}
+                />
+              )}
+            </li>
+          ))}
+          {showAdd && onAdd ? (
             <li>
-              <button
-                type="button"
-                disabled={uploading}
-                onClick={() => inputRef.current?.click()}
-                onDragOver={(e) => {
-                  if (uploading) return;
-                  e.preventDefault();
-                  setDragOver(true);
-                }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={onDrop}
-                className={cn(
-                  "flex size-24 flex-col items-center justify-center gap-1.5 rounded-sm border border-dashed border-input bg-card text-muted-foreground outline-none transition-colors duration-150",
-                  "hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-60",
-                  dragOver && "border-ring bg-muted text-foreground",
-                )}
-              >
-                <Plus className="size-5" aria-hidden />
-                <span className="text-xs leading-4 font-medium">{uploading ? "Uploading…" : "Add photos"}</span>
-              </button>
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                tabIndex={-1}
-                aria-hidden
-                className="sr-only"
-                data-testid="request-photos-input"
-                disabled={uploading}
-                onChange={(e) => {
-                  if (e.target.files?.length) onAdd?.(e.target.files);
-                  e.target.value = "";
-                }}
-              />
+              <AddPhotoTile uploading={uploading} onFiles={onAdd} testId="request-photos-input" />
             </li>
           ) : null}
         </ul>
       )}
+      {onRetryMissing && broken.some((p) => canRetryMissing?.(p)) ? picker.input : null}
 
       {onOpenPhoto ? null : (
         <PhotoLightbox
-          photos={photos}
+          photos={viewable}
           index={openIndex}
           onIndexChange={setOpenIndex}
           uploaderName={uploaderName}
@@ -218,21 +231,5 @@ export function RequestPhotosCard({
         />
       )}
     </section>
-  );
-}
-
-/** The thumbnail image over the placeholder icon; hidden again if it fails to load. */
-function Thumbnail({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return (
-    <img
-      src={url}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      onError={() => setFailed(true)}
-      className="absolute inset-0 size-full object-cover"
-    />
   );
 }

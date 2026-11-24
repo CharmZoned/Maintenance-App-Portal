@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { withFrom } from "@/lib/back-link";
+import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import { Inbox, Plus } from "lucide-react";
 import { useApp } from "@/context";
 import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
@@ -219,8 +221,11 @@ export function TenantRequestsPage({
   const noUnit = home != null && home.unit_id == null;
   const canReport = !noUnit;
 
+  /** The request page, told where to come back to (`?from=`, UX-09). */
+  const requestHref = (w: Pick<WorkOrder, "id">) => withFrom(`/maintenance/${w.id}`);
+
   function openRequest(w: WorkOrder) {
-    go(`/maintenance/${w.id}`);
+    go(requestHref(w));
   }
 
   function body() {
@@ -247,6 +252,7 @@ export function TenantRequestsPage({
       <RequestListTable
         items={items}
         onOpen={openRequest}
+        hrefFor={requestHref}
         thumbnails={thumbnails}
         dateColumn="reported"
         sort={sort}
@@ -296,10 +302,7 @@ export function TenantRequestsPage({
 
       {body()}
 
-      <aside className="rounded-sm bg-warning-tint px-4 py-3 text-sm text-warning" role="note">
-        <span className="font-medium">Immediate danger?</span> Contact local emergency services. Do
-        not wait for a portal response.
-      </aside>
+      <SupportContactNotice variant="urgent" />
 
       {/* Phone: primary action as a sticky bar above the bottom tabs (spec §6.2). */}
       <div className="sticky bottom-0 -mx-6 border-t border-border bg-background px-4 py-3 md:hidden">

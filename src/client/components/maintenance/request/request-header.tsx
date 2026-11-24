@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronLeft } from "lucide-react";
 import { PriorityChip, StatusChip } from "@/components/patterns";
 import type { PriorityLevel, RequestStatus } from "@/lib/request-status";
@@ -43,6 +44,14 @@ export interface RequestHeaderProps {
    * in the chrome instead, so pass false to keep a phone back link here.
    */
   phoneBackInHeader?: boolean;
+  /**
+   * The title is the page's h1 at every width (landlord: the toolbar carries
+   * the portal breadcrumb, so the request title is the page heading here).
+   * Default: the title shows on phone only, as an h2 under the toolbar h1.
+   */
+  titleIsPageHeading?: boolean;
+  /** Buttons under the location line (landlord: Message the office). */
+  actions?: ReactNode;
 }
 
 /**
@@ -98,6 +107,8 @@ export function RequestHeader({
   onBack,
   hidePhoneTitle = false,
   phoneBackInHeader = true,
+  titleIsPageHeading = false,
+  actions,
 }: RequestHeaderProps) {
   const number = requestNumber.startsWith("#") ? requestNumber : `#${requestNumber}`;
   const step = headerNextStep(status, nextStep, assigneeName);
@@ -114,7 +125,12 @@ export function RequestHeader({
       <div className={phoneBackInHeader ? "hidden md:flex" : "flex"}>
         <RequestBackLink label={backLabel} onBack={onBack} />
       </div>
-      {hidePhoneTitle ? null : (
+      {titleIsPageHeading ? (
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h1 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-foreground">{title}</h1>
+          <span className="text-sm leading-5 text-muted-foreground">{number}</span>
+        </div>
+      ) : hidePhoneTitle ? null : (
         // Phone: the header bar holds the back button (with the chrome), so the title and number live here.
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 md:hidden">
           <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-foreground">{title}</h2>
@@ -127,6 +143,7 @@ export function RequestHeader({
         {priority ? <PriorityChip level={priority} /> : null}
       </div>
       {locationLine ? <p className="text-sm leading-5 text-muted-foreground">{locationLine}</p> : null}
+      {actions ? <div className="flex flex-wrap gap-2 pt-1">{actions}</div> : null}
     </div>
   );
 }

@@ -121,7 +121,7 @@ export const fixtureModel: AdminDashboardModel = {
         id: "visit-1000",
         kind: "visit",
         day: "2026-11-17",
-        title: "Scheduled visit · 10:00–11:00 am",
+        title: "Scheduled visit · 10–12",
         record: "Kitchen faucet leaking · #MR-001000",
         details: ["Sam Fixit, team · Tina Renter, tenant", "Maple Court · Unit 1A"],
         actionLabel: "Open request",
@@ -239,7 +239,7 @@ export const fixtureModel: AdminDashboardModel = {
         heading: "#MR-001000 · Kitchen faucet leaking",
         context: "Maple Court · 1A · Tina Renter, tenant",
         statusLine: "High · Assigned → Attend scheduled visit",
-        meta: "Sam Fixit, team · Tomorrow, Tue 17 Nov 2026",
+        meta: "Sam Fixit, team · Tue 17 Nov · 10–12",
         href: "/maintenance/1000",
       },
       {

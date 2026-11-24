@@ -62,6 +62,8 @@ export function navItemsForAudience(
     case "maintenance":
       return [
         { id: "maintenance", label: "My jobs", href: "/maintenance" },
+        // Their visits by day (UX-17). Same /calendar page, work items only.
+        { id: "calendar", label: "Calendar", href: "/calendar" },
         { id: "messages", label: "Messages", href: "/messages" },
       ];
     case "staff":

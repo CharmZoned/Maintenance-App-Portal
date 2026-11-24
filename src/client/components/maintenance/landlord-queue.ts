@@ -1,8 +1,9 @@
+import { billedSpend, billedSpendText } from "@/lib/billed-spend";
 import { formatDocumentDate } from "@/lib/landlord-documents";
 import { formatMoney } from "@/lib/utils";
 import type { WorkOrder, WorkOrderPriority } from "@/types";
 import type { RequestStatus } from "@/components/patterns/status-chip";
-import { parseWhenDate, toRequestStatus } from "./request-status";
+import { formatVisit, hasScheduledVisit, parseWhenDate, toRequestStatus } from "@/lib/request-status";
 
 /**
  * Landlord maintenance queue (Figma "001 - Landlord Pages", LM frames
@@ -16,8 +17,9 @@ import { parseWhenDate, toRequestStatus } from "./request-status";
  *
  * TODO(data-gap): list rows have `assigned_staff_id` but no staff name, so
  * the status line cannot say "Sam Fixit". There is no common-area flag;
- * "Common area" is used only when the unit is named that. Spend is the sum
- * of `landlord_price` on completed requests (null counts as nothing billed).
+ * "Common area" is used only when the unit is named that. The Billed figure
+ * comes from `billedSpend` (lib/billed-spend), shared with Home and the
+ * property page.
  */
 
 export type LandlordQueueTab = "open" | "on_hold" | "completed" | "all";
@@ -82,7 +84,7 @@ export type LandlordQueueModel = {
   spendCompactDetail: string;
   /** "3 open · 0 emergency · 1 on hold" */
   phoneHeadline: string;
-  /** "Spend: $180 this month · $1,240 this year" */
+  /** "Billed: $180 this month · $1,240 this year" */
   phoneSpend: string;
   completedSpendLine: string;
   groups: LandlordQueueGroup[];
@@ -104,11 +106,10 @@ export function buildLandlordQueue(input: {
   const now = input.now ?? new Date();
   const scoped = input.orders.filter((order) => inProperty(order, input.propertyId));
   const counts = countOrders(scoped);
-  const spend = spendTotals(scoped, now);
-  const spendMonthAmount = formatMoney(spend.month);
-  const spendYearAmount = formatMoney(spend.year);
-  const spendMonthLabel = `${spendMonthAmount} this month`;
-  const spendYearLabel = `${spendYearAmount} this year`;
+  const billed = billedSpendText(billedSpend(scoped, now));
+  const spendMonthAmount = billed.monthAmount;
+  const spendMonthLabel = billed.month;
+  const spendYearLabel = billed.year;
   const onHold = onHoldSummary(scoped, now);
   const groups = groupRows(scoped.filter((order) => inTab(order, input.tab)), input.properties, input.tab, now);
   const completedThisMonth = scoped.filter(
@@ -125,8 +126,8 @@ export function buildLandlordQueue(input: {
     spendYearLabel,
     spendCompactDetail: `this month · ${spendYearLabel}`,
     phoneHeadline: `${counts.open} open · ${emergencyPhrase(counts.emergency)} · ${counts.onHold} on hold`,
-    phoneSpend: `Spend: ${spendMonthLabel} · ${spendYearLabel}`,
-    completedSpendLine: `Spend: ${spendMonthLabel} · ${spendYearLabel}`,
+    phoneSpend: billed.line,
+    completedSpendLine: billed.line,
     groups,
     openFooter: input.tab === "open" ? openFooter(completedThisMonth) : null,
     completedNotes: input.tab === "completed" ? completedNotes(scoped, input.properties, input.propertyId, now) : [],
@@ -166,19 +167,6 @@ function countOrders(orders: readonly WorkOrder[]): LandlordQueueCounts {
 
 function emergencyPhrase(n: number): string {
   return n > 1 ? `${n} emergencies` : `${n} emergency`;
-}
-
-function spendTotals(orders: readonly WorkOrder[], now: Date): { month: number; year: number } {
-  let month = 0;
-  let year = 0;
-  for (const order of orders) {
-    if (order.status !== "closed") continue;
-    const when = order.completed_at ?? order.created_at;
-    const price = order.landlord_price ?? 0;
-    if (inYear(when, now)) year += price;
-    if (inMonth(when, now)) month += price;
-  }
-  return { month, year };
 }
 
 function onHoldSummary(orders: readonly WorkOrder[], now: Date): { full: string; compact: string } {
@@ -315,10 +303,11 @@ function statusDetail(order: WorkOrder, now: Date): string {
     if (isToday(order.scheduled_at, now) || (!order.scheduled_at && isToday(order.created_at, now))) {
       return "Started today";
     }
-    const visit = queueDate(order.scheduled_at, now);
+    const visit = formatVisit(order, { now });
     return visit ? `Visit ${visit}` : "";
   }
-  const visit = queueDate(order.scheduled_at, now);
+  // A New request has no visit yet, whatever scheduled_at holds (pool offers).
+  const visit = hasScheduledVisit(order) ? formatVisit(order, { now }) : "";
   return visit ? `Visit ${visit}` : "";
 }
 
@@ -415,8 +404,3 @@ function inMonth(iso: string | null | undefined, now: Date): boolean {
   return parsed.getFullYear() === now.getFullYear() && parsed.getMonth() === now.getMonth();
 }
 
-function inYear(iso: string | null | undefined, now: Date): boolean {
-  const parsed = iso ? parseWhenDate(iso) : null;
-  if (!parsed) return false;
-  return parsed.getFullYear() === now.getFullYear();
-}

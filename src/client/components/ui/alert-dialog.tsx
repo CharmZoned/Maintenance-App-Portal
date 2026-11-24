@@ -3,6 +3,14 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+import { useFocusReturn } from "@/lib/focus-return";
+import { useMarkDialogOpen } from "@/lib/open-dialogs";
+
+/** Rendered inside open dialog content only: counts it as open. */
+function OpenMarker() {
+  useMarkDialogOpen();
+  return null;
+}
 
 /**
  * The confirm surface for destructive actions.
@@ -33,22 +41,30 @@ AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <AlertDialogPortal>
-    <AlertDialogOverlay>
-      <div className="flex min-h-full items-center justify-center">
-        <AlertDialogPrimitive.Content
-          ref={ref}
-          className={cn(
-            "relative z-50 grid w-full max-w-md gap-3 rounded-lg bg-card p-5 text-card-foreground shadow-float",
-            className,
-          )}
-          {...props}
-        />
-      </div>
-    </AlertDialogOverlay>
-  </AlertDialogPortal>
-));
+>(({ className, onOpenAutoFocus, onCloseAutoFocus, ...props }, ref) => {
+  const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
+  return (
+    <AlertDialogPortal>
+      <AlertDialogOverlay>
+        <div className="flex min-h-full items-center justify-center">
+          <AlertDialogPrimitive.Content
+            ref={ref}
+            className={cn(
+              "relative z-50 grid w-full max-w-md gap-3 rounded-lg bg-card p-5 text-card-foreground shadow-float",
+              className,
+            )}
+            onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+            onCloseAutoFocus={focusReturn.onCloseAutoFocus}
+            {...props}
+          >
+            <OpenMarker />
+            {props.children}
+          </AlertDialogPrimitive.Content>
+        </div>
+      </AlertDialogOverlay>
+    </AlertDialogPortal>
+  );
+});
 AlertDialogContent.displayName = AlertDialogPrimitive.Content.displayName;
 
 const AlertDialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (

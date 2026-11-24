@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import type { BilledRow } from "./billed-spend";
 import {
   mapLandlord,
   mapProperty,
@@ -55,6 +56,7 @@ import type {
   DocumentVisibility,
 } from "../types";
 import type { AccountStatus, AppRole, Tables } from "../types.supabase";
+import { friendlyAccountError } from "./account-errors";
 
 export interface UserAccountRow {
   user_id: string;
@@ -71,6 +73,12 @@ export interface UserAccountRow {
    * (FE ahead of live mig) — do not block UI; server enforces after apply.
    */
   email_confirmed_at?: string | null;
+  /** Sign-up details from auth metadata (admin list RPC, 20261124090000). */
+  full_name?: string | null;
+  /** What the person chose at registration. `null` = not stated. */
+  intent_role?: "tenant" | "landlord" | null;
+  signup_address?: string | null;
+  phone?: string | null;
 }
 
 export interface StaffMember {
@@ -80,6 +88,24 @@ export interface StaffMember {
   email: string;
   job_title: string | null;
   gets_request_alerts: boolean;
+  /** Optional so older fixtures still type-check; listStaff always sets them. */
+  phone?: string | null;
+  company_name?: string | null;
+  services?: string[];
+  /** Office flag; false = no longer takes new work. */
+  active?: boolean;
+}
+
+export interface NewStaffMember {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  company_name?: string | null;
+  job_title?: string | null;
+  services?: string[];
+  gets_request_alerts?: boolean;
+  active?: boolean;
 }
 
 function throwSb(error: { message: string } | null): never {
@@ -1400,6 +1426,39 @@ async function loadPricesByRequestIds(
   return { worker, landlord };
 }
 
+/**
+ * Completed requests since `closedSince` with their landlord price only, for
+ * billed spend. Slim on purpose: no joins, no notes, no worker prices; RLS
+ * scopes the rows (an owner sees only their properties' requests and their
+ * own price table).
+ */
+export async function listBilledRequests(closedSince: string): Promise<BilledRow[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequests")
+    .select("id, property_id, closed_at, created_at")
+    .eq("status", workOrderStatusToDb("closed"))
+    .gte("closed_at", closedSince);
+  if (error) throwSb(error);
+  const rows = data ?? [];
+  const prices = new Map<number, number>();
+  if (rows.length > 0) {
+    const { data: priced, error: priceError } = await supabase
+      .from("MaintenanceRequestLandlordPrices")
+      .select("maintenance_request_id, amount")
+      .in("maintenance_request_id", rows.map((r) => r.id));
+    if (priceError) throwSb(priceError);
+    for (const p of priced ?? []) prices.set(p.maintenance_request_id, Number(p.amount));
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    property_id: r.property_id,
+    status: "closed" as const,
+    landlord_price: prices.get(r.id) ?? null,
+    completed_at: r.closed_at,
+    created_at: r.created_at,
+  }));
+}
+
 /** Admin-only (RLS). null removes the price. */
 async function setRequestPrice(table: RequestPriceTable, requestId: number, amount: number | null): Promise<void> {
   if (amount == null) {
@@ -1423,11 +1482,14 @@ export async function listWorkOrders(params?: {
   limit?: number;
   /** Skip the staff-notes and price batches (unused on tenant/landlord Home). */
   skip_staff_notes?: boolean;
+  /** Only requests closed on or after this ISO instant (pair with status "closed"). */
+  closed_since?: string;
 }): Promise<WorkOrder[]> {
   let q = supabase.from("MaintenanceRequests").select("*").order("created_at", { ascending: false });
   if (params?.property_id) q = q.eq("property_id", params.property_id);
   if (params?.status) q = q.eq("status", workOrderStatusToDb(params.status as WorkOrderStatus));
   else if (params?.open_only) q = q.in("status", [...WORK_ORDER_OPEN_STATUSES_DB]);
+  if (params?.closed_since) q = q.gte("closed_at", params.closed_since);
   if (params?.limit != null && params.limit > 0) q = q.limit(params.limit);
   const { data: rows, error } = await q;
   if (error) throwSb(error);
@@ -1580,7 +1642,14 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
   );
 }
 
-/** Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment. */
+/**
+ * Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment.
+ *
+ * `client_submission_id` (a UUID the form makes once per draft) makes the save
+ * idempotent: sending the same draft again (a retry, a double tap, a response
+ * lost on a bad connection) returns the request already created instead of a
+ * duplicate (unique index maintenance_requests_client_submission_id_key).
+ */
 export async function submitTenantMaintenanceRequest(
   input: {
     title: string;
@@ -1588,6 +1657,7 @@ export async function submitTenantMaintenanceRequest(
     category: MaintenanceCategory | string;
     permission_to_enter: boolean;
     priority?: WorkOrderPriority;
+    client_submission_id?: string;
   },
   opts?: { signal?: AbortSignal },
 ): Promise<WorkOrder> {
@@ -1647,11 +1717,24 @@ export async function submitTenantMaintenanceRequest(
       next_follow_up_date: null,
       resolution_notes: null,
       is_test_data: false,
+      client_submission_id: input.client_submission_id ?? null,
     })
     .select("*");
   if (signal) insertQuery = insertQuery.abortSignal(signal);
   const { data, error } = await insertQuery.single();
-  if (error) throwSb(error);
+  if (error) {
+    // Same draft sent twice: hand back the request the first send created.
+    if (error.code === "23505" && input.client_submission_id) {
+      const { data: existing, error: existingErr } = await supabase
+        .from("MaintenanceRequests")
+        .select("*")
+        .eq("client_submission_id", input.client_submission_id)
+        .maybeSingle();
+      if (existingErr) throwSb(existingErr);
+      if (existing) return mapWorkOrder(existing);
+    }
+    throwSb(error);
+  }
   signal?.throwIfAborted();
   return mapWorkOrder(data!);
 }
@@ -1696,6 +1779,9 @@ export async function updateWorkOrder(
         : patch.scheduled_at
       : null;
   }
+  // Arrival-window end. Leaving it out while moving scheduled_for clears the
+  // window in the database (keep_visit_window), so a stale end never sticks.
+  if (patch.scheduled_end_at !== undefined) row.scheduled_end_at = patch.scheduled_end_at;
   if (patch.resolution_notes !== undefined) row.resolution_notes = patch.resolution_notes;
   if (patch.hold_reason !== undefined) row.hold_reason = patch.hold_reason;
   if (patch.next_follow_up_date !== undefined) row.next_follow_up_date = patch.next_follow_up_date;
@@ -1902,8 +1988,12 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
     .from(PHOTO_BUCKET)
     .createSignedUrls(paths, 3600);
   const urlByPath = new Map<string, string>();
+  // Paths Storage answered for and said have no file: the row was saved but the
+  // upload never finished (a whole failed batch call proves nothing either way).
+  const notFound = new Set<string>();
   for (const entry of signedList ?? []) {
     if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
+    else if (entry.path && entry.error) notFound.add(entry.path);
   }
   await Promise.all(
     rows.map(async (row) => {
@@ -1911,7 +2001,10 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
       const { data: signed } = await supabase.storage
         .from(PHOTO_BUCKET)
         .createSignedUrl(row.storage_path, 3600);
-      if (signed?.signedUrl) urlByPath.set(row.storage_path, signed.signedUrl);
+      if (signed?.signedUrl) {
+        urlByPath.set(row.storage_path, signed.signedUrl);
+        notFound.delete(row.storage_path);
+      }
     }),
   );
 
@@ -1922,7 +2015,9 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
     caption: row.caption,
     created_at: row.created_at,
     uploaded_by_role: row.uploaded_by_role,
+    uploaded_by_user_id: row.uploaded_by_user_id ?? null,
     url: urlByPath.get(row.storage_path) ?? null,
+    missing: notFound.has(row.storage_path),
   }));
 }
 
@@ -2002,20 +2097,42 @@ export async function uploadMaintenancePhoto(
   const { data, error } = await photoInsert.single();
   if (error) throwSb(error);
 
-  signal?.throwIfAborted();
+  // The row must never outlive a failed upload: a row without its file would
+  // otherwise show as a broken photo (and, before 20261124120000, counted as
+  // the worker's completion proof). The uploader may delete their own row while
+  // it has no file, so this works for every role.
+  const rollBack = async (reason: string): Promise<never> => {
+    const { error: delErr } = await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+    if (delErr) throw new Error(`${reason} (also failed to roll back photo row: ${delErr.message})`);
+    throw new Error(reason);
+  };
+
+  if (signal?.aborted) {
+    await rollBack("Upload cancelled.").catch(() => undefined);
+    signal.throwIfAborted();
+  }
   const uploadPromise = supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
     cacheControl: "3600",
     upsert: false,
     contentType: file.type || undefined,
   });
-  const { error: upErr } = await raceAbort(uploadPromise, signal);
-  if (upErr) {
-    const { error: delErr } = await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
-    if (delErr) {
-      throw new Error(`${upErr.message} (also failed to roll back photo row: ${delErr.message})`);
-    }
-    throw new Error(upErr.message);
+  let upErr: { message: string } | null;
+  try {
+    ({ error: upErr } = await raceAbort(uploadPromise, signal));
+  } catch (err) {
+    // Aborted while uploading: drop the row once the upload settles, so a late
+    // success cannot leave a file without a row or a row without a file.
+    void uploadPromise.then(async ({ error }) => {
+      if (error) {
+        await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+      } else {
+        await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+        await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+      }
+    });
+    throw err;
   }
+  if (upErr) await rollBack(upErr.message);
 
   signal?.throwIfAborted();
   const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);
@@ -2026,8 +2143,26 @@ export async function uploadMaintenancePhoto(
     caption: data!.caption,
     created_at: data!.created_at,
     uploaded_by_role: data!.uploaded_by_role,
+    uploaded_by_user_id: data!.uploaded_by_user_id ?? null,
     url: signed?.signedUrl ?? null,
+    missing: false,
   };
+}
+
+/**
+ * Finish a photo whose row was saved but whose file never arrived (`missing`):
+ * upload `file` to the row's own storage path, so the photo keeps its place.
+ */
+export async function retryMissingMaintenancePhoto(
+  photo: Pick<MaintenancePhoto, "storage_path">,
+  file: File,
+): Promise<void> {
+  const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(photo.storage_path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (error) throw new Error(error.message);
 }
 
 /** Reject with AbortError when `signal` aborts before `promise` settles. */
@@ -2172,6 +2307,33 @@ export async function listInProgressSince(
 /** Worker: take a job offered to the pool. The RPC assigns it and sets status Scheduled. */
 export async function acceptMaintenanceRequest(requestId: number): Promise<void> {
   const { error } = await supabase.rpc("accept_maintenance_request", { p_request_id: requestId });
+  if (error) throwSb(error);
+}
+
+/** Worker: hand an accepted job back to the admin. The reason goes to the office only. */
+export async function releaseMaintenanceRequest(requestId: number, reason: string): Promise<void> {
+  const { error } = await supabase.rpc("release_maintenance_request", {
+    p_request_id: requestId,
+    p_reason: reason.trim(),
+  });
+  if (error) throwSb(error);
+}
+
+/** Reporting tenant: the completed fix holds. */
+export async function confirmMaintenanceRequestFixed(requestId: number): Promise<void> {
+  const { error } = await supabase.rpc("confirm_maintenance_request_fixed", {
+    p_request_id: requestId,
+    p_fixed: true,
+  });
+  if (error) throwSb(error);
+}
+
+/** Reporting tenant: still a problem. Saves the note as a message and reopens the request. */
+export async function reopenMaintenanceRequestNotFixed(requestId: number, note: string): Promise<void> {
+  const { error } = await supabase.rpc("reopen_maintenance_request_not_fixed", {
+    p_request_id: requestId,
+    p_note: note.trim(),
+  });
   if (error) throwSb(error);
 }
 
@@ -2457,27 +2619,109 @@ void assertOk;
 
 // ── Staff (admin role linking) ────────────────────────────────────
 
-export async function listStaff(): Promise<StaffMember[]> {
-  const { data, error } = await supabase
-    .from("Staff")
-    .select("id, first_name, last_name, email, job_title, gets_request_alerts")
-    .order("last_name");
-  if (error) throwSb(error);
-  return (data ?? []).map((s) => ({
+const STAFF_COLUMNS =
+  "id, first_name, last_name, email, job_title, gets_request_alerts, phone, company_name, services, active";
+
+type StaffRow = Pick<
+  Tables<"Staff">,
+  | "id"
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "job_title"
+  | "gets_request_alerts"
+  | "phone"
+  | "company_name"
+  | "services"
+> & { active?: boolean | null };
+
+function mapStaff(s: StaffRow): StaffMember {
+  return {
     id: s.id,
     first_name: s.first_name,
     last_name: s.last_name,
     email: s.email,
     job_title: s.job_title,
     gets_request_alerts: Boolean(s.gets_request_alerts),
-  }));
+    phone: s.phone ?? null,
+    company_name: s.company_name ?? null,
+    services: s.services ?? [],
+    // Absent before 20261124090000 — treat as active.
+    active: s.active !== false,
+  };
+}
+
+export async function listStaff(): Promise<StaffMember[]> {
+  const { data, error } = await supabase.from("Staff").select(STAFF_COLUMNS).order("last_name");
+  if (error) throwSb(error);
+  return ((data ?? []) as StaffRow[]).map(mapStaff);
+}
+
+function staffPayload(input: Partial<NewStaffMember>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (input.first_name !== undefined) row.first_name = input.first_name.trim();
+  if (input.last_name !== undefined) row.last_name = input.last_name.trim();
+  if (input.email !== undefined) {
+    const email = input.email.trim().toLowerCase();
+    if (!email) throw new Error("Email is required");
+    row.email = email;
+  }
+  if (input.phone !== undefined) row.phone = input.phone?.trim() || null;
+  if (input.company_name !== undefined) row.company_name = input.company_name?.trim() || null;
+  if (input.job_title !== undefined) row.job_title = input.job_title?.trim() || null;
+  if (input.services !== undefined) row.services = input.services;
+  if (input.gets_request_alerts !== undefined) row.gets_request_alerts = input.gets_request_alerts;
+  if (input.active !== undefined) row.active = input.active;
+  return row;
+}
+
+/** Admin: add a team member (Staff row). Their login links on approval. */
+export async function createStaff(input: NewStaffMember): Promise<StaffMember> {
+  if (!input.first_name.trim() || !input.last_name.trim()) throw new Error("First and last name are required");
+  const { data, error } = await supabase
+    .from("Staff")
+    .insert(staffPayload(input) as never)
+    .select(STAFF_COLUMNS)
+    .single();
+  if (error) throwSb(error);
+  return mapStaff(data as StaffRow);
+}
+
+export async function updateStaff(id: number, patch: Partial<NewStaffMember>): Promise<StaffMember> {
+  const { data, error } = await supabase
+    .from("Staff")
+    .update(staffPayload(patch) as never)
+    .eq("id", id)
+    .select(STAFF_COLUMNS)
+    .single();
+  if (error) throwSb(error);
+  return mapStaff(data as StaffRow);
+}
+
+/** Admin: open (not Closed) requests assigned to each Staff id. */
+export async function countOpenJobsByStaff(): Promise<Map<number, number>> {
+  const rows = await selectAllPages<{ assigned_staff_id: number | null }>((from, to) =>
+    supabase
+      .from("MaintenanceRequests")
+      .select("assigned_staff_id")
+      .not("assigned_staff_id", "is", null)
+      .in("status", [...WORK_ORDER_OPEN_STATUSES_DB])
+      .order("id")
+      .range(from, to),
+  );
+  const counts = new Map<number, number>();
+  for (const r of rows) {
+    if (r.assigned_staff_id == null) continue;
+    counts.set(r.assigned_staff_id, (counts.get(r.assigned_staff_id) ?? 0) + 1);
+  }
+  return counts;
 }
 
 // ── User accounts (admin approval queue) ──────────────────────────
 
 export async function listUserAccounts(): Promise<UserAccountRow[]> {
   const { data, error } = await supabase.rpc("list_user_accounts_for_admin");
-  if (error) throwSb(error);
+  if (error) throw new Error(friendlyAccountError(error.message));
   return (data ?? []).map((row) => {
     const mapped: UserAccountRow = {
       user_id: row.user_id,
@@ -2493,6 +2737,13 @@ export async function listUserAccounts(): Promise<UserAccountRow[]> {
     if ("email_confirmed_at" in row) {
       mapped.email_confirmed_at = row.email_confirmed_at ?? null;
     }
+    if ("full_name" in row) {
+      mapped.full_name = row.full_name ?? null;
+      mapped.intent_role =
+        row.intent_role === "tenant" || row.intent_role === "landlord" ? row.intent_role : null;
+      mapped.signup_address = row.signup_address ?? null;
+      mapped.phone = row.phone ?? null;
+    }
     return mapped;
   });
 }
@@ -2505,7 +2756,7 @@ export async function setAccountStatus(
     p_user_id: userId,
     p_status: status,
   });
-  if (error) throwSb(error);
+  if (error) throw new Error(friendlyAccountError(error.message));
   return data!;
 }
 
@@ -2521,7 +2772,40 @@ export async function adminSetUserRole(
     p_tenant_id: links?.tenant_id ?? null,
     p_staff_id: links?.staff_id ?? null,
   });
-  if (error) throwSb(error);
+  if (error) throw new Error(friendlyAccountError(error.message));
+  return data!;
+}
+
+/** Details for a Tenant / Landlord / Staff row created during approval. */
+export interface NewSubjectFromSignup {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  company_name?: string | null;
+  job_title?: string | null;
+  notes?: string | null;
+  services?: string[];
+}
+
+/**
+ * Admin: set role + link (existing record id, or a new record created from the
+ * sign-up) and optionally approve — one atomic server call
+ * (`admin_assign_account_role`, 20261124090000). Errors are plain language.
+ */
+export async function assignAccountRole(
+  userId: string,
+  role: AppRole,
+  opts: { linkId?: number | null; create?: NewSubjectFromSignup | null; approve: boolean },
+): Promise<Tables<"user_roles">> {
+  const { data, error } = await supabase.rpc("admin_assign_account_role", {
+    p_user_id: userId,
+    p_role: role,
+    p_link_id: opts.create ? null : (opts.linkId ?? null),
+    p_create: opts.create ? ({ ...opts.create } as Record<string, unknown>) : null,
+    p_approve: opts.approve,
+  });
+  if (error) throw new Error(friendlyAccountError(error.message));
   return data!;
 }
 

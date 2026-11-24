@@ -219,6 +219,7 @@ function sampleWorld(): AdminDashboardSources {
       status: "scheduled",
       assigned_staff_id: 1,
       scheduled_at: at(2026, 11, 17, 10),
+      scheduled_end_at: at(2026, 11, 17, 12),
     }),
     wo({ id: 998, title: "Hallway light out", status: "in_progress", created_at: at(2026, 11, 13, 8) }),
     wo({
@@ -660,7 +661,7 @@ describe("calendar", () => {
     expect(event("visit-1000")).toMatchObject({
       kind: "visit",
       day: "2026-11-17",
-      title: "Scheduled visit · 10:00 am",
+      title: "Scheduled visit · 10–12",
       record: "Kitchen faucet leaking · #MR-001000",
       details: ["Sam Fixit, team · Tina Renter, tenant", "Maple Court · Unit 1A"],
       actionLabel: "Open request",
@@ -688,6 +689,31 @@ describe("calendar", () => {
       details: ["Raj Patel, tenant", "Maple Court · Unit 1B"],
       actionLabel: "Open rent",
     });
+  });
+
+  test("a New request with a proposed date is listed once, as an assignment, not also as a visit", () => {
+    const sources = world();
+    sources.workOrders = [
+      wo({ id: 3001, title: "Offered job", status: "open", assigned_staff_id: null, scheduled_at: at(2026, 11, 16, 14) }),
+    ];
+    const events = buildAdminDashboardModel(sources, NOW).calendar.events.filter((e) => e.record.startsWith("Offered job"));
+    expect(events.map((e) => e.id)).toEqual(["assign-3001"]);
+  });
+
+  test("a visit whose window has passed without work starting reads missed", () => {
+    const sources = world();
+    sources.workOrders = [
+      wo({
+        id: 3002,
+        title: "Fix gate",
+        status: "scheduled",
+        assigned_staff_id: 1,
+        scheduled_at: at(2026, 11, 15, 8),
+        scheduled_end_at: at(2026, 11, 15, 12),
+      }),
+    ];
+    const visit = buildAdminDashboardModel(sources, NOW).calendar.events.find((e) => e.id === "visit-3002")!;
+    expect(visit.title).toBe("Scheduled visit · 8–12 (missed)");
   });
 
   test("a date-only visit has no clock time", () => {

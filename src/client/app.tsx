@@ -6,6 +6,7 @@ import { useRouter, type Route } from "./hooks/use-router";
 import { AppContext } from "./context";
 import { ErrorBanner } from "./components/error-banner";
 import { NoticeBanner } from "./components/notice-banner";
+import { MAIN_CONTENT_ID } from "./lib/focus-return";
 import { PortalErrorBoundary } from "./components/portal-error-boundary";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { PropertiesList } from "./components/properties/properties-list";
@@ -29,7 +30,11 @@ import { LandlordsPage } from "./components/landlords/landlords-page";
 import { ApplicationsPage } from "./components/applications/applications-page";
 import { UsersPage } from "./components/users/users-page";
 import { LoginPage } from "./components/auth/login-page";
-import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
+import {
+  ResetConfirmPage,
+  ResetLinkExpiredPage,
+  ResetRequestPage,
+} from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
 import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
@@ -45,8 +50,10 @@ import { FoundationGalleryPage } from "./components/foundation/foundation-galler
 import { PeoplePage } from "./components/people/people-page";
 import { MessagesPage } from "./components/messages/messages-page";
 import { NotificationsHost } from "./components/messages/notifications-host";
+import { useInboxUnread } from "./components/messages/use-inbox-unread";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
+import { useOwnerName } from "./components/landlord/use-owner-name";
 import { PaymentsPage } from "./components/payments";
 import {
   DEMO_ACCOUNTS,
@@ -68,7 +75,7 @@ import {
   type PortalAudience,
 } from "./lib/safe-redirect";
 
-function activeFor(route: Route): string {
+function activeFor(route: Route, staffShell: boolean): string {
   if (route.name === "property") return "properties";
   if (route.name === "request") return "maintenance";
   if (
@@ -81,23 +88,25 @@ function activeFor(route: Route): string {
   }
   // Staff-only screens without a rail entry of their own: leases belong with the
   // rent roll, applications come in through the website listings, and the
-  // calendar now lives on the dashboard. (Other shells have no such nav ids.)
+  // calendar now lives on the dashboard. (Other shells have no such nav ids;
+  // the technician shell lists Calendar itself.)
   if (route.name === "leases") return "rent";
   if (route.name === "applications") return "listings";
-  if (route.name === "calendar") return "dashboard";
+  if (route.name === "calendar") return staffShell ? "dashboard" : "calendar";
   if (route.name === "account") return "account";
   // Payments are Home CTAs in Figma — keep Home nav highlight.
   if (route.name === "payments" || route.name === "payments-ledger") return "home";
   return route.name;
 }
 
-type AuthScreen = "login" | "reset-request" | "reset-confirm";
+type AuthScreen = "login" | "reset-request";
+
+/** Where reset emails land. Choosing a new password is driven by this path. */
+const RESET_PASSWORD_PATH = "/reset-password";
 
 export function App() {
   const auth = useAuth();
-  const [authScreen, setAuthScreen] = useState<AuthScreen>(() =>
-    window.location.pathname === "/reset-password" ? "reset-confirm" : "login",
-  );
+  const [authScreen, setAuthScreen] = useState<AuthScreen>("login");
   const ready = auth.gate.state === "ready";
   const isAdmin = auth.gate.state === "ready" && auth.gate.role.role === "admin";
   const isTenant =
@@ -113,6 +122,8 @@ export function App() {
     auth.gate.role.role === "maintenance" &&
     auth.gate.role.staff_id != null;
   const state = useAppState(ready, { isAdmin, isTenant, isLandlord, isMaintenance });
+  // Owners are greeted by the name on their Landlords record, not their role.
+  const ownerName = useOwnerName(isLandlord && auth.gate.state === "ready" ? auth.gate.role.landlord_id : null);
   // The viewer's own ids, so their own request-timeline entries read "You".
   const viewerIds =
     auth.gate.state === "ready"
@@ -139,16 +150,16 @@ export function App() {
     isAdmin,
     refreshKey: path,
   });
+  // Messages badge for the tenant / landlord / technician shells: the same inbox rule.
+  const portalUnread = useInboxUnread({
+    enabled: ready && (isTenant || isLandlord || isMaintenance),
+    role: isTenant ? "tenant" : isLandlord ? "landlord" : isMaintenance ? "maintenance" : null,
+    refreshKey: path,
+  });
 
   useEffect(() => {
     if (ready) reportLocation(path);
   }, [path, ready]);
-
-  useEffect(() => {
-    if (window.location.pathname === "/reset-password") {
-      setAuthScreen("reset-confirm");
-    }
-  }, []);
 
   // Phase 4b / WS-R + role shell: one replace landing (redirect/intent → clamp).
   // No separate effects — avoids same-tick order races and replace-then-push history.
@@ -156,7 +167,7 @@ export function App() {
   // /reset-password → role home before the form can submit.
   useEffect(() => {
     if (!ready) return;
-    if (window.location.pathname === "/reset-password") return;
+    if (window.location.pathname === RESET_PASSWORD_PATH) return;
     const audience: PortalAudience = isTenant
       ? "tenant"
       : isLandlord
@@ -224,25 +235,31 @@ export function App() {
     );
   }
 
+  // Leaving /reset-password always moves the URL off it, so signing in next
+  // does not land on the change-password screen.
+  const leaveResetPassword = (screen: AuthScreen) => {
+    auth.setAuthError(null);
+    setAuthScreen(screen);
+    if (path === RESET_PASSWORD_PATH) navigate("/", { search: "" });
+  };
+
   if (auth.gate.state === "unauthenticated") {
+    // No session on /reset-password: the link expired, was used, or the page
+    // was opened directly. Password fields could never save here (UX-01).
+    if (path === RESET_PASSWORD_PATH) {
+      return withStagingChrome(
+        <ResetLinkExpiredPage
+          onRequestNew={() => leaveResetPassword("reset-request")}
+          onBack={() => leaveResetPassword("login")}
+        />,
+      );
+    }
     if (authScreen === "reset-request") {
       return withStagingChrome(
         <ResetRequestPage
           error={auth.authError}
-          onBack={() => setAuthScreen("login")}
+          onBack={() => leaveResetPassword("login")}
           onSubmit={auth.requestPasswordReset}
-        />,
-      );
-    }
-    if (authScreen === "reset-confirm") {
-      return withStagingChrome(
-        <ResetConfirmPage
-          error={auth.authError}
-          onSubmit={auth.updatePassword}
-          onDone={() => {
-            window.history.replaceState(null, "", "/dashboard");
-            setAuthScreen("login");
-          }}
         />,
       );
     }
@@ -252,8 +269,34 @@ export function App() {
         error={auth.authError}
         onLogin={auth.login}
         onSignup={auth.signup}
-        onForgot={() => setAuthScreen("reset-request")}
+        onForgot={() => leaveResetPassword("reset-request")}
         onDemoSignedIn={goDemoHome}
+      />,
+    );
+  }
+
+  // Signed in on /reset-password: from a reset email link (any account state,
+  // so a pending account can still set a password), or opened directly to
+  // change the password — then Cancel goes back to the role home.
+  if (path === RESET_PASSWORD_PATH) {
+    const resetHome = ready
+      ? ROLE_HOME[
+          isTenant ? "tenant" : isLandlord ? "landlord" : isMaintenance ? "maintenance" : "staff"
+        ]
+      : "/";
+    const goResetHome = () => navigate(resetHome, { replace: true, search: "" });
+    return withStagingChrome(
+      <ResetConfirmPage
+        mode={auth.recovery ? "recovery" : "change"}
+        email={auth.gate.user.email}
+        error={auth.authError}
+        onSubmit={auth.updatePassword}
+        onCancel={
+          auth.recovery
+            ? () => void auth.logout().then(() => leaveResetPassword("login"))
+            : goResetHome
+        }
+        onDone={goResetHome}
       />,
     );
   }
@@ -355,29 +398,13 @@ export function App() {
 
   const homePath = ROLE_HOME[audience];
 
-  // reset-password while already authenticated (from email link)
-  if (authScreen === "reset-confirm" && window.location.pathname === "/reset-password") {
-    return withStagingChrome(
-      <ResetConfirmPage
-        error={auth.authError}
-        onSubmit={auth.updatePassword}
-        onDone={() => {
-          setAuthScreen("login");
-          // replace:true syncs React path even when URL already matches (avoids
-          // replaceState-then-navigate no-op leaving route stuck on /reset-password).
-          navigate(homePath, { replace: true, search: "" });
-        }}
-      />,
-    );
-  }
-
   const isStaffShell = audience === "staff";
   const navItems = isStaffShell
     ? withNavCounts(navItemsForAudience(audience, { isAdmin }), navCounts)
-    : navItemsForAudience(audience);
+    : withNavCounts(navItemsForAudience(audience), { messages: portalUnread });
   const metaFullName = auth.gate.user.user_metadata?.full_name;
   const displayName =
-    typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null;
+    typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : ownerName;
   const chrome = {
     email: auth.gate.user.email ?? "",
     role: auth.gate.role.role,
@@ -389,7 +416,11 @@ export function App() {
   };
 
   const main = (
-    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+    <main
+      id={MAIN_CONTENT_ID}
+      tabIndex={-1}
+      className="relative flex min-w-0 flex-1 flex-col overflow-hidden outline-none"
+    >
       {/* Pages keep their own list loaders — do not blank the shell while lookups finish. */}
       <PortalErrorBoundary>
         {isTenant ? (
@@ -553,7 +584,7 @@ export function App() {
               ))}
             {route.name === "users" &&
               (isAdmin ? (
-                <UsersPage />
+                <UsersPage search={search} navigate={navigate} />
               ) : (
                 <Placeholder
                   title="Admins only"
@@ -588,7 +619,7 @@ export function App() {
       {isStaffShell || route.name === "request" ? null : (
         <MobileTabBar
           items={navItems}
-          active={activeFor(route)}
+          active={activeFor(route, isStaffShell)}
           onNavigate={(href) => navigate(href)}
         />
       )}
@@ -598,6 +629,16 @@ export function App() {
   return withStagingChrome(
     <AppContext.Provider value={state}>
       <ShellChromeProvider value={chrome}>
+        <a
+          href={`#${MAIN_CONTENT_ID}`}
+          onClick={(e) => {
+            e.preventDefault();
+            document.getElementById(MAIN_CONTENT_ID)?.focus();
+          }}
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-sm focus:bg-card focus:px-4 focus:py-2.5 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-float focus:outline-none focus:ring-[3px] focus:ring-ring/40"
+        >
+          Skip to content
+        </a>
         <div
           className="flex min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row"
           style={{
@@ -608,7 +649,7 @@ export function App() {
           {isStaffShell ? (
             <AdminWorkspace
               items={navItems}
-              active={activeFor(route)}
+              active={activeFor(route, isStaffShell)}
               homeHref={homePath}
               userName={displayName ?? displayNameFromEmail(chrome.email)}
               userMeta={`${roleLabel(chrome.role)} · ${PORTAL_BRAND}`}
@@ -623,7 +664,7 @@ export function App() {
               <div className="hidden shrink-0 md:flex">
                 <PortalNav
                   items={navItems}
-                  active={activeFor(route)}
+                  active={activeFor(route, isStaffShell)}
                   homeHref={homePath}
                   onNavigate={(href) => navigate(href)}
                 />

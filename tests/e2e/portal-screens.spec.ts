@@ -61,9 +61,9 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Admin dashboard");
   });
 
-  test("a worker gets My jobs + Messages only (no empty admin shell)", async ({ page }, testInfo) => {
+  test("a worker gets My jobs, Calendar and Messages only (no empty admin shell)", async ({ page }, testInfo) => {
     await signIn(page, "worker");
-    expect(await navLinks(page)).toEqual(["My jobs", "Messages"]);
+    expect(await navLinks(page)).toEqual(["My jobs", "Calendar", "Messages"]);
     await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute(
       "href",
       "/maintenance",
@@ -132,7 +132,7 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.getByLabel("Email").fill("admin@test.local");
     await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByText("Invalid login credentials")).toBeVisible();
+    await expect(page.getByText("That email and password don’t match")).toBeVisible();
     await expect(nav(page)).toHaveCount(0);
     await shot(page, testInfo, "Wrong password");
   });
@@ -161,7 +161,8 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.getByLabel("Email").fill("nina@signup.test");
     await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Create account", exact: true }).click();
-    await expect(page.getByText("Check your email to verify your account")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+    await expect(page.getByText("nina@signup.test")).toBeVisible();
     await shot(page, testInfo, "Sign-up confirmation message");
 
     const mail = (await outbox()).find((m) => m.to === "nina@signup.test" && m.type === "signup");
@@ -195,6 +196,18 @@ test.describe("[R1] Accounts and login — screens", () => {
 
     await signOut(page);
     await signIn(page, { email: "worker2@test.local", password: "BrandNew456!" });
+  });
+
+  test("a used or expired reset link explains itself and offers a new one", async ({ page }, testInfo) => {
+    await page.goto("/reset-password");
+    await expect(
+      page.getByRole("heading", { name: "This reset link has expired or was already used." }),
+    ).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    await shot(page, testInfo, "Expired reset link");
+    await page.getByRole("button", { name: "Send a new link" }).click();
+    await expect(page.getByRole("heading", { name: "Reset password" })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/");
   });
 });
 
@@ -234,8 +247,9 @@ test.describe("[R2] Account approval — screens", () => {
     const row = page.locator("div.space-y-3 > div", { hasText: "pending@test.local" }).first();
     await expect(row).toBeVisible();
     await shot(page, testInfo, "Approval queue");
-    await row.getByRole("button", { name: "Approve", exact: true }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: "Approve" }).click();
+    await row.getByRole("button", { name: "Approve…", exact: true }).click();
+    // Pat's sign-up email matched a Staff row, so the dialog arrives pre-linked.
+    await page.getByRole("dialog").getByRole("button", { name: "Approve as Team member" }).click();
     await page.getByRole("button", { name: /^Approved/ }).click();
     await expect(page.locator("div.space-y-3 > div", { hasText: "pending@test.local" }).first()).toBeVisible();
     await shot(page, testInfo, "Account approved");

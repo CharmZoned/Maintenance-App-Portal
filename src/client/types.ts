@@ -287,7 +287,14 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   permission_to_enter: boolean;
   assigned_staff_id?: number | null;
+  /** Visit: start of the arrival window (DB `scheduled_for`). */
   scheduled_at: string | null;
+  /**
+   * Visit: end of the arrival window (DB `scheduled_end_at`). Null = no window:
+   * a date only (noon-UTC sentinel) or an arrival time only. Format with
+   * `formatVisit` (lib/request-status).
+   */
+  scheduled_end_at?: string | null;
   completed_at: string | null;
   /**
    * What the worker is paid (MaintenanceRequestWorkerPrices). Readable by admin,
@@ -305,6 +312,14 @@ export interface WorkOrder {
   hold_reason?: string | null;
   next_follow_up_date?: string | null;
   created_at: string;
+  /** Worker job pool (20261118190000): when an admin offered it, a worker accepted it, or last released it. */
+  offered_at?: string | null;
+  accepted_at?: string | null;
+  released_at?: string | null;
+  /** Tenant's answer after completion: "confirmed" | "not_fixed"; cleared when reopened. */
+  tenant_fix_response?: "confirmed" | "not_fixed" | null;
+  tenant_fix_responded_at?: string | null;
+  tenant_fix_note?: string | null;
   // Joined
   property_name?: string | null;
   property_color?: string | null;
@@ -332,8 +347,15 @@ export interface MaintenancePhoto {
   caption: string | null;
   created_at: string;
   uploaded_by_role: string | null;
+  /** Auth user who added it (the completion-photo rule counts only the worker's own). */
+  uploaded_by_user_id?: string | null;
   /** Signed URL for display (ephemeral). */
   url?: string | null;
+  /**
+   * Storage reported no file at storage_path: the row was saved but the upload
+   * never finished. Such a photo does not prove a fix.
+   */
+  missing?: boolean;
 }
 
 export interface MaintenanceComment {

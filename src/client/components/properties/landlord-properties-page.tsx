@@ -24,6 +24,7 @@ import {
   type PropertyCardModel,
   type RentFilter,
 } from "@/lib/landlord-properties";
+import { officeMessageHref } from "@/lib/messages";
 import { currentPeriod } from "@/lib/utils";
 import type { PropertyDocument, RentCharge, Unit, WorkOrder } from "@/types";
 
@@ -108,7 +109,7 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
   });
 
   function messageGopher() {
-    navigate("/messages");
+    navigate(officeMessageHref());
   }
 
   async function retry() {

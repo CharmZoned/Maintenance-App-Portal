@@ -1,7 +1,8 @@
 /**
- * The office inbox: every conversation an admin can open in Messages, and the
- * ONE definition of "unread" used by the Messages page, the dashboard's Unread
- * messages KPI and Messages card, and the Messages badge in the admin rail.
+ * The inbox: every conversation the signed-in user can open in Messages, and
+ * the ONE definition of "new activity" used for every role — by the Messages
+ * page, the Messages nav badge, the bell, the admin dashboard's Unread
+ * messages KPI and the landlord Home messages card.
  *
  * Two kinds of conversation:
  *   - office  — a direct thread between one portal user (tenant, landlord or
@@ -9,28 +10,54 @@
  *   - request — the comment thread on a maintenance request
  *               (MaintenanceRequestComments / MaintenanceThreadReads)
  *
- * The office is every admin together, so a reply from any admin answers the
- * thread for all of them.
+ * Whose side a message is on depends on who reads (see `isOurs`): for an admin
+ * it is the office — every admin together, so a reply from any admin answers
+ * the thread for all of them; for anyone else it is that person alone.
+ *
+ * Read state is saved per user (RLS: own rows only), so it survives reloads
+ * and is the same on every screen.
  */
 import { supabase } from "@/lib/supabase";
 import type { AppRole } from "@/types.supabase";
 
-/** Fired on `window` when the signed-in admin read or answered a conversation. */
+/** Fired on `window` when the signed-in user read or answered a conversation. */
 export const INBOX_CHANGED_EVENT = "lg:inbox-changed";
 
 export function announceInboxChanged(): void {
   // Whatever was loading started before the change: later readers must not join it.
-  inboxInFlight = null;
+  inboxInFlight.clear();
   if (typeof window !== "undefined") window.dispatchEvent(new Event(INBOX_CHANGED_EVENT));
 }
 
 /** One message, reduced to what the unread rule needs. */
 export interface InboxMessage {
   at: string;
-  /** Written by an admin — i.e. by the office itself. */
-  fromOffice: boolean;
-  /** When the signed-in admin last read the thread this message belongs to; null = never. */
+  /** Written by the reader's own side (`isOurs`): the office for an admin, the reader themself otherwise. */
+  ours: boolean;
+  /** When the reader last read the thread this message belongs to; null = never. */
   readAt: string | null;
+}
+
+/** Who reads the inbox. `userId` only matters for non-admins. */
+export interface InboxViewer {
+  role: AppRole;
+  userId: string | null;
+}
+
+/** The office's view: every signed-in admin reads the same inbox. */
+export const OFFICE_VIEWER: InboxViewer = { role: "admin", userId: null };
+
+/**
+ * Is this message from the reader's own side? Admins speak as the office, so
+ * any admin's message is "ours" to every admin. Everyone else speaks only for
+ * themselves: a message is theirs when they wrote it.
+ */
+export function isOurs(
+  viewer: InboxViewer,
+  message: { author_role: AppRole | null; author_user_id: string | null },
+): boolean {
+  if (viewer.role === "admin") return message.author_role === "admin";
+  return viewer.userId != null && message.author_user_id === viewer.userId;
 }
 
 const ms = (iso: string | null | undefined) => {
@@ -40,20 +67,20 @@ const ms = (iso: string | null | undefined) => {
 };
 
 /**
- * THE unread rule. A conversation is unread when someone outside the office
- * wrote in it after
- *   1. the office's latest reply there (any admin answering counts), and
- *   2. the signed-in admin last opened it.
- * Messages written by the office are never unread.
+ * THE unread rule, for every role. A conversation is unread when someone on
+ * the other side wrote in it after
+ *   1. the reader's side last replied there (for admins: any admin), and
+ *   2. the reader last opened it.
+ * The reader's own side's messages are never unread.
  */
 export function isConversationUnread(messages: readonly InboxMessage[]): boolean {
   let lastReply = Number.NEGATIVE_INFINITY;
   for (const m of messages) {
     const t = ms(m.at);
-    if (m.fromOffice && t > lastReply) lastReply = t;
+    if (m.ours && t > lastReply) lastReply = t;
   }
   return messages.some((m) => {
-    if (m.fromOffice) return false;
+    if (m.ours) return false;
     const t = ms(m.at);
     if (Number.isNaN(t) || t <= lastReply) return false;
     const read = ms(m.readAt);
@@ -125,14 +152,18 @@ export function requestReadThread(visibility: string | null | undefined): "share
 
 /**
  * Group raw rows into conversations, newest first. Pure — the loader below and
- * the unit tests feed it.
+ * the unit tests feed it. `viewer` decides whose side each message is on; it
+ * defaults to the office (the admin inbox).
  */
-export function buildInbox(input: {
-  officeMessages: readonly OfficeMessageRow[];
-  officeReads: readonly OfficeReadRow[];
-  comments: readonly RequestCommentRow[];
-  requestReads: readonly RequestReadRow[];
-}): InboxConversation[] {
+export function buildInbox(
+  input: {
+    officeMessages: readonly OfficeMessageRow[];
+    officeReads: readonly OfficeReadRow[];
+    comments: readonly RequestCommentRow[];
+    requestReads: readonly RequestReadRow[];
+  },
+  viewer: InboxViewer = OFFICE_VIEWER,
+): InboxConversation[] {
   const conversations: InboxConversation[] = [];
 
   const officeRead = new Map(input.officeReads.map((r) => [r.thread_user_id, r.last_read_at]));
@@ -158,7 +189,7 @@ export function buildInbox(input: {
         authorStaffId: null,
       },
       unread: isConversationUnread(
-        rows.map((m) => ({ at: m.created_at, fromOffice: m.author_role === "admin", readAt })),
+        rows.map((m) => ({ at: m.created_at, ours: isOurs(viewer, m), readAt })),
       ),
     });
   }
@@ -189,7 +220,7 @@ export function buildInbox(input: {
       unread: isConversationUnread(
         rows.map((c) => ({
           at: c.created_at,
-          fromOffice: c.author_role === "admin",
+          ours: isOurs(viewer, c),
           readAt: requestRead.get(`${requestId}:${requestReadThread(c.visibility)}`) ?? null,
         })),
       ),
@@ -217,35 +248,55 @@ function fail(error: { message: string } | null): void {
 }
 
 /**
- * A load already on its way. Callers that ask at the same moment (the rail
- * badge and the dashboard or Messages page on the same navigation) share it
- * instead of reading the whole inbox twice. Cleared when it settles and when
- * the inbox announces a change, so a read after a write is always fresh.
+ * Loads already on their way, by viewer. Callers that ask at the same moment
+ * (the nav badge, the bell and the Messages page on one navigation) share one
+ * instead of reading the whole inbox several times. Cleared when it settles
+ * and when the inbox announces a change, so a read after a write is fresh.
  */
-let inboxInFlight: Promise<InboxConversation[]> | null = null;
+const inboxInFlight = new Map<string, Promise<InboxConversation[]>>();
+
+const viewerKey = (viewer: InboxViewer) =>
+  viewer.role === "admin" ? "admin" : `${viewer.role}:${viewer.userId ?? ""}`;
 
 /**
- * Every conversation the signed-in admin can open in Messages, with real read
- * state. RLS returns only the caller's own read rows.
+ * Every conversation the viewer can open in Messages, with their saved read
+ * state. RLS limits the rows to what they may see (a tenant gets their own
+ * office thread and the tenant-visible comments on their home's requests) and
+ * returns only their own read rows.
  */
-export function loadAdminInbox(): Promise<InboxConversation[]> {
-  if (inboxInFlight) return inboxInFlight;
-  const load = readAdminInbox();
-  inboxInFlight = load;
+export function loadInbox(viewer: InboxViewer): Promise<InboxConversation[]> {
+  const key = viewerKey(viewer);
+  const pending = inboxInFlight.get(key);
+  if (pending) return pending;
+  const load = readInbox(viewer);
+  inboxInFlight.set(key, load);
   const clear = () => {
-    if (inboxInFlight === load) inboxInFlight = null;
+    if (inboxInFlight.get(key) === load) inboxInFlight.delete(key);
   };
   load.then(clear, clear);
   return load;
 }
 
+/** The office inbox, as any signed-in admin reads it. */
+export function loadAdminInbox(): Promise<InboxConversation[]> {
+  return loadInbox(OFFICE_VIEWER);
+}
+
+/**
+ * Landlords have no request conversations: request messaging with the owner
+ * is out of scope (SOW), so their inbox is their office thread alone.
+ */
+export const hasRequestConversations = (role: AppRole) => role !== "landlord";
+
 /**
  * `withBodies: false` reads the same rows without message text — enough for
- * the unread rule (authorship and times), and much lighter for the rail badge,
+ * the unread rule (authorship and times), and much lighter for the nav badge,
  * which reloads on every route change.
  */
-async function readAdminInbox({ withBodies = true } = {}): Promise<InboxConversation[]> {
+async function readInbox(viewer: InboxViewer, { withBodies = true } = {}): Promise<InboxConversation[]> {
   const body = withBodies ? ", body" : "";
+  const none = Promise.resolve({ data: [] as never[], error: null });
+  const withRequests = hasRequestConversations(viewer.role);
   const [office, officeReads, comments, requestReads] = await Promise.all([
     supabase
       .from("OfficeMessages")
@@ -253,43 +304,98 @@ async function readAdminInbox({ withBodies = true } = {}): Promise<InboxConversa
       .order("created_at", { ascending: false })
       .limit(OFFICE_MESSAGE_WINDOW),
     supabase.from("OfficeThreadReads").select("thread_user_id, last_read_at"),
-    supabase
-      .from("MaintenanceRequestComments")
-      .select(
-        `id, created_at, maintenance_request_id, author_user_id, author_role, author_tenant_id, author_staff_id, visibility${body}`,
-      )
-      .order("created_at", { ascending: false })
-      .limit(REQUEST_COMMENT_WINDOW),
-    supabase.from("MaintenanceThreadReads").select("maintenance_request_id, thread, last_read_at"),
+    withRequests
+      ? supabase
+          .from("MaintenanceRequestComments")
+          .select(
+            `id, created_at, maintenance_request_id, author_user_id, author_role, author_tenant_id, author_staff_id, visibility${body}`,
+          )
+          .order("created_at", { ascending: false })
+          .limit(REQUEST_COMMENT_WINDOW)
+      : none,
+    withRequests
+      ? supabase.from("MaintenanceThreadReads").select("maintenance_request_id, thread, last_read_at")
+      : none,
   ]);
   fail(office.error);
   fail(officeReads.error);
   fail(comments.error);
   fail(requestReads.error);
   const withBody = <T extends object>(rows: T[]) => rows.map((r) => ({ body: "", ...r }));
-  return buildInbox({
-    officeMessages: withBody(office.data ?? []) as unknown as OfficeMessageRow[],
-    officeReads: (officeReads.data ?? []) as OfficeReadRow[],
-    comments: withBody(comments.data ?? []) as unknown as RequestCommentRow[],
-    requestReads: (requestReads.data ?? []) as RequestReadRow[],
-  });
+  return buildInbox(
+    {
+      officeMessages: withBody(office.data ?? []) as unknown as OfficeMessageRow[],
+      officeReads: (officeReads.data ?? []) as OfficeReadRow[],
+      comments: withBody(comments.data ?? []) as unknown as RequestCommentRow[],
+      requestReads: (requestReads.data ?? []) as RequestReadRow[],
+    },
+    viewer,
+  );
+}
+
+/** The viewer's unread conversation count — the Messages nav badge. */
+export async function countInboxUnread(viewer: InboxViewer): Promise<number> {
+  // Same rows and rule as the Messages page, minus the message text.
+  return countUnreadConversations(await readInbox(viewer, { withBodies: false }));
 }
 
 /** The signed-in admin's unread count (Messages badge). */
-export async function countAdminUnread(): Promise<number> {
-  // Same rows and rule as the Messages page, minus the message text.
-  return countUnreadConversations(await readAdminInbox({ withBodies: false }));
+export function countAdminUnread(): Promise<number> {
+  return countInboxUnread(OFFICE_VIEWER);
+}
+
+let viewerCache: { userId: string; viewer: Promise<InboxViewer | null> } | null = null;
+
+/**
+ * The signed-in user as an inbox viewer (id and portal role), or null when
+ * signed out or without a role. Cached per signed-in user.
+ */
+export async function currentInboxViewer(): Promise<InboxViewer | null> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const userId = session?.user.id ?? null;
+  if (!userId) {
+    viewerCache = null;
+    return null;
+  }
+  if (viewerCache?.userId !== userId) {
+    const viewer = (async (): Promise<InboxViewer | null> => {
+      const { data, error } = await supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle();
+      if (error || !data?.role) return null;
+      return { role: data.role as AppRole, userId };
+    })();
+    viewerCache = { userId, viewer };
+    // A failed lookup must not stick for the whole session.
+    void viewer.then((v) => {
+      if (!v && viewerCache?.viewer === viewer) viewerCache = null;
+    });
+  }
+  return viewerCache.viewer;
 }
 
 /**
- * Record that the signed-in admin has read a request thread up to `through`
- * (the latest message they saw — a server timestamp, so clock skew cannot
- * leave it unread). Both the tenant-visible and the internal thread are shown
- * together in Messages, so both are marked.
+ * Which MaintenanceThreadReads rows a role keeps. Staff read the internal
+ * ("office") comments too; tenants and landlords only ever see the shared
+ * ones, and RLS refuses them a read row for the other.
  */
-export async function markRequestThreadRead(requestId: number, through: string): Promise<void> {
+export function requestReadThreadsFor(role: AppRole): ReadonlyArray<"shared" | "office"> {
+  return role === "admin" || role === "maintenance" ? ["shared", "office"] : ["shared"];
+}
+
+/**
+ * Record that the signed-in user has read a request thread up to `through`
+ * (the latest message they saw — a server timestamp, so clock skew cannot
+ * leave it unread). Staff see the tenant-visible and the internal comments
+ * together, so both are marked unless `threads` says otherwise.
+ */
+export async function markRequestThreadRead(
+  requestId: number,
+  through: string,
+  threads: ReadonlyArray<"shared" | "office"> = ["shared", "office"],
+): Promise<void> {
   const { error } = await supabase.from("MaintenanceThreadReads").upsert(
-    (["shared", "office"] as const).map((thread) => ({
+    threads.map((thread) => ({
       maintenance_request_id: requestId,
       thread,
       last_read_at: through,
@@ -299,7 +405,7 @@ export async function markRequestThreadRead(requestId: number, through: string):
   fail(error);
 }
 
-/** Record that the signed-in admin has read an office thread up to `through`. */
+/** Record that the signed-in user has read an office thread up to `through`. */
 export async function markOfficeThreadRead(threadUserId: string, through: string): Promise<void> {
   const { error } = await supabase
     .from("OfficeThreadReads")
@@ -307,11 +413,15 @@ export async function markOfficeThreadRead(threadUserId: string, through: string
   fail(error);
 }
 
-/** Record a conversation of either kind as read up to `through`. */
-export function markConversationRead(conversation: InboxConversation, through: string): Promise<void> {
+/** Record a conversation of either kind as read up to `through`, for `viewer` (default: an admin). */
+export function markConversationRead(
+  conversation: InboxConversation,
+  through: string,
+  viewer: InboxViewer = OFFICE_VIEWER,
+): Promise<void> {
   return conversation.kind === "office"
     ? markOfficeThreadRead(conversation.threadUserId, through)
-    : markRequestThreadRead(conversation.requestId, through);
+    : markRequestThreadRead(conversation.requestId, through, requestReadThreadsFor(viewer.role));
 }
 
 // ── Recording reads from the Messages page ──────────────────────────
@@ -426,15 +536,23 @@ export async function listOfficeMessages(threadUserId: string): Promise<OfficeMe
   return (data ?? []) as OfficeMessageRow[];
 }
 
-/** The office (signed-in admin) answers a portal user's thread. */
-export async function sendOfficeMessage(threadUserId: string, body: string): Promise<OfficeMessageRow> {
+/**
+ * Write in an office thread: the office (an admin) answering a portal user, or
+ * — with `as` set to their role — a portal user writing in their own thread.
+ * RLS checks both the role and whose thread it is.
+ */
+export async function sendOfficeMessage(
+  threadUserId: string,
+  body: string,
+  as: AppRole = "admin",
+): Promise<OfficeMessageRow> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in.");
   const { data, error } = await supabase
     .from("OfficeMessages")
-    .insert({ thread_user_id: threadUserId, author_user_id: user.id, author_role: "admin", body: body.trim() })
+    .insert({ thread_user_id: threadUserId, author_user_id: user.id, author_role: as, body: body.trim() })
     .select("id, created_at, thread_user_id, author_user_id, author_role, body")
     .single();
   fail(error);

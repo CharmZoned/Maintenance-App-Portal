@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import type { AccountStatus, AppRole } from "../types.supabase";
+import { isRecoveryLinkHash, plainAuthError } from "../components/auth/auth-errors";
 
 export interface UserRoleRow {
   user_id: string;
@@ -34,9 +35,20 @@ function canAccessPortfolio(role: UserRoleRow): boolean {
 export const SIGNUP_NAME_MAX = 200;
 export const SIGNUP_ADDRESS_MAX = 500;
 
+/**
+ * Whether the page opened from a reset email link. Read at module load:
+ * Supabase parses the fragment (and then clears it) once the client initialises,
+ * and its PASSWORD_RECOVERY event can fire before our listener subscribes.
+ */
+const OPENED_FROM_RECOVERY_LINK = isRecoveryLinkHash(
+  typeof window === "undefined" ? "" : window.location.hash,
+);
+
 export function useAuth() {
   const [gate, setGate] = useState<AuthGate>({ state: "loading" });
   const [authError, setAuthError] = useState<string | null>(null);
+  /** True while the session came from a password-recovery email link. */
+  const [recovery, setRecovery] = useState(OPENED_FROM_RECOVERY_LINK);
 
   const resolve = useCallback(async (session: Session | null) => {
     if (!session?.user) {
@@ -49,8 +61,10 @@ export function useAuth() {
       .eq("user_id", session.user.id)
       .maybeSingle();
     if (error) {
-      setAuthError(error.message);
-      setGate({ state: "error", user: session.user, message: error.message });
+      console.warn("[auth] role lookup failed", error.message);
+      const message = "We couldn’t load your account details. Check your connection and try again.";
+      setAuthError(message);
+      setGate({ state: "error", user: session.user, message });
       return;
     }
     if (!data) {
@@ -87,7 +101,9 @@ export function useAuth() {
       await resolve(data.session);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
+      if (event === "SIGNED_OUT") setRecovery(false);
       void resolve(session);
     });
 
@@ -101,15 +117,8 @@ export function useAuth() {
     setAuthError(null);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      // AuthRetryableFetchError often surfaces as opaque "fetch failed" / "Failed to fetch".
-      const lower = error.message.trim().toLowerCase();
-      const message =
-        lower === "fetch failed" ||
-        lower === "failed to fetch" ||
-        lower.includes("load failed")
-          ? "Can't reach Supabase (network). For local, use pnpm dev:local; for staging, check VITE_SUPABASE_URL / anon key."
-          : error.message;
-      setAuthError(message);
+      // Plain language, incl. opaque "fetch failed" from AuthRetryableFetchError.
+      setAuthError(plainAuthError(error));
       throw error;
     }
   }, []);
@@ -159,7 +168,7 @@ export function useAuth() {
         },
       });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(plainAuthError(error));
         throw error;
       }
       if (data.session) return "session";
@@ -178,7 +187,7 @@ export function useAuth() {
     const redirectTo = `${window.location.origin}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
-      setAuthError(error.message);
+      setAuthError(plainAuthError(error));
       throw error;
     }
   }, []);
@@ -187,9 +196,10 @@ export function useAuth() {
     setAuthError(null);
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
-      setAuthError(error.message);
+      setAuthError(plainAuthError(error));
       throw error;
     }
+    setRecovery(false);
   }, []);
 
   const retryRole = useCallback(async () => {
@@ -201,6 +211,7 @@ export function useAuth() {
     gate,
     authError,
     setAuthError,
+    recovery,
     login,
     signup,
     logout,

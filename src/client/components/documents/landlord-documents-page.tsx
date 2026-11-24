@@ -11,6 +11,7 @@ import { PageShell } from "@/components/page-shell";
 import { ErrorRetry, SkeletonRow } from "@/components/patterns";
 import {
   LandlordDocumentRow,
+  downloadLandlordDocument,
   LandlordPageIntro,
   LandlordPortalTitle,
   LandlordPropertyHeading,
@@ -150,13 +151,7 @@ export function LandlordDocumentsPage() {
   async function downloadDoc(doc: PropertyDocument) {
     try {
       setDownloadingId(doc.id);
-      const url = await getPropertyDocumentDownloadUrl(doc);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = doc.file_name;
-      a.rel = "noreferrer";
-      a.target = "_blank";
-      a.click();
+      await downloadLandlordDocument(doc, getPropertyDocumentDownloadUrl);
     } catch (err) {
       setError((err as Error).message);
     } finally {

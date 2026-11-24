@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronLeft } from "lucide-react";
+import { ChevronDown, ChevronLeft, MessageSquare } from "lucide-react";
 import { useApp } from "@/context";
 import { LandlordPortalTitle } from "@/components/landlord";
 import { PageShell } from "@/components/page-shell";
@@ -25,18 +25,25 @@ import {
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
 import * as data from "@/lib/data";
 import type { StaffMember } from "@/lib/data";
+import { FEATURES } from "@/lib/feature-flags";
+import { officeMessageHref } from "@/lib/messages";
 import {
   formatActivityStamp,
+  formatVisit,
+  requestDayInSentence,
   PRIORITY_OPTIONS,
   priorityLevel,
   inProgressSince,
   requestDayWord,
   requestNextStep,
   toRequestStatus,
+  visitChoiceFrom,
   type RequestStatus,
+  type VisitChoice,
 } from "@/lib/request-status";
+import { VisitWindowFields, visitPatchFor } from "./visit-window-fields";
 import { buildTimeline, type RequestViewerRole } from "@/lib/request-timeline";
-import { cn, toIsoDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceComment,
@@ -56,6 +63,11 @@ import {
 } from "./request/request-actions-panel";
 import { RequestHeader } from "./request/request-header";
 import { RequestPhotosCard } from "./request/request-photos-card";
+import { CompleteJobDialog } from "./request/complete-job-dialog";
+import { completionProof, lastReopenedAt, completionPhotoSince } from "./request/completion-proof";
+import { NoteDialog } from "./request/note-dialog";
+import type { PendingPhoto } from "./request/photo-tiles";
+import { TenantFixCheck, tenantFixState, tenantFixSummary } from "./request/tenant-fix-check";
 import {
   RequestBanner,
   RequestErrorState,
@@ -66,6 +78,7 @@ import {
 import { RequestComposer, RequestTimeline, type RequestTimelineComposer } from "./request/request-timeline";
 import {
   backLinkFor,
+  backLinkFromSearch,
   notAvailableActionFor,
   sectionsForRole,
   viewerRoleFrom,
@@ -199,6 +212,7 @@ export function formatPrice(amount: number): string {
  * Cost value for the viewer (mirrors the price-table RLS):
  * admin "Worker $42.00 · Landlord $55.00" (only parts that are set);
  * worker "$42.00"; landlord "$55.00"; null when nothing is recorded.
+ * The landlord's value is shown only once it is a real bill (landlordBilledLabel).
  */
 export function costLabelFor(
   order: Pick<WorkOrder, "worker_price" | "landlord_price">,
@@ -237,6 +251,47 @@ const COMPLETION_PHOTO_ERROR = "Add at least one photo of the finished work befo
 const STATUS_ERROR = "Couldn't change the status. Try again.";
 const SAVE_ERROR = "Couldn't save. Try again.";
 
+/**
+ * Landlord "Billed $55.00": the landlord price is what Landlord Gopher bills,
+ * but until the job is completed it is only the office's estimate (set when
+ * the job is offered or assigned), so a New or in-progress request shows no
+ * cost at all rather than a number that may change.
+ */
+export function landlordBilledLabel(
+  order: Pick<WorkOrder, "status" | "landlord_price">,
+): string | null {
+  if (order.status !== "closed" || order.landlord_price == null) return null;
+  return formatPrice(order.landlord_price);
+}
+
+/** "MR-001000" (no "#"), for the office message's About line. */
+function plainRequestNumber(order: Pick<WorkOrder, "id" | "request_number">): string {
+  return requestNumberLabel(order).replace(/^#/, "");
+}
+
+/** Office thread link with "About: Maple Court · Unit 1A · MR-001000 · Kitchen faucet leaking". */
+export function officeHrefForRequest(
+  order: Pick<WorkOrder, "id" | "request_number" | "title" | "property_name" | "unit_name">,
+): string {
+  const unit = order.unit_name?.trim();
+  return officeMessageHref({
+    about: [order.property_name, unit ? `Unit ${unit}` : null, plainRequestNumber(order), order.title],
+  });
+}
+
+/**
+ * A worker looking at a job they do not hold (a pool offer, or one assigned to
+ * someone else): RLS refuses messages and photos from them, so the page hides
+ * the controls that could only fail, and leaves out the tenant's name.
+ */
+export function workerHoldsJob(
+  order: Pick<WorkOrder, "assigned_staff_id">,
+  viewerStaffId: number | null | undefined,
+): boolean {
+  if (order.assigned_staff_id == null) return false;
+  return viewerStaffId == null || order.assigned_staff_id === viewerStaffId;
+}
+
 // ── Presentational view ────────────────────────────────────────────
 
 export interface RequestDetailViewProps {
@@ -267,12 +322,29 @@ export interface RequestDetailViewProps {
   onEditCost?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
-  onAddPhotos?: (files: FileList) => void;
+  onAddPhotos?: (files: File[]) => void;
+  /** This session's uploads in flight or failed (Photos card "Upload failed — Retry"). */
+  pendingPhotos?: PendingPhoto[];
+  onRetryPendingPhoto?: (key: string) => void;
+  onDiscardPendingPhoto?: (key: string) => void;
+  /** Saved photo whose file never arrived: may the viewer upload it again? */
+  canRetryMissingPhoto?: (photo: MaintenancePhoto) => boolean;
+  onRetryMissingPhoto?: (photo: MaintenancePhoto, file: File) => void;
   onSend?: (body: string, internal: boolean) => void | Promise<void>;
   /** Admin: Reopen on the completed strip. */
   onReopen?: () => void;
-  /** Worker: accept a job offered to the pool. */
+  /** Worker: accept a job offered to the pool (FEATURES.workerSelfClaim only). */
   onAcceptJob?: () => void;
+  /** Worker: hand a job they hold back to the office (FEATURES.workerSelfClaim only). */
+  onReleaseJob?: () => void;
+  /** Tenant, completed request: "Yes, it's fixed". */
+  onConfirmFixed?: () => void;
+  /** Tenant, completed request: "Still a problem" (opens the note dialog). */
+  onStillProblem?: () => void;
+  /** Landlord: "Message the office about this request". */
+  onMessageOffice?: () => void;
+  /** Back label when the page was opened from somewhere else (`?from=`). */
+  backLabel?: string;
   /** Extra nodes (dialogs, banners) rendered inside the page. */
   children?: ReactNode;
 }
@@ -306,21 +378,38 @@ export function RequestDetailView({
   onEdit,
   onDelete,
   onAddPhotos,
+  pendingPhotos = [],
+  onRetryPendingPhoto,
+  onDiscardPendingPhoto,
+  canRetryMissingPhoto,
+  onRetryMissingPhoto,
   onSend,
   onReopen,
   onAcceptJob,
+  onReleaseJob,
+  onConfirmFixed,
+  onStillProblem,
+  onMessageOffice,
+  backLabel,
   children,
 }: RequestDetailViewProps) {
-  const visibility = sectionsForRole(role);
-  const back = backLinkFor(role);
+  const roleVisibility = sectionsForRole(role);
+  const isWorker = role === "maintenance";
+  // A worker who does not hold this job cannot message on it or add photos.
+  const outsider = isWorker && !workerHoldsJob(order, viewerStaffId);
+  const visibility: RequestSectionVisibility = outsider
+    ? { ...roleVisibility, composer: false, addPhotos: false, internalNotes: false }
+    : roleVisibility;
+  const back = { ...backLinkFor(role), ...(backLabel ? { label: backLabel } : {}) };
   const staffMap = useMemo(() => staffById(staff), [staff]);
   const status = toRequestStatus(order);
   const assignee = assigneeName(order, staffMap);
   const assigneeStaff = order.assigned_staff_id != null ? staffMap.get(order.assigned_staff_id) : undefined;
-  const reporter = personName(order.tenant_first_name, order.tenant_last_name);
+  // The tenant's name stays off a job the worker has not taken.
+  const reporter = outsider ? "" : personName(order.tenant_first_name, order.tenant_last_name);
   const number = requestNumberLabel(order);
   const completed = status === "Completed";
-  const isWorker = role === "maintenance";
+  const fixState = role === "tenant" ? tenantFixState(order) : null;
 
   const entries = useMemo(
     () =>
@@ -357,7 +446,7 @@ export function RequestDetailView({
   );
   // "Reported by" uses the same person as the timeline's first entry, so the
   // page never names the reporter two different ways.
-  const reporterLabel = entries.find((e) => e.kind === "reported")?.actor.name ?? reporter;
+  const reporterLabel = outsider ? "" : (entries.find((e) => e.kind === "reported")?.actor.name ?? reporter);
 
   const composer: RequestTimelineComposer | null =
     visibility.composer && !completed && onSend
@@ -381,6 +470,7 @@ export function RequestDetailView({
       onEdit={onEdit}
       onDelete={onDelete}
       onAcceptJob={onAcceptJob}
+      onReleaseJob={onReleaseJob}
     />
   ) : null;
 
@@ -427,6 +517,15 @@ export function RequestDetailView({
           backLabel={back.label}
           onBack={onBack}
           phoneBackInHeader={role !== "landlord"}
+          titleIsPageHeading={role === "landlord"}
+          actions={
+            onMessageOffice ? (
+              <Button variant="secondary" size="touch" className="md:h-8 md:px-3" onClick={onMessageOffice}>
+                <MessageSquare aria-hidden />
+                Message the office about this request
+              </Button>
+            ) : null
+          }
         />
 
         <div className="flex flex-col gap-4 md:gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
@@ -435,21 +534,38 @@ export function RequestDetailView({
             <div className="hidden md:block lg:col-start-2 lg:row-start-1">{actions}</div>
           ) : null}
           <div className="flex min-w-0 flex-col gap-4 md:gap-6 lg:col-start-1 lg:row-start-1">
+            {fixState && (fixState !== "ask" || (onConfirmFixed && onStillProblem)) ? (
+              <TenantFixCheck
+                state={fixState}
+                completedBy={assignee}
+                completedWhen={order.completed_at ? requestDayInSentence(order.completed_at) : ""}
+                respondedWhen={order.tenant_fix_responded_at ? requestDayInSentence(order.tenant_fix_responded_at) : ""}
+                busy={busy}
+                onConfirm={() => onConfirmFixed?.()}
+                onStillProblem={() => onStillProblem?.()}
+              />
+            ) : null}
             <RequestDetailsCard
               order={order}
               assignee={assignee}
               assigneeRole={assigneeStaff?.job_title?.trim() || "Maintenance"}
               status={status}
               completed={completed}
-              landlordCost={!visibility.actionsPanel && visibility.cost ? costLabel : null}
+              billed={role === "landlord" ? landlordBilledLabel(order) : null}
+              tenantCheck={role !== "tenant" ? tenantFixSummary(order, requestDayInSentence) : null}
             />
             <RequestPhotosCard
               photos={photos}
               max={MAX_MAINTENANCE_PHOTOS}
-              slotsLeft={photoSlotsLeft(photos, isWorker)}
+              slotsLeft={photoSlotsLeft(photos, isWorker, completionPhotoSince(order, history))}
               canAdd={visibility.addPhotos}
               uploading={uploading}
               onAdd={visibility.addPhotos ? onAddPhotos : undefined}
+              pending={pendingPhotos}
+              onRetryPending={onRetryPendingPhoto}
+              onDiscardPending={onDiscardPendingPhoto}
+              canRetryMissing={visibility.addPhotos ? canRetryMissingPhoto : undefined}
+              onRetryMissing={onRetryMissingPhoto}
               uploaderName={(photo) => photoAuthor(photo, { tenant: reporter, assignee })}
               loadError={photosError}
               onRetry={onRetryPhotos}
@@ -501,15 +617,18 @@ function RequestDetailsCard({
   assigneeRole,
   status,
   completed,
-  landlordCost,
+  billed,
+  tenantCheck,
 }: {
   order: WorkOrder;
   assignee: string | null;
   assigneeRole: string;
   status: RequestStatus;
   completed: boolean;
-  /** Landlord: their price, shown in Details (no actions panel). */
-  landlordCost: string | null;
+  /** Landlord: what they are billed, once the job is completed (landlordBilledLabel). */
+  billed: string | null;
+  /** Staff / landlord on a completed request: what the tenant said (tenantFixSummary). */
+  tenantCheck: string | null;
 }) {
   return (
     <section
@@ -533,7 +652,7 @@ function RequestDetailsCard({
         <ReadOnlyField
           label="Scheduled"
           // New = open with nobody assigned: never "scheduled", whatever scheduled_at holds (spec §1).
-          value={(status !== "New" && dayStamp(order.scheduled_at)) || "Not scheduled yet"}
+          value={(status !== "New" && formatVisit(order)) || "Not scheduled yet"}
         />
       </div>
       {completed ? (
@@ -542,7 +661,8 @@ function RequestDetailsCard({
           value={<p className="whitespace-pre-wrap break-words">{order.resolution_notes?.trim() || "Not recorded"}</p>}
         />
       ) : null}
-      {landlordCost ? <ReadOnlyField label="Cost" value={landlordCost} /> : null}
+      {completed && tenantCheck ? <ReadOnlyField label="Tenant check" value={tenantCheck} /> : null}
+      {billed ? <ReadOnlyField label="Billed" value={billed} /> : null}
     </section>
   );
 }
@@ -691,7 +811,16 @@ function FieldHint({ children, tone = "muted" }: { children: ReactNode; tone?: "
   );
 }
 
-type DialogKind = "assign" | "hold" | "complete" | "vendor" | "cost" | "edit" | null;
+type DialogKind = "assign" | "hold" | "complete" | "vendor" | "cost" | "edit" | "release" | "not-fixed" | null;
+
+/**
+ * "What fixed it?" drafts by request id, kept while the app is open, so a
+ * worker who cancels the Complete dialog to go take a photo finds their notes
+ * again. Cleared once the job is completed.
+ */
+const completionNotesDrafts = new Map<number, string>();
+
+let pendingSeq = 0;
 
 // ── Container ──────────────────────────────────────────────────────
 
@@ -715,7 +844,15 @@ export function RequestDetailPage({
   const role = viewerRoleFrom(app);
   const isWorker = role === "maintenance";
   const isAdmin = role === "admin";
-  const back = backLinkFor(role);
+  // `?from=` (maintenance list, calendar): Back returns to that view.
+  const back = useMemo(
+    () =>
+      typeof window === "undefined"
+        ? backLinkFor(role)
+        : backLinkFromSearch(role, window.location.search, window.location.origin),
+    // Read once per request page (`id` re-reads it); the query does not change while it is open.
+    [role, id],
+  );
 
   const [order, setOrder] = useState<WorkOrder | null>(null);
   const [photos, setPhotos] = useState<MaintenancePhoto[]>([]);
@@ -736,7 +873,7 @@ export function RequestDetailPage({
 
   // Dialog fields.
   const [assignStaffId, setAssignStaffId] = useState<string>("");
-  const [assignDate, setAssignDate] = useState("");
+  const [assignVisit, setAssignVisit] = useState<VisitChoice>(() => visitChoiceFrom({ scheduled_at: null }));
   const [holdReason, setHoldReason] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -749,7 +886,26 @@ export function RequestDetailPage({
   const [editPriority, setEditPriority] = useState<WorkOrderPriority>("normal");
   const [editDescription, setEditDescription] = useState("");
   const [editEntry, setEditEntry] = useState(false);
-  const completionPhotoInput = useRef<HTMLInputElement>(null);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [releaseReason, setReleaseReason] = useState("");
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [notFixedNote, setNotFixedNote] = useState("");
+  const [notFixedError, setNotFixedError] = useState<string | null>(null);
+  /** Uploads picked in this session that are in flight or failed. */
+  const [pending, setPending] = useState<PendingPhoto[]>([]);
+  const pendingFiles = useRef(new Map<string, File>());
+
+  // Free the previews' object URLs when the page goes away.
+  useEffect(() => {
+    const files = pendingFiles.current;
+    return () => {
+      setPending((items) => {
+        for (const item of items) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        return [];
+      });
+      files.clear();
+    };
+  }, [id]);
 
   const getWorkOrder = app.getWorkOrder;
   const listPhotos = app.listMaintenancePhotos;
@@ -924,8 +1080,11 @@ export function RequestDetailPage({
   const location = placeLabel(current);
   const dialogContext = [current.title, location].filter(Boolean).join(" · ");
   const assignee = assigneeName(current, staffMap);
-  const workerPhotoCount = photos.filter((p) => p.uploaded_by_role === "maintenance").length;
-  const needsCompletionPhoto = isWorker && workerPhotoCount === 0;
+  const holdsJob = isWorker && workerHoldsJob(current, myStaffId);
+  // Same rule as the server: this worker's own stored photo since they took
+  // the job and since it was last reopened.
+  const proof = completionProof({ order: current, history, photos, viewerUserId });
+  const needsCompletionPhoto = isWorker && proof.need !== "none";
 
   async function applyStatus(
     next: WorkOrderStatus,
@@ -936,11 +1095,22 @@ export function RequestDetailPage({
     try {
       await app.updateWorkOrder(current.id, { status: next, ...extra }, { previousStatus: current.status });
       setDialog(null);
+      if (next === "closed") completionNotesDrafts.delete(current.id);
       success(current.status === "closed" && next !== "closed" ? "Request reopened." : message);
       refresh();
     } catch (err) {
       const raw = (err as Error)?.message ?? "";
-      failure(next === "closed" && /photo/i.test(raw) ? COMPLETION_PHOTO_ERROR : STATUS_ERROR);
+      if (next === "closed" && dialog === "complete") {
+        // Said where the worker is looking; the banner would sit on top of the dialog.
+        if (/photo/i.test(raw)) {
+          setCompleteError(`${COMPLETION_PHOTO_ERROR} Add one above, then try again.`);
+          void retryPhotos(); // a photo may have lost its file: show it as failed
+        } else {
+          setCompleteError("Couldn't mark it completed. Check your connection and try again.");
+        }
+      } else {
+        failure(next === "closed" && /photo/i.test(raw) ? COMPLETION_PHOTO_ERROR : STATUS_ERROR);
+      }
     } finally {
       setBusy(false);
     }
@@ -948,7 +1118,7 @@ export function RequestDetailPage({
 
   function openAssign() {
     setAssignStaffId(current.assigned_staff_id != null ? String(current.assigned_staff_id) : "");
-    setAssignDate(current.scheduled_at?.slice(0, 10) || toIsoDate(new Date()));
+    setAssignVisit(visitChoiceFrom(current));
     setDialog("assign");
   }
 
@@ -959,8 +1129,17 @@ export function RequestDetailPage({
   }
 
   function openComplete() {
-    setResolutionNotes(current.resolution_notes?.trim() || "");
+    // After a reopen the old "what fixed it" describes the fix that did not hold: start fresh.
+    const previous = lastReopenedAt(history) == null ? current.resolution_notes?.trim() || "" : "";
+    setResolutionNotes(completionNotesDrafts.get(current.id) ?? previous);
+    setCompleteError(null);
     setDialog("complete");
+  }
+
+  function changeCompletionNotes(notes: string) {
+    setResolutionNotes(notes);
+    completionNotesDrafts.set(current.id, notes);
+    setCompleteError(null);
   }
 
   function changeStatus(next: WorkOrderStatus) {
@@ -977,7 +1156,7 @@ export function RequestDetailPage({
           openAssign();
           return;
         }
-        void applyStatus("scheduled", {}, `${assignee ?? "Worker"} assigned for ${dayStamp(current.scheduled_at)}.`);
+        void applyStatus("scheduled", {}, `${assignee ?? "Worker"} assigned for ${formatVisit(current)}.`);
         return;
       case "open":
         // "New" means not assigned yet (spec §1), so clear the assignee.
@@ -991,12 +1170,13 @@ export function RequestDetailPage({
 
   async function confirmAssign() {
     const staffId = Number(assignStaffId);
-    if (!staffId || !assignDate) return;
+    const visit = visitPatchFor(assignVisit);
+    if (!staffId || !visit) return;
     const name = assigneeName({ assigned_staff_id: staffId }, staffMap) ?? "Worker";
     await applyStatus(
       "scheduled",
-      { assigned_staff_id: staffId, scheduled_at: assignDate },
-      `${name} assigned for ${dayStamp(assignDate)}.`,
+      { assigned_staff_id: staffId, ...visit },
+      `${name} assigned for ${formatVisit({ ...visit, status: "scheduled", assigned_staff_id: staffId })}.`,
     );
   }
 
@@ -1013,25 +1193,93 @@ export function RequestDetailPage({
   async function confirmComplete() {
     const notes = resolutionNotes.trim();
     if (!notes || needsCompletionPhoto) return;
+    setCompleteError(null);
     await applyStatus("closed", { resolution_notes: notes }, "Marked completed.");
   }
 
-  async function addPhotos(files: FileList | File[]) {
-    const picked = takePhotoFiles(files, photoSlotsLeft(photos, isWorker));
-    if (picked.length === 0) return;
+  // Photo uploads: each picked file shows as a tile (uploading → photo, or
+  // "Upload failed — Retry"). The data layer removes the row when the file
+  // does not make it, so a failed upload never counts as proof.
+  function setPendingStatus(key: string, status: PendingPhoto["status"]) {
+    setPending((items) => items.map((item) => (item.key === key ? { ...item, status } : item)));
+  }
+
+  function dropPending(key: string) {
+    pendingFiles.current.delete(key);
+    setPending((items) => {
+      const gone = items.find((item) => item.key === key);
+      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      return items.filter((item) => item.key !== key);
+    });
+  }
+
+  /** Upload the files behind these pending keys, one after another. True when all made it. */
+  async function uploadPending(keys: string[]): Promise<boolean> {
     setUploading(true);
     let added = 0;
+    let failed = 0;
     try {
-      for (const file of picked) {
-        await app.uploadMaintenancePhoto(current.id, file);
-        added += 1;
+      for (const key of keys) {
+        const file = pendingFiles.current.get(key);
+        if (!file) continue;
+        setPendingStatus(key, "uploading");
+        try {
+          const saved = await app.uploadMaintenancePhoto(current.id, file);
+          added += 1;
+          dropPending(key);
+          // Show (and count) it at once; the silent reload below confirms it.
+          setPhotos((list) => (list.some((p) => p.id === saved.id) ? list : [...list, saved]));
+        } catch {
+          failed += 1;
+          setPendingStatus(key, "failed");
+        }
       }
-      success(added === 1 ? "Photo added." : `${added} photos added.`);
-    } catch {
-      failure("Couldn't add the photo. Try again.");
     } finally {
       setUploading(false);
       if (added > 0) refresh();
+    }
+    // In the Complete dialog the tiles say it all; elsewhere confirm with the banner.
+    if (dialog !== "complete") {
+      if (failed > 0) failure(failed === 1 ? "A photo didn't upload. Use Retry on it." : `${failed} photos didn't upload. Use Retry on them.`);
+      else if (added > 0) success(added === 1 ? "Photo added." : `${added} photos added.`);
+    }
+    return failed === 0;
+  }
+
+  function addPhotos(files: FileList | File[]) {
+    const inFlight = isWorker ? pending.length : 0;
+    const picked = takePhotoFiles(files, Math.max(0, photoSlotsLeft(photos, isWorker, proof.since) - inFlight));
+    if (picked.length === 0) return;
+    const items: PendingPhoto[] = picked.map((file) => {
+      const key = `pending-${++pendingSeq}`;
+      pendingFiles.current.set(key, file);
+      return {
+        key,
+        name: file.name || "Photo",
+        previewUrl: typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : null,
+        status: "uploading",
+      };
+    });
+    setPending((list) => [...list, ...items]);
+    void uploadPending(items.map((item) => item.key));
+  }
+
+  function retryPending(key: string) {
+    if (uploading) return;
+    void uploadPending([key]);
+  }
+
+  /** A saved photo whose file never arrived: upload a file into the same photo. */
+  async function retryMissing(photo: MaintenancePhoto, file: File) {
+    setUploading(true);
+    try {
+      await data.retryMissingMaintenancePhoto(photo, file);
+      await retryPhotos();
+      if (dialog !== "complete") success("Photo added.");
+    } catch {
+      failure("That photo still didn't upload. Try again.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -1155,6 +1403,73 @@ export function RequestDetailPage({
     void applyStatus(current.assigned_staff_id != null ? "scheduled" : "open", {}, "Request reopened.");
   }
 
+  function openRelease() {
+    setReleaseReason("");
+    setReleaseError(null);
+    setDialog("release");
+  }
+
+  async function confirmRelease() {
+    const reason = releaseReason.trim();
+    if (!reason || busy) return;
+    setBusy(true);
+    setReleaseError(null);
+    try {
+      await data.releaseMaintenanceRequest(current.id, reason);
+      setDialog(null);
+      // The job is no longer this worker's: it leaves their list (and this page).
+      app.setNotice("Job released. The office will reassign it.");
+      navigate(backLinkFor(role).to);
+    } catch {
+      setReleaseError("Couldn't release the job. Check your connection and try again.");
+      setBusy(false);
+    }
+  }
+
+  async function confirmFixed() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await data.confirmMaintenanceRequestFixed(current.id);
+      success("Thanks for confirming it's fixed.");
+      await load({ silent: true });
+    } catch {
+      failure("Couldn't save your answer. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openNotFixed() {
+    setNotFixedNote("");
+    setNotFixedError(null);
+    setDialog("not-fixed");
+  }
+
+  async function confirmNotFixed() {
+    const note = notFixedNote.trim();
+    if (!note || busy) return;
+    setBusy(true);
+    setNotFixedError(null);
+    try {
+      await data.reopenMaintenanceRequestNotFixed(current.id, note);
+      setDialog(null);
+      success("Request reopened. We've let the office know.");
+      await load({ silent: true });
+    } catch (err) {
+      const raw = (err as Error)?.message ?? "";
+      setNotFixedError(
+        /already confirmed/i.test(raw)
+          ? "You already confirmed this is fixed. Report a new request instead."
+          : "Couldn't reopen the request. Check your connection and try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selfClaim = FEATURES.workerSelfClaim;
+
   async function confirmDelete() {
     setBusy(true);
     try {
@@ -1195,12 +1510,24 @@ export function RequestDetailPage({
       onEditCost={visibility.costVendorEditable ? openCost : undefined}
       onEdit={visibility.editAndDelete ? openEdit : undefined}
       onDelete={visibility.editAndDelete ? () => setDeleteOpen(true) : undefined}
-      onAddPhotos={visibility.addPhotos ? (files) => void addPhotos(files) : undefined}
+      onAddPhotos={visibility.addPhotos ? addPhotos : undefined}
+      pendingPhotos={pending}
+      onRetryPendingPhoto={retryPending}
+      onDiscardPendingPhoto={dropPending}
+      canRetryMissingPhoto={(photo) => Boolean(viewerUserId) && photo.uploaded_by_user_id === viewerUserId}
+      onRetryMissingPhoto={(photo, file) => void retryMissing(photo, file)}
       onSend={visibility.composer ? send : undefined}
       onReopen={visibility.changeStatus ? reopen : undefined}
       onAcceptJob={
-        isWorker && current.status === "open" && current.assigned_staff_id == null ? () => void acceptJob() : undefined
+        selfClaim && isWorker && current.status === "open" && current.assigned_staff_id == null
+          ? () => void acceptJob()
+          : undefined
       }
+      onReleaseJob={selfClaim && holdsJob && current.status !== "closed" ? openRelease : undefined}
+      onConfirmFixed={role === "tenant" ? () => void confirmFixed() : undefined}
+      onStillProblem={role === "tenant" ? openNotFixed : undefined}
+      onMessageOffice={role === "landlord" ? () => navigate(officeHrefForRequest(current)) : undefined}
+      backLabel={back.label}
       nameForUserId={nameForUserId}
       photosError={photosError}
       onRetryPhotos={() => void retryPhotos()}
@@ -1212,7 +1539,7 @@ export function RequestDetailPage({
         title="Assign and schedule"
         description={dialogContext}
         primaryLabel="Assign"
-        primaryDisabled={!assignStaffId || !assignDate}
+        primaryDisabled={!assignStaffId || !visitPatchFor(assignVisit)}
         busy={busy}
         onPrimary={() => void confirmAssign()}
       >
@@ -1231,17 +1558,7 @@ export function RequestDetailPage({
             </SelectContent>
           </Select>
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="assign-date">Date</Label>
-          <Input
-            id="assign-date"
-            type="date"
-            className="h-11 md:h-8"
-            value={assignDate}
-            onChange={(e) => setAssignDate(e.target.value)}
-          />
-          <FieldHint>The tenant is told who is coming and when.</FieldHint>
-        </div>
+        <VisitWindowFields value={assignVisit} onChange={setAssignVisit} idPrefix="assign" />
       </ShortDialog>
 
       <ShortDialog
@@ -1276,55 +1593,62 @@ export function RequestDetailPage({
         </div>
       </ShortDialog>
 
-      <ShortDialog
+      <CompleteJobDialog
         open={dialog === "complete"}
         onOpenChange={closeDialog}
-        title="Mark completed"
-        description={dialogContext}
-        primaryLabel="Mark completed"
-        primaryDisabled={!resolutionNotes.trim() || needsCompletionPhoto || uploading}
+        context={dialogContext}
+        notes={resolutionNotes}
+        onNotesChange={changeCompletionNotes}
+        proofPhotos={isWorker ? proof.photos : []}
+        need={isWorker ? proof.need : "none"}
+        pending={pending}
+        slotsLeft={Math.max(0, photoSlotsLeft(photos, isWorker, proof.since) - pending.length)}
+        uploading={uploading}
+        onAddPhotos={addPhotos}
+        onRetryPending={retryPending}
+        onDiscardPending={dropPending}
+        error={completeError}
         busy={busy}
-        onPrimary={() => void confirmComplete()}
-      >
-        {needsCompletionPhoto ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-sm bg-muted px-3 py-2.5">
-            <p className="text-sm leading-5 text-foreground">Add a photo of the finished work first.</p>
-            <input
-              ref={completionPhotoInput}
-              type="file"
-              accept="image/*"
-              multiple
-              className="sr-only"
-              tabIndex={-1}
-              aria-hidden
-              onChange={(e) => {
-                if (e.target.files?.length) void addPhotos(Array.from(e.target.files));
-                e.target.value = "";
-              }}
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              size="touch"
-              className="md:h-7 md:px-2"
-              disabled={uploading}
-              onClick={() => completionPhotoInput.current?.click()}
-            >
-              {uploading ? "Uploading…" : "Add photo"}
-            </Button>
-          </div>
-        ) : null}
-        <div className="grid gap-1.5">
-          <Label htmlFor="resolution-notes">What fixed it?</Label>
-          <Textarea
-            id="resolution-notes"
-            rows={3}
-            value={resolutionNotes}
-            onChange={(e) => setResolutionNotes(e.target.value)}
-          />
-          <FieldHint>Shown to the tenant and the landlord.</FieldHint>
-        </div>
-      </ShortDialog>
+        onSubmit={() => void confirmComplete()}
+      />
+
+      <NoteDialog
+        open={dialog === "release"}
+        onOpenChange={closeDialog}
+        title="Release this job?"
+        description="It goes back to the office to reassign. The tenant isn't told why."
+        label="Why are you releasing it?"
+        hint="Only the office sees this."
+        placeholder="e.g. Need a part I can't get this week"
+        value={releaseReason}
+        onChange={(v) => {
+          setReleaseReason(v);
+          setReleaseError(null);
+        }}
+        primaryLabel="Release job"
+        primaryVariant="destructive"
+        error={releaseError}
+        busy={busy}
+        onSubmit={() => void confirmRelease()}
+      />
+
+      <NoteDialog
+        open={dialog === "not-fixed"}
+        onOpenChange={closeDialog}
+        title="Still a problem?"
+        description="We'll reopen the request and let the office and the worker know."
+        label="What's still wrong?"
+        hint="A sentence is enough, e.g. “Still dripping under the sink.”"
+        value={notFixedNote}
+        onChange={(v) => {
+          setNotFixedNote(v);
+          setNotFixedError(null);
+        }}
+        primaryLabel="Reopen request"
+        error={notFixedError}
+        busy={busy}
+        onSubmit={() => void confirmNotFixed()}
+      />
 
       <ShortDialog
         open={dialog === "vendor"}

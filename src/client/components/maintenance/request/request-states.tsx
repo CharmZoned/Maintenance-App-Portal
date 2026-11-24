@@ -1,8 +1,9 @@
-import { useEffect, type ReactNode } from "react";
-import { CircleAlert, CircleCheck, RefreshCw, SearchX, TriangleAlert, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { RefreshCw, SearchX, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { RequestBackLink } from "./request-header";
+import { FloatingBanner } from "@/components/patterns/floating-banner";
 
 /**
  * Request page states (spec §3; Figma "UPGRADED — Request" has them for every role).
@@ -190,42 +191,24 @@ export interface RequestBannerProps {
   tone: RequestBannerTone;
   message: string;
   onDismiss: () => void;
-  /** Auto-dismiss after this many ms (0 keeps it). Default 4000. */
+  /** Auto-dismiss after this many ms (0 keeps it). Default: success 4s, error stays. */
   autoDismissMs?: number;
 }
 
 /**
  * Banner / Success and Banner / Error (spec §3): floating at the bottom centre,
- * one line, close x, auto-dismiss. 520px on desktop; on phone it sits above
- * the sticky bar.
+ * one line, close x. On phone it sits above the sticky bar. Drawn above open
+ * dialogs and sheets so a failed save inside one is visible (FloatingBanner).
  */
-export function RequestBanner({ tone, message, onDismiss, autoDismissMs = 4000 }: RequestBannerProps) {
-  useEffect(() => {
-    if (!autoDismissMs) return;
-    const t = window.setTimeout(onDismiss, autoDismissMs);
-    return () => window.clearTimeout(t);
-  }, [message, autoDismissMs, onDismiss]);
-
-  const Icon = tone === "success" ? CircleCheck : CircleAlert;
+export function RequestBanner({ tone, message, onDismiss, autoDismissMs }: RequestBannerProps) {
   return (
-    <div
-      role={tone === "success" ? "status" : "alert"}
-      className={cn(
-        "fixed inset-x-4 bottom-24 z-50 mx-auto flex max-w-[358px] items-center gap-3 rounded-md px-4 py-3 text-sm leading-5 shadow-float md:bottom-6 md:max-w-[520px]",
-        tone === "success" ? "bg-success-tint text-success" : "bg-destructive-tint text-destructive",
-      )}
-    >
-      <Icon className="size-4 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1">{message}</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-sm opacity-80 outline-none hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/40"
-      >
-        <X className="size-4" aria-hidden />
-      </button>
-    </div>
+    <FloatingBanner
+      tone={tone}
+      message={message}
+      onDismiss={onDismiss}
+      autoDismissMs={autoDismissMs}
+      placement="above-bar"
+    />
   );
 }
 

@@ -66,7 +66,7 @@ import { staffQueueTab } from "@/components/maintenance/request-status";
 import { countUnreadConversations, officeKey, type InboxConversation } from "@/lib/inbox";
 import { displayNameFromEmail } from "@/lib/portal-nav";
 import { liveUnits, vacantUnlistedUnits } from "@/lib/listings-overview";
-import { isOpenRequest, toRequestStatus } from "@/lib/request-status";
+import { formatVisit, hasScheduledVisit, isOpenRequest, toRequestStatus, visitInfo } from "@/lib/request-status";
 import { formatMoney } from "@/lib/utils";
 import {
   UNIT_READINESS_LABELS,
@@ -1124,16 +1124,19 @@ function buildCalendar(ctx: Ctx): DashboardCalendarModel {
     const placeDetail = placeLine(place.propertyName, place.unitName);
     const href = ROUTES.request(wo.id);
 
-    const visit = momentOf(wo.scheduled_at, { dateOnlySentinel: true });
-    if (visit && inWindow(visit.day)) {
+    // Only a real visit. A New request (nobody assigned, maybe offered to the
+    // pool) can carry a proposed date, but nobody is coming: listing it here
+    // as well as "Assign a team member" double-listed it (its page says
+    // "Not scheduled yet").
+    const visit = hasScheduledVisit(wo) ? visitInfo(wo, ctx.now) : null;
+    if (visit && inWindow(visit.dayKey)) {
       const tenant = people.tenant(wo.tenant_id);
       events.push({
         id: `visit-${wo.id}`,
         kind: "visit",
-        day: visit.day,
-        // TODO(data-gap): a visit has a start time only (`scheduled_for`), no end
-        // time or duration, so the design's "10:00–11:00 am" range cannot be shown.
-        title: joinParts(["Scheduled visit", visit.clock]),
+        day: visit.dayKey,
+        // "Scheduled visit · 8–12", "Scheduled visit · 8–12 (missed)".
+        title: `${joinParts(["Scheduled visit", visit.time])}${visit.missed ? " (missed)" : ""}`,
         record,
         details: [
           joinParts([
@@ -1681,7 +1684,8 @@ function buildMaintenance(ctx: Ctx): MaintenanceSnapshotModel {
 }
 
 function nextDate(wo: WorkOrder): string | null {
-  const days = [momentOf(wo.scheduled_at, { dateOnlySentinel: true })?.day, followUpDay(wo)].filter(
+  const visitDay = hasScheduledVisit(wo) ? visitInfo(wo)?.dayKey : null;
+  const days = [visitDay, followUpDay(wo)].filter(
     (day): day is string => Boolean(day),
   );
   return days.sort()[0] ?? null;
@@ -1706,8 +1710,8 @@ function requestMeta(ctx: Ctx, wo: WorkOrder, assignee: Person | null): string {
     return joinParts([lead, formatDayShort(followUp)]);
   }
   const who = assignee ? personRef(assignee) : "Team member assigned";
-  const visit = momentOf(wo.scheduled_at, { dateOnlySentinel: true });
-  return joinParts([who, visit ? relativeWithWeekday(visit.day, today) : "Not scheduled yet"]);
+  // The shared visit text: "Wed 25 Nov · 8–12", "Today · 8–12 (missed)".
+  return joinParts([who, formatVisit(wo, { now: ctx.now }) || "Not scheduled yet"]);
 }
 
 // ── Messages ───────────────────────────────────────────────────────

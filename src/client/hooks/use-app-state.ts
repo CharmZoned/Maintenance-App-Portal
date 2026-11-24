@@ -275,6 +275,7 @@ export function useAppState(
     open_only?: boolean;
     limit?: number;
     skip_staff_notes?: boolean;
+    closed_since?: string;
   }): Promise<WorkOrder[]> => {
     return data.listWorkOrders(params);
   }, []);

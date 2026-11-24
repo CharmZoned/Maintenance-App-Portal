@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { DialogOpenMarker } from "@/components/ui/dialog";
+import { startedOnFloatingBanner } from "@/lib/open-dialogs";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { CircleAlert, Upload, X } from "lucide-react";
 import { useApp } from "@/context";
@@ -644,7 +646,11 @@ export function AdminNewRequestDialog({
                 "relative z-50 flex w-full flex-col bg-card text-card-foreground outline-none",
                 "min-h-[calc(100dvh-var(--staging-ribbon-offset,0px))] md:min-h-0 md:max-w-[680px] md:rounded-lg md:shadow-float",
               )}
+              onInteractOutside={(event) => {
+                if (startedOnFloatingBanner(event)) event.preventDefault();
+              }}
             >
+              <DialogOpenMarker />
               <form noValidate onSubmit={(e) => void submit(e)} className="flex flex-1 flex-col">
                 <div className="flex items-start gap-3 border-b border-border px-4 py-3 md:border-0 md:px-5 md:pb-0 md:pt-5">
                   <div className="min-w-0 flex-1 space-y-1 pt-2 md:pt-0">

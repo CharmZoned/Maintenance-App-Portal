@@ -497,13 +497,30 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
     ]);
   };
 
-  /** The admin sets the date, time and both prices and pushes the job to the worker pool. */
-  const offer = async (requestId: number, at: Offset, scheduledFor: Offset, workerPrice: number, landlordPrice: number) => {
+  /**
+   * A visit is a day plus an arrival window (UX-17): Morning 8–12, Afternoon
+   * 12–5, Evening 5–8. `day` is an offset from now; the window is that day's hours.
+   */
+  type VisitWindow = readonly [startHour: number, endHour: number];
+  const MORNING: VisitWindow = [8, 12];
+  const AFTERNOON: VisitWindow = [12, 17];
+  const visitAt = (dayParam: string, hourParam: string) =>
+    `date_trunc('day', now() + ${dayParam}::interval) + make_interval(hours => ${hourParam}::int)`;
+
+  /** The admin sets the visit (day + arrival window) and both prices and pushes the job to the worker pool. */
+  const offer = async (
+    requestId: number,
+    at: Offset,
+    day: Offset,
+    window: VisitWindow,
+    workerPrice: number,
+    landlordPrice: number,
+  ) => {
     await callAs(
       db,
       admin.userId,
-      `(public.offer_maintenance_request($1, date_trunc('hour', now() + $2::interval), $3, $4)).id`,
-      [requestId, scheduledFor, workerPrice, landlordPrice],
+      `(public.offer_maintenance_request($1, ${visitAt("$2", "$5")}, $3, $4, ${visitAt("$2", "$6")})).id`,
+      [requestId, day, workerPrice, landlordPrice, window[0], window[1]],
     );
     await db.admin(`update public."MaintenanceRequests" set offered_at = now() + $2::interval where id = $1`, [requestId, at]);
     await stamp(requestId, at);
@@ -516,13 +533,15 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
     await stamp(requestId, at);
   };
 
-  /** The admin assigns a worker directly, with a date and time. */
-  const schedule = async (requestId: number, worker: Person, at: Offset, scheduledFor: Offset) => {
+  /** The admin assigns a worker directly, with a day and an arrival window. */
+  const schedule = async (requestId: number, worker: Person, at: Offset, day: Offset, window: VisitWindow) => {
     await db.admin(
       `update public."MaintenanceRequests"
-          set status = 'Scheduled', assigned_staff_id = $2, scheduled_for = date_trunc('hour', now() + $3::interval)
+          set status = 'Scheduled', assigned_staff_id = $3,
+              scheduled_for = ${visitAt("$2", "$4")},
+              scheduled_end_at = ${visitAt("$2", "$5")}
         where id = $1`,
-      [requestId, worker.staffId ?? null, scheduledFor],
+      [requestId, day, worker.staffId ?? null, window[0], window[1]],
     );
     await stamp(requestId, at, admin);
   };
@@ -652,7 +671,7 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   });
 
   // Closed: assigned by the admin, done by Sam, confirmed by Tina.
-  await schedule(closed, sam, "-23 days -20 hours", "-21 days");
+  await schedule(closed, sam, "-23 days -20 hours", "-21 days", MORNING);
   await prices(closed, 85, 120);
   await say(closed, admin, "-23 days -20 hours", "Sam from Fixit Home Repair will come by on the scheduled day.");
   await start(closed, sam, "-21 days");
@@ -661,7 +680,7 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   await confirmFixed(closed, tina, "-20 days", "Works again, thank you!");
 
   // On hold: Sam started, then had to wait for a part.
-  await schedule(onHold, sam, "-8 days -20 hours", "-6 days");
+  await schedule(onHold, sam, "-8 days -20 hours", "-6 days", AFTERNOON);
   await prices(onHold, 90, 135);
   await start(onHold, sam, "-6 days");
   await hold(onHold, sam, "-5 days -22 hours", "Waiting on a replacement latch from the supplier.", 4);
@@ -674,13 +693,13 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   ]);
 
   // Scheduled: pushed to the pool, accepted by Sam. Created -> Offered -> Accepted.
-  await offer(scheduled, "-1 days -20 hours", "+1 days", 120, 175);
+  await offer(scheduled, "-1 days -20 hours", "+1 days", MORNING, 120, 175);
   await accept(scheduled, sam, "-1 days -18 hours");
   await say(scheduled, sam, "-1 days -17 hours", "I'll be there tomorrow. Please leave the dishwasher empty.");
   await say(scheduled, tom, "-1 days -16 hours", "Will do, thanks.");
 
   // In progress: urgent, so the admin assigned Riley directly.
-  await schedule(inProgress, riley, "-1 days", "-3 hours");
+  await schedule(inProgress, riley, "-1 days", "0 days", MORNING);
   await prices(inProgress, 220, 310);
   await say(inProgress, admin, "-1 days", "Riley from Wrench Electric & HVAC is coming this morning.");
   await start(inProgress, riley, "-2 hours");
@@ -688,8 +707,8 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
 
   // In the pool, waiting for a worker.
   await say(pooled, tina, "-19 hours", "It is getting a little worse each day.");
-  await offer(pooled, "-3 hours", "+2 days", 140, 190);
-  await offer(pooledElectrical, "-2 hours", "+1 days", 160, 230);
+  await offer(pooled, "-3 hours", "+2 days", AFTERNOON, 140, 190);
+  await offer(pooledElectrical, "-2 hours", "+1 days", MORNING, 160, 230);
 
   // ── Job photos ──────────────────────────────────────────────────────
   // Rows only (see DemoWorld.photos). Paths follow `{request_id}/{file}`, the

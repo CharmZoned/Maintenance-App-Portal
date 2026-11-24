@@ -11,7 +11,8 @@ export function PersonRow({
 }: {
   name: string;
   meta: string;
-  status: PortalStatusKind;
+  /** Omitted while account statuses are unavailable. */
+  status?: PortalStatusKind;
   onClick?: () => void;
   className?: string;
 }) {
@@ -30,7 +31,7 @@ export function PersonRow({
         <p className="truncate text-sm font-medium text-foreground">{name}</p>
         <p className="truncate text-xs text-muted-foreground">{meta}</p>
       </div>
-      <PortalStatus status={status} />
+      {status ? <PortalStatus status={status} /> : null}
     </Comp>
   );
 }
