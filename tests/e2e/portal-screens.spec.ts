@@ -263,7 +263,42 @@ test.describe("[R3] Properties and units — screens", () => {
     await page.goto("/properties");
     await expect(page.getByText("Maple Court").first()).toBeVisible();
     await expect(page.getByText("Birch House")).toBeVisible();
+    const cards = page.getByRole("list", { name: "Properties", exact: true }).getByRole("listitem");
+    await expect(cards.filter({ hasText: "Maple Court" }), "each card names its owner").toContainText("Lena Owner");
+    await expect(cards.filter({ hasText: "Birch House" })).toContainText("Oscar Elsewhere");
     await shot(page, testInfo, "Properties list");
+
+    // The portfolio by owner: pressing an owner shows only their properties.
+    const owners = page.getByRole("group", { name: "Filter properties by owner" });
+    await owners.getByRole("button", { name: /Lena Owner/ }).click();
+    await expect(page).toHaveURL(/\/properties\?owner=\d+$/);
+    await expect(page.getByRole("list", { name: "Properties owned by Lena Owner" }).getByRole("listitem")).toHaveCount(1);
+    await expect(page.getByText("Birch House")).toHaveCount(0);
+    await expect(page.getByText("Showing 1 property owned by Lena Owner")).toBeVisible();
+    // The URL is the filter: the rail's plain Properties link clears it, Back restores it.
+    await nav(page).getByRole("link", { name: /^Properties/ }).click();
+    await expect(page).toHaveURL(/\/properties$/);
+    await expect(cards).toHaveCount(2);
+    await expect(owners.getByRole("button", { name: /All owners/ })).toHaveAttribute("aria-pressed", "true");
+    await page.goBack();
+    await expect(page).toHaveURL(/\/properties\?owner=\d+$/);
+    await expect(page.getByRole("list", { name: "Properties owned by Lena Owner" }).getByRole("listitem")).toHaveCount(1);
+    await page.getByRole("button", { name: "Show all owners" }).click();
+    await expect(page).toHaveURL(/\/properties$/);
+    await expect(cards).toHaveCount(2);
+    await owners.getByRole("button", { name: /Lena Owner/ }).click();
+    await expect(page).toHaveURL(/\/properties\?owner=\d+$/);
+    await owners.getByRole("button", { name: /All owners/ }).click();
+    await expect(page).toHaveURL(/\/properties$/);
+    await expect(cards).toHaveCount(2);
+
+    // The whole card opens the property; Edit opens the editor instead.
+    await page.getByRole("button", { name: "Edit Maple Court" }).click();
+    await expect(page.getByRole("dialog").getByRole("heading", { name: "Edit property" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(/\/properties$/);
+    await page.getByRole("link", { name: "Birch House" }).click();
+    await expect(page).toHaveURL(/\/properties\/\d+$/);
   });
 
   test("an admin adds a property from the Properties page", async ({ page }, testInfo) => {
