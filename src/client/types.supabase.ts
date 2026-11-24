@@ -198,6 +198,8 @@ export interface Database {
           company_name: string | null;
           phone: string | null;
           services: string[];
+          /** Office flag (20261124090000). False = no longer takes new work. */
+          active: boolean;
         };
         Insert: {
           id?: number;
@@ -211,6 +213,7 @@ export interface Database {
           company_name?: string | null;
           phone?: string | null;
           services?: string[];
+          active?: boolean;
         };
         Update: Partial<Database["public"]["Tables"]["Staff"]["Insert"]>;
         Relationships: [];
@@ -896,6 +899,11 @@ export interface Database {
           account_status: AccountStatus;
           created_at: string;
           email_confirmed_at: string | null;
+          /** Sign-up metadata (20261124090000), clamped server-side. */
+          full_name: string | null;
+          intent_role: "tenant" | "landlord" | null;
+          signup_address: string | null;
+          phone: string | null;
         }[];
       };
       set_account_status: {
@@ -909,6 +917,16 @@ export interface Database {
           p_landlord_id?: number | null;
           p_tenant_id?: number | null;
           p_staff_id?: number | null;
+        };
+        Returns: Database["public"]["Tables"]["user_roles"]["Row"];
+      };
+      admin_assign_account_role: {
+        Args: {
+          p_user_id: string;
+          p_role: AppRole;
+          p_link_id?: number | null;
+          p_create?: Record<string, unknown> | null;
+          p_approve?: boolean;
         };
         Returns: Database["public"]["Tables"]["user_roles"]["Row"];
       };

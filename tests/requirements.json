@@ -25,6 +25,11 @@
       "id": "WF3",
       "title": "Worker job pool",
       "summary": "An admin sets the date, time and price and pushes a job; a worker accepts it (first accept wins), can release it back, completes it with a photo, and the tenant confirms the fix. Includes the direct chat with the office."
+    },
+    {
+      "id": "WF4",
+      "title": "Sign-up approval as tenant or owner",
+      "summary": "Someone signs up from the website as a tenant or owner with no record on file; the admin sees their name, chosen role and address, and approves them in one step by linking an existing record or creating one from the sign-up; they then sign in to their own home."
     }
   ]
 }

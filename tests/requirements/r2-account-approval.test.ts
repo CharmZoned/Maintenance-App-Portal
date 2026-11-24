@@ -160,7 +160,7 @@ describe("[R2] Account approval", () => {
         role: "maintenance",
       });
       await expect(data.setAccountStatus(login[0].id, "approved")).rejects.toThrow(
-        /email must be confirmed before approving/i,
+        /haven.t confirmed their email/i, // plain-language version of "Email must be confirmed before approving"
       );
       expect(await statusOf(login[0].id)).toBe("pending");
 
@@ -194,7 +194,7 @@ describe("[R2] Account approval", () => {
     test("a login with no role cannot be approved until a role is assigned", async () => {
       const login = await roleLessLogin("rory");
       await signInApp("admin");
-      await expect(data.setAccountStatus(login, "approved")).rejects.toThrow(/assign a role before approving/i);
+      await expect(data.setAccountStatus(login, "approved")).rejects.toThrow(/choose a role before approving/i);
     });
 
     test("an admin approves a landlord who is linked to a landlord record", async () => {
@@ -209,7 +209,7 @@ describe("[R2] Account approval", () => {
     test("an approved worker cannot have their staff link removed", async () => {
       await signInApp("admin");
       await expect(data.adminSetUserRole(world.users.worker.id, "maintenance", { staff_id: null })).rejects.toThrow(
-        /cannot clear staff link while approved/i,
+        /must stay linked to a Staff record/i, // "Cannot clear Staff link while approved"
       );
     });
 
@@ -241,7 +241,7 @@ describe("[R2] Account approval", () => {
     test("suspending the sole approved admin is refused", async () => {
       await signInApp("admin");
       await expect(data.setAccountStatus(world.users.admin.id, "suspended")).rejects.toThrow(
-        /cannot remove the last approved admin/i,
+        /can.t remove the last admin/i,
       );
       expect(await statusOf(world.users.admin.id)).toBe("approved");
     });
@@ -250,7 +250,7 @@ describe("[R2] Account approval", () => {
       await signInApp("admin");
       await expect(
         data.adminSetUserRole(world.users.admin.id, "maintenance", { staff_id: world.staff.worker.id }),
-      ).rejects.toThrow(/cannot remove the last approved admin/i);
+      ).rejects.toThrow(/can.t remove the last admin/i);
       const [row] = await sql<{ role: string }>(`select role from public.user_roles where user_id = $1`, [
         world.users.admin.id,
       ]);
@@ -277,7 +277,7 @@ describe("[R2] Account approval", () => {
 
       // Seed admin remains the sole approved admin and still cannot self-lock out.
       await expect(data.setAccountStatus(world.users.admin.id, "rejected")).rejects.toThrow(
-        /cannot remove the last approved admin/i,
+        /can.t remove the last admin/i,
       );
     });
   });

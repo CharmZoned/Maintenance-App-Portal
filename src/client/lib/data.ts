@@ -55,6 +55,7 @@ import type {
   DocumentVisibility,
 } from "../types";
 import type { AccountStatus, AppRole, Tables } from "../types.supabase";
+import { friendlyAccountError } from "./account-errors";
 
 export interface UserAccountRow {
   user_id: string;
@@ -71,6 +72,12 @@ export interface UserAccountRow {
    * (FE ahead of live mig) — do not block UI; server enforces after apply.
    */
   email_confirmed_at?: string | null;
+  /** Sign-up details from auth metadata (admin list RPC, 20261124090000). */
+  full_name?: string | null;
+  /** What the person chose at registration. `null` = not stated. */
+  intent_role?: "tenant" | "landlord" | null;
+  signup_address?: string | null;
+  phone?: string | null;
 }
 
 export interface StaffMember {
@@ -80,6 +87,24 @@ export interface StaffMember {
   email: string;
   job_title: string | null;
   gets_request_alerts: boolean;
+  /** Optional so older fixtures still type-check; listStaff always sets them. */
+  phone?: string | null;
+  company_name?: string | null;
+  services?: string[];
+  /** Office flag; false = no longer takes new work. */
+  active?: boolean;
+}
+
+export interface NewStaffMember {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  company_name?: string | null;
+  job_title?: string | null;
+  services?: string[];
+  gets_request_alerts?: boolean;
+  active?: boolean;
 }
 
 function throwSb(error: { message: string } | null): never {
@@ -2460,27 +2485,109 @@ void assertOk;
 
 // ── Staff (admin role linking) ────────────────────────────────────
 
-export async function listStaff(): Promise<StaffMember[]> {
-  const { data, error } = await supabase
-    .from("Staff")
-    .select("id, first_name, last_name, email, job_title, gets_request_alerts")
-    .order("last_name");
-  if (error) throwSb(error);
-  return (data ?? []).map((s) => ({
+const STAFF_COLUMNS =
+  "id, first_name, last_name, email, job_title, gets_request_alerts, phone, company_name, services, active";
+
+type StaffRow = Pick<
+  Tables<"Staff">,
+  | "id"
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "job_title"
+  | "gets_request_alerts"
+  | "phone"
+  | "company_name"
+  | "services"
+> & { active?: boolean | null };
+
+function mapStaff(s: StaffRow): StaffMember {
+  return {
     id: s.id,
     first_name: s.first_name,
     last_name: s.last_name,
     email: s.email,
     job_title: s.job_title,
     gets_request_alerts: Boolean(s.gets_request_alerts),
-  }));
+    phone: s.phone ?? null,
+    company_name: s.company_name ?? null,
+    services: s.services ?? [],
+    // Absent before 20261124090000 — treat as active.
+    active: s.active !== false,
+  };
+}
+
+export async function listStaff(): Promise<StaffMember[]> {
+  const { data, error } = await supabase.from("Staff").select(STAFF_COLUMNS).order("last_name");
+  if (error) throwSb(error);
+  return ((data ?? []) as StaffRow[]).map(mapStaff);
+}
+
+function staffPayload(input: Partial<NewStaffMember>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  if (input.first_name !== undefined) row.first_name = input.first_name.trim();
+  if (input.last_name !== undefined) row.last_name = input.last_name.trim();
+  if (input.email !== undefined) {
+    const email = input.email.trim().toLowerCase();
+    if (!email) throw new Error("Email is required");
+    row.email = email;
+  }
+  if (input.phone !== undefined) row.phone = input.phone?.trim() || null;
+  if (input.company_name !== undefined) row.company_name = input.company_name?.trim() || null;
+  if (input.job_title !== undefined) row.job_title = input.job_title?.trim() || null;
+  if (input.services !== undefined) row.services = input.services;
+  if (input.gets_request_alerts !== undefined) row.gets_request_alerts = input.gets_request_alerts;
+  if (input.active !== undefined) row.active = input.active;
+  return row;
+}
+
+/** Admin: add a team member (Staff row). Their login links on approval. */
+export async function createStaff(input: NewStaffMember): Promise<StaffMember> {
+  if (!input.first_name.trim() || !input.last_name.trim()) throw new Error("First and last name are required");
+  const { data, error } = await supabase
+    .from("Staff")
+    .insert(staffPayload(input) as never)
+    .select(STAFF_COLUMNS)
+    .single();
+  if (error) throwSb(error);
+  return mapStaff(data as StaffRow);
+}
+
+export async function updateStaff(id: number, patch: Partial<NewStaffMember>): Promise<StaffMember> {
+  const { data, error } = await supabase
+    .from("Staff")
+    .update(staffPayload(patch) as never)
+    .eq("id", id)
+    .select(STAFF_COLUMNS)
+    .single();
+  if (error) throwSb(error);
+  return mapStaff(data as StaffRow);
+}
+
+/** Admin: open (not Closed) requests assigned to each Staff id. */
+export async function countOpenJobsByStaff(): Promise<Map<number, number>> {
+  const rows = await selectAllPages<{ assigned_staff_id: number | null }>((from, to) =>
+    supabase
+      .from("MaintenanceRequests")
+      .select("assigned_staff_id")
+      .not("assigned_staff_id", "is", null)
+      .in("status", [...WORK_ORDER_OPEN_STATUSES_DB])
+      .order("id")
+      .range(from, to),
+  );
+  const counts = new Map<number, number>();
+  for (const r of rows) {
+    if (r.assigned_staff_id == null) continue;
+    counts.set(r.assigned_staff_id, (counts.get(r.assigned_staff_id) ?? 0) + 1);
+  }
+  return counts;
 }
 
 // ── User accounts (admin approval queue) ──────────────────────────
 
 export async function listUserAccounts(): Promise<UserAccountRow[]> {
   const { data, error } = await supabase.rpc("list_user_accounts_for_admin");
-  if (error) throwSb(error);
+  if (error) throw new Error(friendlyAccountError(error.message));
   return (data ?? []).map((row) => {
     const mapped: UserAccountRow = {
       user_id: row.user_id,
@@ -2496,6 +2603,13 @@ export async function listUserAccounts(): Promise<UserAccountRow[]> {
     if ("email_confirmed_at" in row) {
       mapped.email_confirmed_at = row.email_confirmed_at ?? null;
     }
+    if ("full_name" in row) {
+      mapped.full_name = row.full_name ?? null;
+      mapped.intent_role =
+        row.intent_role === "tenant" || row.intent_role === "landlord" ? row.intent_role : null;
+      mapped.signup_address = row.signup_address ?? null;
+      mapped.phone = row.phone ?? null;
+    }
     return mapped;
   });
 }
@@ -2508,7 +2622,7 @@ export async function setAccountStatus(
     p_user_id: userId,
     p_status: status,
   });
-  if (error) throwSb(error);
+  if (error) throw new Error(friendlyAccountError(error.message));
   return data!;
 }
 
@@ -2524,7 +2638,40 @@ export async function adminSetUserRole(
     p_tenant_id: links?.tenant_id ?? null,
     p_staff_id: links?.staff_id ?? null,
   });
-  if (error) throwSb(error);
+  if (error) throw new Error(friendlyAccountError(error.message));
+  return data!;
+}
+
+/** Details for a Tenant / Landlord / Staff row created during approval. */
+export interface NewSubjectFromSignup {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  company_name?: string | null;
+  job_title?: string | null;
+  notes?: string | null;
+  services?: string[];
+}
+
+/**
+ * Admin: set role + link (existing record id, or a new record created from the
+ * sign-up) and optionally approve — one atomic server call
+ * (`admin_assign_account_role`, 20261124090000). Errors are plain language.
+ */
+export async function assignAccountRole(
+  userId: string,
+  role: AppRole,
+  opts: { linkId?: number | null; create?: NewSubjectFromSignup | null; approve: boolean },
+): Promise<Tables<"user_roles">> {
+  const { data, error } = await supabase.rpc("admin_assign_account_role", {
+    p_user_id: userId,
+    p_role: role,
+    p_link_id: opts.create ? null : (opts.linkId ?? null),
+    p_create: opts.create ? ({ ...opts.create } as Record<string, unknown>) : null,
+    p_approve: opts.approve,
+  });
+  if (error) throw new Error(friendlyAccountError(error.message));
   return data!;
 }
 

@@ -22,6 +22,7 @@ export function PageShell({
   actions,
   width = "max-w-7xl",
   titleIsPageHeading = true,
+  section,
   children,
 }: {
   title: React.ReactNode;
@@ -35,13 +36,15 @@ export function PageShell({
    * band title is then plain text, so the page has exactly one h1.
    */
   titleIsPageHeading?: boolean;
+  /** Admin workspace breadcrumb ("Admin workspace / {section}"). Defaults to the active rail item. */
+  section?: string;
   children: React.ReactNode;
 }) {
   const chrome = useShellChrome();
 
   if (chrome?.onOpenNav) {
     return (
-      <AdminPageShell title={title} meta={meta} actions={actions}>
+      <AdminPageShell section={section} title={title} meta={meta} actions={actions}>
         <div className="min-w-0 space-y-6">{children}</div>
       </AdminPageShell>
     );

@@ -9,6 +9,7 @@ import {
   anonClient,
   clientFor,
   expectDenied,
+  PERSONAS,
   resetWorld,
   serviceClient,
   signInApp,
@@ -422,6 +423,58 @@ describe("[R7] Permissions", () => {
       await sql(`update public.user_roles set account_status = 'approved' where user_id = $1`, [
         world.users.landlord.id,
       ]);
+    });
+
+    test("reads only name, contact and unit for their tenants — never screening data (admin still can)", async () => {
+      await sql(
+        `update public."Tenants"
+            set date_of_birth = '1990-04-02', employer = 'Acme Screening Co', monthly_income = 5400,
+                emergency_contact = 'Pat Kin (555) 0100', notes = 'Credit check passed'
+          where id = $1`,
+        [world.tenants.tenant.id],
+      );
+      const screening = ["date_of_birth", "employer", "monthly_income", "emergency_contact", "notes"] as const;
+
+      const landlord = await clientFor("landlord");
+      const own = await landlord.from("Tenants").select("*").eq("id", world.tenants.tenant.id).single();
+      expect(own.error).toBeNull();
+      expect(own.data).toMatchObject({
+        id: world.tenants.tenant.id,
+        first_name: expect.any(String),
+        last_name: expect.any(String),
+        email: PERSONAS.tenant.email,
+        unit_id: world.units.a.id,
+      });
+      for (const col of screening) expect(own.data?.[col], `landlord reads ${col}`).toBeNull();
+
+      // Asking for the columns by name, or filtering on them, reveals nothing either.
+      const named = await landlord
+        .from("Tenants")
+        .select("monthly_income, employer, date_of_birth")
+        .eq("id", world.tenants.tenant.id)
+        .single();
+      expect(named.data).toEqual({ monthly_income: null, employer: null, date_of_birth: null });
+      const probe = await landlord.from("Tenants").select("id").gt("monthly_income", 1000);
+      expect(probe.data ?? []).toEqual([]);
+
+      // The landlord pages' own reads (leases → tenant name/contact) still work.
+      await signInApp("landlord");
+      const leases = await data.listLeases();
+      expect(Array.isArray(leases)).toBe(true);
+
+      const admin = await clientFor("admin");
+      const full = await admin.from("Tenants").select("*").eq("id", world.tenants.tenant.id).single();
+      expect(full.data).toMatchObject({
+        date_of_birth: "1990-04-02",
+        employer: "Acme Screening Co",
+        monthly_income: 5400,
+        emergency_contact: "Pat Kin (555) 0100",
+        notes: "Credit check passed",
+      });
+
+      // The tenant still reads their own full record.
+      const self = await (await clientFor("tenant")).from("Tenants").select("employer, emergency_contact").single();
+      expect(self.data).toEqual({ employer: "Acme Screening Co", emergency_contact: "Pat Kin (555) 0100" });
     });
 
     test("sees updates meant for the tenant but not internal staff notes", async () => {

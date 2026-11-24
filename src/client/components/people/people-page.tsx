@@ -1,44 +1,73 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { useApp } from "@/context";
 import * as data from "@/lib/data";
-import type { UserAccountRow } from "@/lib/data";
+import type { StaffMember, UserAccountRow } from "@/lib/data";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
 import { TenantDialog } from "@/components/tenants/tenant-dialog";
 import { LandlordDialog } from "@/components/landlords/landlord-dialog";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
-import type { Landlord, Tenant } from "@/types";
+import type { Landlord } from "@/types";
 import { portalStatusFromAccounts } from "@/lib/people-portal-status";
-import { PeopleTabBar, type PeopleTabId } from "./people-tab-bar";
+import { PeopleTabBar, isPeopleTab, type PeopleTabId } from "./people-tab-bar";
 import { ApprovalCard } from "./approval-card";
+import { AssignAccountDialog } from "./assign-account-dialog";
 import { PersonRow } from "./person-row";
 import { TeamRow } from "./team-row";
+import { TeamMemberDialog } from "./team-member-dialog";
 import { VendorRow } from "./vendor-row";
+import { displayName } from "./account-labels";
+import { useResource, type Resource } from "./use-resource";
 
-type LoadState = "loading" | "ready" | "error";
+const EMPTY_ACCOUNTS: UserAccountRow[] = [];
+const EMPTY_STAFF: StaffMember[] = [];
+const EMPTY_JOBS = new Map<number, number>();
 
-function approveBlockedReason(user: UserAccountRow): string | null {
-  if (user.email_confirmed_at === null) {
-    return "Email must be confirmed before approving.";
+function Skeletons() {
+  return (
+    <div className="overflow-hidden rounded-md border border-border" aria-busy="true" aria-label="Loading">
+      <SkeletonRow />
+      <SkeletonRow />
+      <SkeletonRow />
+    </div>
+  );
+}
+
+/** Loading / error+retry / content for one tab's own list. */
+function ResourceGate<T>({
+  resource,
+  what,
+  children,
+}: {
+  resource: Resource<T>;
+  what: string;
+  children: ReactNode;
+}) {
+  if (resource.state === "loading" || resource.state === "idle") return <Skeletons />;
+  if (resource.state === "error") {
+    return (
+      <div className="rounded-md border border-border bg-card">
+        <ErrorRetry
+          message={`We couldn't load ${what}. Check your connection and try again.`}
+          onRetry={() => void resource.reload()}
+        />
+      </div>
+    );
   }
-  if (!user.role) return "Assign a role before approving.";
-  if (user.role === "maintenance" && user.staff_id == null) {
-    return "Link a Staff row before approving a maintenance account.";
-  }
-  if (user.role === "tenant" && user.tenant_id == null) {
-    return "Link a Tenant row before approving a tenant account.";
-  }
-  if (user.role === "landlord" && user.landlord_id == null) {
-    return "Link a Landlord row before approving a landlord account.";
-  }
-  return null;
+  return <>{children}</>;
+}
+
+function plural(n: number, one: string, many: string) {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /**
  * Figma 06 People — N7 container with Approvals / Tenants / Landlords / Team / Vendors.
- * Reuses existing list/approval APIs; portal status is derived (invite API stub).
+ * Each tab loads its own list, so one failure shows an error + Retry in that
+ * tab only. Approve… opens one dialog (role + record + confirm).
  */
 export function PeoplePage({
   search = "",
@@ -57,120 +86,97 @@ export function PeoplePage({
     landlords,
     vendors,
     canMutatePortfolio,
+    refreshLookups,
     loading: appLoading,
   } = useApp();
+
+  const accounts = useResource(data.listUserAccounts, EMPTY_ACCOUNTS, isAdmin);
+  const fetchTenants = useCallback(() => listTenants(), [listTenants]);
+  const tenants = useResource(fetchTenants, [], true);
+  const staff = useResource(data.listStaff, EMPTY_STAFF, isAdmin);
+  const openJobs = useResource(data.countOpenJobsByStaff, EMPTY_JOBS, isAdmin);
+
   const [tab, setTab] = useState<PeopleTabId>("tenants");
-  const [state, setState] = useState<LoadState>("loading");
-  const [error, setLocalError] = useState<string | null>(null);
-  const [accounts, setAccounts] = useState<UserAccountRow[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [staff, setStaff] = useState<data.StaffMember[]>([]);
   const [tenantDialog, setTenantDialog] = useState(false);
   const [landlordDialog, setLandlordDialog] = useState(false);
   const [editingLandlord, setEditingLandlord] = useState<Landlord | undefined>();
+  const [teamDialog, setTeamDialog] = useState<{ member?: StaffMember } | null>(null);
+  const [assigning, setAssigning] = useState<UserAccountRow | null>(null);
+  const [rejecting, setRejecting] = useState<UserAccountRow | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{
-    user: UserAccountRow;
-    status: "approved" | "rejected";
-  } | null>(null);
-
-  /** Initial mount shows skeletons; mutation refreshes keep current rows. */
-  const load = useCallback(
-    async (opts?: { keepRows?: boolean }) => {
-      if (!opts?.keepRows) setState("loading");
-      setLocalError(null);
-      try {
-        const [acc, ten, st] = await Promise.all([
-          isAdmin ? data.listUserAccounts() : Promise.resolve([] as UserAccountRow[]),
-          listTenants(),
-          isAdmin ? data.listStaff() : Promise.resolve([] as data.StaffMember[]),
-        ]);
-        setAccounts(acc);
-        setTenants(ten);
-        setStaff(st);
-        setState("ready");
-      } catch (err) {
-        setLocalError((err as Error).message);
-        setState("error");
-        setError((err as Error).message);
-      }
-    },
-    [isAdmin, listTenants, setError],
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const pending = useMemo(
-    () => accounts.filter((a) => a.account_status === "pending"),
-    [accounts],
+    () => accounts.data.filter((a) => a.account_status === "pending"),
+    [accounts.data],
   );
+  const accountsReady = accounts.state === "ready";
 
-  // Default tab: Approvals when anything waiting, else Tenants (Figma N7 note).
-  // Honour ?tab= from URL when present.
-  useEffect(() => {
-    if (state !== "ready") return;
+  // Tab from ?tab= when present. Otherwise, once (after the queue has loaded):
+  // Approvals when anything is waiting, else Tenants (Figma N7 note). Never
+  // jump away later, e.g. right after approving the last sign-up.
+  const urlTab = useMemo(() => {
     const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-    const fromUrl = params.get("tab") as PeopleTabId | null;
-    if (
-      fromUrl === "approvals" ||
-      fromUrl === "tenants" ||
-      fromUrl === "landlords" ||
-      fromUrl === "team" ||
-      fromUrl === "vendors"
-    ) {
-      setTab(fromUrl);
+    const t = params.get("tab");
+    return isPeopleTab(t) ? t : null;
+  }, [search]);
+  const defaulted = useRef(false);
+  useEffect(() => {
+    if (urlTab) {
+      setTab(urlTab);
+      defaulted.current = true;
       return;
     }
+    if (defaulted.current) return;
+    if (isAdmin && (accounts.state === "loading" || accounts.state === "idle")) return;
+    defaulted.current = true;
     setTab(pending.length > 0 ? "approvals" : "tenants");
-  }, [state, pending.length, search]);
+  }, [urlTab, isAdmin, accounts.state, pending.length]);
 
-  function selectTab(id: PeopleTabId) {
+  function selectTab(id: string) {
+    if (!isPeopleTab(id)) return;
     setTab(id);
     if (replace) replace(`/people?tab=${id}`);
   }
 
-  async function applyStatus(user: UserAccountRow, status: "approved" | "rejected") {
-    if (status === "approved" && approveBlockedReason(user)) {
-      setError(approveBlockedReason(user) ?? "Cannot approve yet.");
-      setConfirm(null);
-      return;
-    }
+  async function reject(user: UserAccountRow) {
     setBusyId(user.user_id);
     try {
-      await data.setAccountStatus(user.user_id, status);
-      await load({ keepRows: true });
+      await data.setAccountStatus(user.user_id, "rejected");
+      setNotice(`${displayName(user)}’s sign-up was rejected.`);
+      await accounts.reload({ quiet: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusyId(null);
-      setConfirm(null);
+      setRejecting(null);
     }
   }
 
-  const meta =
-    state === "loading"
-      ? "Loading…"
-      : tab === "approvals"
-        ? pending.length
-          ? `${pending.length} awaiting approval`
-          : "No pending sign-ups"
-        : tab === "tenants"
-          ? `${tenants.length} ${tenants.length === 1 ? "tenant" : "tenants"}`
-          : tab === "landlords"
-            ? `${landlords.length} ${landlords.length === 1 ? "landlord" : "landlords"}`
-            : tab === "team"
-              ? `${staff.length} team ${staff.length === 1 ? "member" : "members"}`
-              : `${vendors.length} ${vendors.length === 1 ? "vendor" : "vendors"}`;
+  const statusFor = (link: Parameters<typeof portalStatusFromAccounts>[1]) =>
+    // Without the account list a chip would claim "Not invited" — show none instead.
+    isAdmin && accountsReady ? portalStatusFromAccounts(accounts.data, link) : undefined;
+
+  const metaFor = (id: PeopleTabId): string => {
+    if (id === "approvals") {
+      if (!isAdmin) return "Admins only";
+      if (!accountsReady) return accounts.state === "error" ? "Couldn't load sign-ups" : "Loading…";
+      return pending.length ? `${pending.length} awaiting approval` : "No pending sign-ups";
+    }
+    if (id === "tenants") {
+      if (tenants.state !== "ready") return tenants.state === "error" ? "Couldn't load tenants" : "Loading…";
+      return plural(tenants.data.length, "tenant", "tenants");
+    }
+    if (id === "landlords") return appLoading && !landlords.length ? "Loading…" : plural(landlords.length, "landlord", "landlords");
+    if (id === "team") {
+      if (staff.state !== "ready") return staff.state === "error" ? "Couldn't load the team" : "Loading…";
+      return plural(staff.data.length, "team member", "team members");
+    }
+    return appLoading && !vendors.length ? "Loading…" : plural(vendors.length, "vendor", "vendors");
+  };
 
   const primaryAction =
     tab === "tenants" && canMutatePortfolio ? (
-      <Button
-        variant="default"
-        size="header"
-        onClick={() => setTenantDialog(true)}
-      >
+      <Button variant="default" size="header" onClick={() => setTenantDialog(true)}>
         <Plus className="size-4" /> Add tenant
       </Button>
     ) : tab === "landlords" && canMutatePortfolio ? (
@@ -185,115 +191,89 @@ export function PeoplePage({
         <Plus className="size-4" /> Add landlord
       </Button>
     ) : tab === "team" && isAdmin ? (
-      <Button
-        variant="default"
-        size="header"
-        type="button"
-        onClick={() =>
-          setNotice("Create Staff rows and link them on Users for now.")
-        }
-      >
+      <Button variant="default" size="header" type="button" onClick={() => setTeamDialog({})}>
         <Plus className="size-4" /> Add team member
       </Button>
     ) : null;
 
-  return (
-    <PageShell title="People" meta={meta} actions={primaryAction} width="max-w-none">
-      <PeopleTabBar active={tab} approvalsCount={pending.length} onChange={selectTab} />
+  const tenantsForDialog = tenants.state === "ready" ? tenants.data : null;
+  const staffForDialog = staff.state === "ready" ? staff.data : null;
 
-      {state === "loading" ? (
-        <div className="border border-border rounded-md overflow-hidden">
-          <SkeletonRow />
-          <SkeletonRow />
-          <SkeletonRow />
-        </div>
-      ) : state === "error" ? (
-        <ErrorRetry message={error ?? undefined} onRetry={() => void load()} />
-      ) : tab === "approvals" ? (
-        <div className="space-y-3">
+  return (
+    <PageShell title="People" meta={metaFor(tab)} actions={primaryAction} width="max-w-none">
+      <Tabs value={tab} onValueChange={selectTab} activationMode="automatic">
+        <PeopleTabBar active={tab} approvalsCount={pending.length} />
+
+        <TabsContent value="approvals" className="mt-4 space-y-3 focus-visible:ring-offset-0">
           <p className="text-[13px] text-muted-foreground">
-            Pending sign-ups · Approve or reject here. Role links live on Users.
+            New sign-ups wait here. Approve… lets you pick their role and link or create their record in one step.
           </p>
           {!isAdmin ? (
             <EmptyState message="Approvals are restricted to admins." />
-          ) : pending.length === 0 ? (
-            <EmptyState message="No pending sign-ups. New accounts appear here after signup." />
           ) : (
-            <div className="flex flex-col gap-3">
-              {pending.map((user) => {
-                const blocked = approveBlockedReason(user);
-                const linkedTenant =
-                  user.role === "tenant" && user.tenant_id != null
-                    ? tenants.find((t) => t.id === user.tenant_id)
-                    : undefined;
-                const softWarning =
-                  !blocked &&
-                  linkedTenant != null &&
-                  linkedTenant.active_unit_id == null
-                    ? "Linked tenant has no unit — they can sign in but cannot submit maintenance until a unit is assigned."
-                    : null;
-                return (
-                  <ApprovalCard
-                    key={user.user_id}
-                    user={user}
-                    blockedReason={blocked}
-                    softWarning={softWarning}
-                    busy={busyId === user.user_id}
-                    onApprove={() => setConfirm({ user, status: "approved" })}
-                    onReject={() => setConfirm({ user, status: "rejected" })}
-                    onManageLinks={() => navigate("/users")}
-                  />
-                );
-              })}
-            </div>
+            <ResourceGate resource={accounts} what="sign-ups">
+              {pending.length === 0 ? (
+                <EmptyState message="No pending sign-ups. New accounts appear here after they sign up." />
+              ) : (
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {pending.map((user) => (
+                    <ApprovalCard
+                      key={user.user_id}
+                      user={user}
+                      busy={busyId === user.user_id}
+                      onApprove={() => setAssigning(user)}
+                      onReject={() => setRejecting(user)}
+                      onOpenInUsers={() =>
+                        navigate(`/users?user=${encodeURIComponent(user.user_id)}&from=approvals`)
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </ResourceGate>
           )}
-        </div>
-      ) : tab === "tenants" ? (
-        <div className="space-y-3">
+        </TabsContent>
+
+        <TabsContent value="tenants" className="mt-4 space-y-3 focus-visible:ring-offset-0">
           <p className="text-[13px] text-muted-foreground">
             Name, unit, phone, and portal status. Open a row for full tenant detail.
           </p>
-          {tenants.length === 0 ? (
-            <EmptyState
-              message="No tenants yet. Add a tenant to start signing leases."
-              actionLabel={canMutatePortfolio ? "Add tenant" : undefined}
-              onAction={canMutatePortfolio ? () => setTenantDialog(true) : undefined}
-            />
-          ) : (
-            <div className="overflow-hidden rounded-md border border-border">
-              {tenants.map((t) => {
-                const unit =
-                  t.active_unit_name && t.active_property_name
-                    ? `${t.active_unit_name} · ${t.active_property_name}`
-                    : t.active_unit_name || "Not linked";
-                const parts = [unit, t.phone?.trim()].filter(Boolean);
-                return (
-                  <PersonRow
-                    key={t.id}
-                    name={`${t.first_name} ${t.last_name}`}
-                    meta={parts.join(" · ")}
-                    status={portalStatusFromAccounts(accounts, {
-                      tenantId: t.id,
-                      email: t.email,
-                    })}
-                    onClick={() => navigate(`/tenants/${t.id}`)}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : tab === "landlords" ? (
-        <div className="space-y-3">
+          <ResourceGate resource={tenants} what="tenants">
+            {tenants.data.length === 0 ? (
+              <EmptyState
+                message="No tenants yet. Add a tenant to start signing leases."
+                actionLabel={canMutatePortfolio ? "Add tenant" : undefined}
+                onAction={canMutatePortfolio ? () => setTenantDialog(true) : undefined}
+              />
+            ) : (
+              <div className="overflow-hidden rounded-md border border-border">
+                {tenants.data.map((t) => {
+                  const unit =
+                    t.active_unit_name && t.active_property_name
+                      ? `${t.active_unit_name} · ${t.active_property_name}`
+                      : t.active_unit_name || "Not linked";
+                  const parts = [unit, t.phone?.trim()].filter(Boolean);
+                  return (
+                    <PersonRow
+                      key={t.id}
+                      name={`${t.first_name} ${t.last_name}`}
+                      meta={parts.join(" · ")}
+                      status={statusFor({ tenantId: t.id, email: t.email })}
+                      onClick={() => navigate(`/tenants/${t.id}`)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </ResourceGate>
+        </TabsContent>
+
+        <TabsContent value="landlords" className="mt-4 space-y-3 focus-visible:ring-offset-0">
           <p className="text-[13px] text-muted-foreground">
             Name, contact, and portal status for each landlord.
           </p>
           {appLoading && landlords.length === 0 ? (
-            <div className="overflow-hidden rounded-md border border-border">
-              <SkeletonRow />
-              <SkeletonRow />
-              <SkeletonRow />
-            </div>
+            <Skeletons />
           ) : landlords.length === 0 ? (
             <EmptyState
               message="No landlords yet. Create a landlord before adding properties."
@@ -310,18 +290,14 @@ export function PeoplePage({
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
               {landlords.map((l) => {
-                const name =
-                  l.company_name?.trim() || `${l.first_name} ${l.last_name}`.trim();
+                const name = l.company_name?.trim() || `${l.first_name} ${l.last_name}`.trim();
                 const meta = [l.email, l.phone].filter(Boolean).join(" · ") || "—";
                 return (
                   <PersonRow
                     key={l.id}
                     name={name}
                     meta={meta}
-                    status={portalStatusFromAccounts(accounts, {
-                      landlordId: l.id,
-                      email: l.email,
-                    })}
+                    status={statusFor({ landlordId: l.id, email: l.email })}
                     onClick={
                       canMutatePortfolio
                         ? () => {
@@ -335,43 +311,69 @@ export function PeoplePage({
               })}
             </div>
           )}
-        </div>
-      ) : tab === "team" ? (
-        <div className="space-y-3">
+        </TabsContent>
+
+        <TabsContent value="team" className="mt-4 space-y-3 focus-visible:ring-offset-0">
           <p className="text-[13px] text-muted-foreground">
-            Name, job title, contact, request alerts, and portal status.
+            Name, trades, contact, open jobs and portal status. Open a row to edit.
           </p>
-          {staff.length === 0 ? (
-            <EmptyState message="No team members yet. Staff rows power maintenance assignment." />
+          {!isAdmin ? (
+            <EmptyState message="The team list is restricted to admins." />
           ) : (
-            <div className="overflow-hidden rounded-md border border-border">
-              {staff.map((s) => (
-                <TeamRow
-                  key={s.id}
-                  name={`${s.first_name} ${s.last_name}`}
-                  meta={[s.job_title, s.email].filter(Boolean).join(" · ") || "—"}
-                  openJobs="Open jobs · —"
-                  alerts={s.gets_request_alerts}
-                  status={portalStatusFromAccounts(accounts, {
-                    staffId: s.id,
-                    email: s.email,
-                  })}
+            <ResourceGate resource={staff} what="the team">
+              {staff.data.length === 0 ? (
+                <EmptyState
+                  message="No team members yet. Add the people who work maintenance requests."
+                  actionLabel="Add team member"
+                  onAction={() => setTeamDialog({})}
                 />
-              ))}
-            </div>
+              ) : (
+                <div className="overflow-hidden rounded-md border border-border">
+                  {staff.data.map((s) => {
+                    const jobs =
+                      openJobs.state === "ready"
+                        ? plural(openJobs.data.get(s.id) ?? 0, "open job", "open jobs")
+                        : openJobs.state === "loading"
+                          ? "Open jobs · …"
+                          : undefined;
+                    const trades = s.services?.length ? s.services.join(", ") : null;
+                    return (
+                      <TeamRow
+                        key={s.id}
+                        name={`${s.first_name} ${s.last_name}`}
+                        meta={[s.job_title ?? s.company_name, trades, s.email].filter(Boolean).join(" · ") || "—"}
+                        openJobs={jobs}
+                        alerts={s.gets_request_alerts}
+                        inactive={s.active === false}
+                        status={statusFor({ staffId: s.id, email: s.email })}
+                        onClick={() => setTeamDialog({ member: s })}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              {openJobs.state === "error" ? (
+                <p className="text-[13px] text-muted-foreground">
+                  Open job counts didn’t load.{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-foreground underline underline-offset-2"
+                    onClick={() => void openJobs.reload()}
+                  >
+                    Retry
+                  </button>
+                </p>
+              ) : null}
+            </ResourceGate>
           )}
-        </div>
-      ) : (
-        <div className="space-y-3">
+        </TabsContent>
+
+        <TabsContent value="vendors" className="mt-4 space-y-3 focus-visible:ring-offset-0">
           <p className="text-[13px] text-muted-foreground">
             Vendors directory with category and contact details.
           </p>
           {appLoading && vendors.length === 0 ? (
-            <div className="overflow-hidden rounded-md border border-border">
-              <SkeletonRow />
-              <SkeletonRow />
-              <SkeletonRow />
-            </div>
+            <Skeletons />
           ) : vendors.length === 0 ? (
             <EmptyState message="No vendors yet." />
           ) : (
@@ -385,33 +387,63 @@ export function PeoplePage({
               ))}
             </div>
           )}
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
 
       <TenantDialog
         open={tenantDialog}
         onOpenChange={setTenantDialog}
-        onSaved={() => void load({ keepRows: true })}
+        onSaved={() => void tenants.reload({ quiet: true })}
       />
       <LandlordDialog
         open={landlordDialog}
         onOpenChange={setLandlordDialog}
         landlord={editingLandlord}
       />
-      <ConfirmDelete
-        open={confirm != null}
+      <TeamMemberDialog
+        open={teamDialog != null}
         onOpenChange={(o) => {
-          if (!o) setConfirm(null);
+          if (!o) setTeamDialog(null);
         }}
-        title={confirm?.status === "approved" ? "Approve account?" : "Reject account?"}
-        description={
-          confirm
-            ? `${confirm.user.email ?? "This user"} will be marked ${confirm.status}.`
-            : ""
+        member={teamDialog?.member}
+        hasLogin={
+          teamDialog?.member != null &&
+          accounts.data.some((a) => a.staff_id === teamDialog.member!.id)
         }
-        confirmLabel={confirm?.status === "approved" ? "Approve" : "Reject"}
+        onSaved={(m) => {
+          if (teamDialog?.member) setNotice(`Saved ${m.first_name} ${m.last_name}.`);
+          void staff.reload({ quiet: true });
+        }}
+      />
+      <AssignAccountDialog
+        open={assigning != null}
+        onOpenChange={(o) => {
+          if (!o) setAssigning(null);
+        }}
+        user={assigning}
+        mode="approve"
+        accounts={accounts.data}
+        tenants={tenantsForDialog}
+        landlords={landlords}
+        staff={staffForDialog}
+        onDone={(_row, message) => {
+          setNotice(message);
+          void accounts.reload({ quiet: true });
+          void tenants.reload({ quiet: true });
+          void staff.reload({ quiet: true });
+          void refreshLookups();
+        }}
+      />
+      <ConfirmDelete
+        open={rejecting != null}
+        onOpenChange={(o) => {
+          if (!o) setRejecting(null);
+        }}
+        title={rejecting ? `Reject ${displayName(rejecting)}?` : "Reject sign-up?"}
+        description="They stay signed in but can't use the portal. You can re-approve them later on Users."
+        confirmLabel="Reject sign-up"
         onConfirm={() => {
-          if (confirm) void applyStatus(confirm.user, confirm.status);
+          if (rejecting) void reject(rejecting);
         }}
       />
     </PageShell>
