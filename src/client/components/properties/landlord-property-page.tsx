@@ -28,7 +28,10 @@ import {
   type RequestRowModel,
   type UnitCardModel,
 } from "@/lib/landlord-properties";
+import { officeMessageHref } from "@/lib/messages";
+import { SUPPORT_CONTACT } from "@/lib/support-contact";
 import { cn, currentPeriod } from "@/lib/utils";
+import { PropertyTabPanel, PropertyTabs } from "./property-tabs";
 import type { Lease, Property, PropertyDocument, RentCharge, Unit, WorkOrder } from "@/types";
 
 /** Leases.unit_id can take several ids in one query. There is no property_id column. */
@@ -126,8 +129,9 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
     });
   }, [property, units, charges, leases, orders, documents, settings.currency]);
 
-  function messageGopher() {
-    navigate("/messages");
+  /** Opens the owner's office thread with "About: <property> · <...about>" drafted. */
+  function messageOffice(about: Array<string | null | undefined> = []) {
+    navigate(officeMessageHref({ about: [property?.name, ...about] }));
   }
 
   async function downloadDoc(doc: PropertyDocument) {
@@ -190,8 +194,8 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
               <Button type="button" variant="secondary" size="touch" onClick={() => setReloadKey((key) => key + 1)}>
                 Try again
               </Button>
-              <Button type="button" variant="secondary" size="touch" onClick={messageGopher}>
-                Message Landlord Gopher
+              <Button type="button" variant="secondary" size="touch" onClick={() => messageOffice()}>
+                Message the office
               </Button>
             </>
           }
@@ -205,7 +209,7 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
           units={units}
           downloadingId={downloadingId}
           onDownload={(doc) => void downloadDoc(doc)}
-          onMessage={messageGopher}
+          onMessage={messageOffice}
           onMaintenance={() => navigate("/maintenance")}
           onRequest={(requestId) => navigate(`/maintenance/${requestId}`)}
         />
@@ -213,6 +217,11 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
     </PageShell>
   );
 }
+
+/** The About line for a document an owner wants to pass to the office. */
+const DOCUMENT_ABOUT = "Document to share";
+
+type MessageOffice = (about?: Array<string | null | undefined>) => void;
 
 function PropertyBody({
   model,
@@ -233,10 +242,17 @@ function PropertyBody({
   units: Unit[];
   downloadingId: number | null;
   onDownload: (doc: PropertyDocument) => void;
-  onMessage: () => void;
+  onMessage: MessageOffice;
   onMaintenance: () => void;
   onRequest: (id: number) => void;
 }) {
+  const [focusRequest, setFocusRequest] = useState(0);
+  const goToTab = (next: PropertyTab) => {
+    onTab(next);
+    setFocusRequest((n) => n + 1);
+  };
+  const sendDocument = (unit?: string) => onMessage([unit, DOCUMENT_ABOUT]);
+
   return (
     <>
       <LandlordPageIntro
@@ -244,63 +260,42 @@ function PropertyBody({
         title={model.title}
         description={model.description}
         action={
-          <div className="flex flex-col gap-2 md:flex-row">
-            <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-              Message Landlord Gopher
+          <div className="grid grid-cols-2 gap-2 md:flex">
+            <Button type="button" variant="secondary" size="touch" onClick={() => onMessage()}>
+              Message the office
             </Button>
-            <Button type="button" variant="secondary" size="touch" className="hidden md:inline-flex" onClick={() => onTab("documents")}>
-              Share a document
-            </Button>
-            <Button type="button" variant="secondary" size="touch" className="hidden md:inline-flex" onClick={() => onTab("requests")}>
-              Report an issue
+            <Button type="button" variant="secondary" size="touch" onClick={() => sendDocument()}>
+              <span className="md:hidden">Send a document</span>
+              <span className="hidden md:inline">Send the office a document</span>
             </Button>
           </div>
         }
       />
 
-      <div role="tablist" aria-label="Property sections" className="-mt-2 flex gap-1 overflow-x-auto border-b border-border">
-        {model.tabs.map((item) => {
-          const selected = item.id === tab;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              className={cn(
-                "h-11 shrink-0 border-b-2 px-3 lg-body-medium",
-                selected ? "border-foreground text-foreground" : "border-transparent text-muted-foreground",
-              )}
-              onClick={() => onTab(item.id)}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {tab === "overview" ? (
-        <Overview model={model} onRequests={() => onTab("requests")} onMessage={onMessage} onRequest={onRequest} />
-      ) : null}
-      {tab === "units" ? (
-        <UnitsPanel model={model} onMessage={onMessage} onDocuments={() => onTab("documents")} />
-      ) : null}
-      {tab === "requests" ? (
-        <RequestsPanel model={model} onRequest={onRequest} onMaintenance={onMaintenance} onMessage={onMessage} />
-      ) : null}
-      {tab === "messages" ? (
-        <MessagesPanel model={model} onMessage={onMessage} onRequest={onRequest} />
-      ) : null}
-      {tab === "documents" ? (
-        <DocumentsPanel
-          propertyName={model.title}
-          documents={documents}
-          units={units}
-          downloadingId={downloadingId}
-          onDownload={onDownload}
-          onMessage={onMessage}
-        />
-      ) : null}
+      <PropertyTabs tabs={model.tabs} value={tab} onValueChange={onTab} label="Property sections" focusRequest={focusRequest}>
+        <PropertyTabPanel value="overview">
+          <Overview model={model} onRequests={() => goToTab("requests")} onMessage={onMessage} onRequest={onRequest} />
+        </PropertyTabPanel>
+        <PropertyTabPanel value="units">
+          <UnitsPanel model={model} onMessage={onMessage} onSendDocument={sendDocument} />
+        </PropertyTabPanel>
+        <PropertyTabPanel value="requests">
+          <RequestsPanel model={model} onRequest={onRequest} onMaintenance={onMaintenance} onMessage={onMessage} />
+        </PropertyTabPanel>
+        <PropertyTabPanel value="messages">
+          <MessagesPanel model={model} onMessage={onMessage} onRequest={onRequest} />
+        </PropertyTabPanel>
+        <PropertyTabPanel value="documents">
+          <DocumentsPanel
+            propertyName={model.title}
+            documents={documents}
+            units={units}
+            downloadingId={downloadingId}
+            onDownload={onDownload}
+            onSendDocument={sendDocument}
+          />
+        </PropertyTabPanel>
+      </PropertyTabs>
     </>
   );
 }
@@ -313,7 +308,7 @@ function Overview({
 }: {
   model: PropertyDetailModel;
   onRequests: () => void;
-  onMessage: () => void;
+  onMessage: MessageOffice;
   onRequest: (id: number) => void;
 }) {
   return (
@@ -399,10 +394,10 @@ function Overview({
             <h2 className="lg-section text-foreground">A little help, when you need it.</h2>
             <p className="lg-body-medium text-foreground">Landlord Gopher</p>
             <p className="lg-caption text-muted-foreground">
-              Message us about this property. We keep the details up to date.
+              Message the office about this property. We keep the details up to date.
             </p>
-            <Button type="button" variant="secondary" size="touch" className="mt-1 w-full" onClick={onMessage}>
-              Message Landlord Gopher
+            <Button type="button" variant="secondary" size="touch" className="mt-1 w-full" onClick={() => onMessage()}>
+              Message the office
             </Button>
           </section>
         </div>
@@ -411,7 +406,7 @@ function Overview({
   );
 }
 
-function AttentionRow({ item, onMessage }: { item: AttentionItem; onMessage: () => void }) {
+function AttentionRow({ item, onMessage }: { item: AttentionItem; onMessage: MessageOffice }) {
   const Icon = item.kind === "lease" ? Calendar : AlertTriangle;
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -424,8 +419,8 @@ function AttentionRow({ item, onMessage }: { item: AttentionItem; onMessage: () 
       </div>
       {item.badge ? <ToneBadge chip={item.badge} /> : null}
       {item.kind === "lease" ? (
-        <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-          Message Landlord Gopher
+        <Button type="button" variant="secondary" size="touch" onClick={() => onMessage([item.title])}>
+          Message the office
         </Button>
       ) : null}
     </div>
@@ -435,11 +430,11 @@ function AttentionRow({ item, onMessage }: { item: AttentionItem; onMessage: () 
 function UnitsPanel({
   model,
   onMessage,
-  onDocuments,
+  onSendDocument,
 }: {
   model: PropertyDetailModel;
-  onMessage: () => void;
-  onDocuments: () => void;
+  onMessage: MessageOffice;
+  onSendDocument: (unit: string) => void;
 }) {
   return (
     <section className="space-y-4">
@@ -452,7 +447,12 @@ function UnitsPanel({
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
           {model.units.map((unit) => (
-            <UnitCard key={unit.id} unit={unit} onMessage={onMessage} onDocuments={onDocuments} />
+            <UnitCard
+              key={unit.id}
+              unit={unit}
+              onMessage={() => onMessage([unit.name])}
+              onSendDocument={() => onSendDocument(unit.name)}
+            />
           ))}
         </div>
       )}
@@ -463,11 +463,11 @@ function UnitsPanel({
 function UnitCard({
   unit,
   onMessage,
-  onDocuments,
+  onSendDocument,
 }: {
   unit: UnitCardModel;
   onMessage: () => void;
-  onDocuments: () => void;
+  onSendDocument: () => void;
 }) {
   return (
     <article className={sectionCardClass("gap-4")}>
@@ -503,10 +503,10 @@ function UnitCard({
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-          Message Landlord Gopher
+          Message the office
         </Button>
-        <Button type="button" variant="secondary" size="touch" onClick={onDocuments}>
-          Share document
+        <Button type="button" variant="secondary" size="touch" onClick={onSendDocument}>
+          Send a document
         </Button>
       </div>
     </article>
@@ -522,7 +522,7 @@ function RequestsPanel({
   model: PropertyDetailModel;
   onRequest: (id: number) => void;
   onMaintenance: () => void;
-  onMessage: () => void;
+  onMessage: MessageOffice;
 }) {
   return (
     <section className="space-y-4">
@@ -537,8 +537,8 @@ function RequestsPanel({
         <Button type="button" variant="secondary" size="touch" onClick={onMaintenance}>
           View all maintenance
         </Button>
-        <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-          Report an issue
+        <Button type="button" variant="secondary" size="touch" onClick={() => onMessage()}>
+          Message the office
         </Button>
       </div>
     </section>
@@ -599,7 +599,7 @@ function MessagesPanel({
   onRequest,
 }: {
   model: PropertyDetailModel;
-  onMessage: () => void;
+  onMessage: MessageOffice;
   onRequest: (id: number) => void;
 }) {
   return (
@@ -610,15 +610,15 @@ function MessagesPanel({
         </span>
         <div className="min-w-0 flex-1">
           <p className="lg-body-medium text-foreground">Questions about {model.title}?</p>
-          <p className="lg-caption text-muted-foreground">Your Landlord Gopher conversation stays in Messages.</p>
+          <p className="lg-caption text-muted-foreground">Your conversation with the office stays in Messages.</p>
         </div>
-        <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-          Message Landlord Gopher
+        <Button type="button" variant="secondary" size="touch" onClick={() => onMessage()}>
+          Message the office
         </Button>
       </div>
       <div className="flex items-center justify-between gap-3">
         <h2 className="lg-section text-foreground">Conversations · {model.title}</h2>
-        <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
+        <Button type="button" variant="secondary" size="touch" onClick={() => onMessage()}>
           New message
         </Button>
       </div>
@@ -659,20 +659,32 @@ function MessageRow({ row, onOpen }: { row: MessageRowModel; onOpen: () => void 
   );
 }
 
+/**
+ * Owners cannot upload here. The honest path is a message to the office,
+ * which replies with how to send the file (or, once it is confirmed, the
+ * office email).
+ */
+export function documentSendHelp(email = SUPPORT_CONTACT.officeEmail): string {
+  const base = "You can't upload files here. Send the office a message saying what the document is";
+  return email.configured
+    ? `${base}, then email it to ${email.value}. It shows up here once the office adds it.`
+    : `${base}; they'll reply with how to send it. It shows up here once the office adds it.`;
+}
+
 function DocumentsPanel({
   propertyName,
   documents,
   units,
   downloadingId,
   onDownload,
-  onMessage,
+  onSendDocument,
 }: {
   propertyName: string;
   documents: PropertyDocument[];
   units: Unit[];
   downloadingId: number | null;
   onDownload: (doc: PropertyDocument) => void;
-  onMessage: () => void;
+  onSendDocument: (unit?: string) => void;
 }) {
   const occupants = useMemo(() => {
     const map = new Map<number, string>();
@@ -691,22 +703,21 @@ function DocumentsPanel({
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="lg-section text-foreground">Documents · {propertyName}</h2>
-        <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-          Share a document
+      <div className="flex flex-col gap-3 rounded-sm border border-border bg-card p-5 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <h2 className="lg-section text-foreground">Documents · {propertyName}</h2>
+          <p className="mt-1 lg-caption text-muted-foreground">{documentSendHelp()}</p>
+        </div>
+        <Button type="button" variant="secondary" size="touch" className="w-full sm:w-auto" onClick={() => onSendDocument()}>
+          Send the office a document
         </Button>
       </div>
-      <p className="lg-caption text-muted-foreground">
-        Download files shared with you. Uploading stays with Landlord Gopher.
-      </p>
       <DocumentGroup
         label={documentScopeGroupLabel({ unit_id: null })}
         docs={building?.documents ?? []}
         empty="No documents for the whole building yet."
         downloadingId={downloadingId}
         onDownload={onDownload}
-        onMessage={onMessage}
       />
       {units.map((unit) => {
         const group = byUnit.get(`unit:${unit.id}`);
@@ -717,10 +728,14 @@ function DocumentsPanel({
             label={documentScopeGroupLabel({ unit_id: unit.id, unit_name: unit.name }, who)}
             docs={group?.documents ?? []}
             empty={`No documents for Unit ${unit.name} yet.`}
-            hint={who ? `Ask Landlord Gopher to share a lease, notice, or addendum with ${who}.` : "Ask Landlord Gopher to share a lease, notice, or addendum."}
+            hint={
+              who
+                ? `Ask the office to share a lease, notice, or addendum with ${who}.`
+                : "Ask the office to share a lease, notice, or addendum."
+            }
             downloadingId={downloadingId}
             onDownload={onDownload}
-            onMessage={onMessage}
+            onSendDocument={() => onSendDocument(`Unit ${unit.name}`)}
           />
         );
       })}
@@ -732,7 +747,6 @@ function DocumentsPanel({
           empty="No documents in this group yet."
           downloadingId={downloadingId}
           onDownload={onDownload}
-          onMessage={onMessage}
         />
       ))}
     </section>
@@ -746,7 +760,7 @@ function DocumentGroup({
   hint,
   downloadingId,
   onDownload,
-  onMessage,
+  onSendDocument,
 }: {
   label: string;
   docs: PropertyDocument[];
@@ -754,7 +768,8 @@ function DocumentGroup({
   hint?: string;
   downloadingId: number | null;
   onDownload: (doc: PropertyDocument) => void;
-  onMessage: () => void;
+  /** Shown on an empty unit group: the document is about that unit. */
+  onSendDocument?: () => void;
 }) {
   return (
     <div className="space-y-3">
@@ -763,9 +778,11 @@ function DocumentGroup({
         <div className="rounded-sm border border-border bg-card p-5">
           <p className="lg-body text-foreground">{empty}</p>
           {hint ? <p className="mt-2 lg-caption text-muted-foreground">{hint}</p> : null}
-          <Button type="button" variant="secondary" size="touch" className="mt-3" onClick={onMessage}>
-            Share a document
-          </Button>
+          {onSendDocument ? (
+            <Button type="button" variant="secondary" size="touch" className="mt-3" onClick={onSendDocument}>
+              Send the office a document
+            </Button>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-3">
