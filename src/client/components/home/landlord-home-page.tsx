@@ -16,6 +16,7 @@ import { useApp } from "@/context";
 import { useShellChrome } from "@/components/chrome/shell-chrome-context";
 import {
   LandlordDocumentRow,
+  downloadLandlordDocument,
   LandlordPageIntro,
   LandlordPortalTitle,
   LandlordPropertyHeading,
@@ -404,13 +405,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
     if (!doc) return;
     try {
       setDownloadingId(doc.id);
-      const url = await getPropertyDocumentDownloadUrl(doc);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = doc.file_name;
-      anchor.rel = "noreferrer";
-      anchor.target = "_blank";
-      anchor.click();
+      await downloadLandlordDocument(doc, getPropertyDocumentDownloadUrl);
     } catch (err) {
       setError((err as Error).message);
     } finally {

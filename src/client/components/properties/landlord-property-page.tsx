@@ -3,6 +3,7 @@ import { AlertTriangle, Building2, Calendar, ChevronLeft, Wrench } from "lucide-
 import { useApp } from "@/context";
 import {
   LandlordDocumentRow,
+  downloadLandlordDocument,
   LandlordPageIntro,
   LandlordPortalTitle,
   LandlordScopeHeading,
@@ -137,13 +138,7 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
   async function downloadDoc(doc: PropertyDocument) {
     try {
       setDownloadingId(doc.id);
-      const url = await getPropertyDocumentDownloadUrl(doc);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = doc.file_name;
-      anchor.rel = "noreferrer";
-      anchor.target = "_blank";
-      anchor.click();
+      await downloadLandlordDocument(doc, getPropertyDocumentDownloadUrl);
     } catch (err) {
       setError((err as Error).message);
     } finally {
