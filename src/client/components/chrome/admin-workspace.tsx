@@ -13,13 +13,34 @@ import {
 const RAIL_QUERY = "(min-width: 1024px)";
 
 /**
+ * Mounted admin workspaces. While there is at least one, `<body>` carries the
+ * `lg-admin` scope too, so surfaces Radix portals out of the page (dialogs,
+ * selects, menus, popovers) get the same palette — and the same navy primary
+ * button — as the page they were opened from.
+ */
+let mountedWorkspaces = 0;
+
+function useAdminBodyScope() {
+  useEffect(() => {
+    mountedWorkspaces += 1;
+    document.body.classList.add("lg-admin");
+    return () => {
+      mountedWorkspaces -= 1;
+      if (mountedWorkspaces === 0) document.body.classList.remove("lg-admin");
+    };
+  }, []);
+}
+
+/**
  * Admin workspace frame (Figma "001 - Admin Pages"): the navy 224px rail on
  * desktop, the slide-in navigation drawer below `lg`, and the content column.
  * Provides `onOpenNav` to pages through ShellChrome so their headers can show
  * the menu button on tablet and phone.
  *
- * The rail and drawer carry the `lg-admin` palette themselves; `children` are
- * left in the app's own palette (pages opt in through `AdminPageShell`).
+ * The rail and drawer carry the `lg-admin` palette themselves, and pages get it
+ * from the admin page frame (`AdminPageShell`, which `PageShell` hands over to
+ * when `onOpenNav` is set). `<body>` carries it as well while the workspace is
+ * mounted, for portalled surfaces.
  */
 export function AdminWorkspace({
   items,
@@ -52,6 +73,7 @@ export function AdminWorkspace({
   const chrome = useShellChrome();
   const railVisible = useMediaQuery(RAIL_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(defaultDrawerOpen);
+  useAdminBodyScope();
 
   // The drawer only exists below `lg`: growing the window past it closes it.
   useEffect(() => {
@@ -73,13 +95,15 @@ export function AdminWorkspace({
   }, []);
   const account = onAccount ?? chrome?.onAccount;
   const signOut = onSignOut ?? chrome?.onSignOut;
+  const section = items.find((item) => item.id === active)?.label;
 
   const pageChrome = useMemo<ShellChromeValue>(
     () => ({
       ...(chrome ?? { email: "", role: "", onSignOut: signOut ?? (() => {}), onAccount: account }),
       onOpenNav: openNav,
+      section,
     }),
-    [chrome, openNav, account, signOut],
+    [chrome, openNav, account, signOut, section],
   );
 
   const navigateFromDrawer = useCallback(

@@ -327,7 +327,7 @@ function StaffMessagesPage({
       }
     >
       {state === "loading" ? (
-        <div className="-mx-6 -mt-2 border-y border-border">
+        <div className="-mx-[var(--page-gutter,1.5rem)] -mt-2 border-y border-border">
           <SkeletonRow />
           <SkeletonRow />
           <SkeletonRow />
@@ -338,7 +338,7 @@ function StaffMessagesPage({
       ) : threads.length === 0 ? (
         <EmptyState message="No request conversations yet. Comments on maintenance requests will show up here." />
       ) : (
-        <div className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]">
+        <div className="-mx-[var(--page-gutter,1.5rem)] -mb-6 -mt-2 flex min-h-[calc(100vh-var(--page-content-top,8rem))] border-t border-border md:min-h-[calc(100vh-var(--page-content-top,7rem))]">
           <div
             className={
               mobileThread && selected

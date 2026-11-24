@@ -38,7 +38,6 @@ export function SettingsPage() {
     <PageShell
       title="Settings"
       meta="Vendors and rent policy defaults"
-      width="max-w-5xl"
     >
 
         <Tabs defaultValue="vendors">

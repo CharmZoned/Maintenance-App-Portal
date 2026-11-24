@@ -10,6 +10,10 @@ import { cn } from "@/lib/utils";
  * screen; everything else is `secondary` (white with the raised shadow ring
  * rather than a painted border, which reads crisper than a 1px line at this
  * height), `ghost` (Cancel, toolbar view-state), or `destructive`.
+ *
+ * Inside the admin workspace (`.lg-admin`, styles.css) `--primary` and
+ * `--brand` are both the admin navy, so `default` and `brand` are the same
+ * one primary colour there: pick either, never override the colour per page.
  */
 const buttonVariants = cva(
   "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm text-sm font-medium transition-colors duration-150 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
