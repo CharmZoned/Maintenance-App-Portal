@@ -71,8 +71,7 @@ export const fixtureModel: AdminDashboardModel = {
         title: "Birch House Unit 1 is vacant and not listed",
         context: "Lena Owner, landlord · Ready for move-in",
         href: "/properties",
-        actionLabel: "Create listing",
-        actionHref: "/listings",
+        actionLabel: "Open property",
       },
       {
         id: "follow-up-995",

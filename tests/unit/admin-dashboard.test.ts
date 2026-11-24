@@ -483,8 +483,10 @@ describe("needs your attention", () => {
       title: "Birch House Unit 1 is vacant and not listed",
       context: "Lena Owner, landlord · Ready for move-in",
       href: "/properties/2",
-      actionHref: "/listings",
+      // Listings can't be published from the portal, so the action opens the property.
+      actionLabel: "Open property",
     });
+    expect(vacant.actionHref).toBeUndefined();
     expect(followUp).toMatchObject({
       title: "Boiler making noise · follow-up due Fri 20 Nov",
       context: "On hold → Follow up: Check part delivery · In 4 days, 20 Nov 2026",
@@ -937,7 +939,8 @@ describe("listings and portfolio", () => {
     // The home is still known to be vacant, just not whether it is listed.
     expect(degraded.attention.items.find((i) => i.id === "vacant-21")).toMatchObject({
       title: "Birch House Unit 1 is vacant",
-      actionLabel: "Manage listings",
+      href: "/properties/2",
+      actionLabel: "Open property",
     });
   });
 
