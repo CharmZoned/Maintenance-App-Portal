@@ -1902,8 +1902,12 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
     .from(PHOTO_BUCKET)
     .createSignedUrls(paths, 3600);
   const urlByPath = new Map<string, string>();
+  // Paths Storage answered for and said have no file: the row was saved but the
+  // upload never finished (a whole failed batch call proves nothing either way).
+  const notFound = new Set<string>();
   for (const entry of signedList ?? []) {
     if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
+    else if (entry.path && entry.error) notFound.add(entry.path);
   }
   await Promise.all(
     rows.map(async (row) => {
@@ -1911,7 +1915,10 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
       const { data: signed } = await supabase.storage
         .from(PHOTO_BUCKET)
         .createSignedUrl(row.storage_path, 3600);
-      if (signed?.signedUrl) urlByPath.set(row.storage_path, signed.signedUrl);
+      if (signed?.signedUrl) {
+        urlByPath.set(row.storage_path, signed.signedUrl);
+        notFound.delete(row.storage_path);
+      }
     }),
   );
 
@@ -1922,7 +1929,9 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
     caption: row.caption,
     created_at: row.created_at,
     uploaded_by_role: row.uploaded_by_role,
+    uploaded_by_user_id: row.uploaded_by_user_id ?? null,
     url: urlByPath.get(row.storage_path) ?? null,
+    missing: notFound.has(row.storage_path),
   }));
 }
 
@@ -2002,20 +2011,42 @@ export async function uploadMaintenancePhoto(
   const { data, error } = await photoInsert.single();
   if (error) throwSb(error);
 
-  signal?.throwIfAborted();
+  // The row must never outlive a failed upload: a row without its file would
+  // otherwise show as a broken photo (and, before 20261124120000, counted as
+  // the worker's completion proof). The uploader may delete their own row while
+  // it has no file, so this works for every role.
+  const rollBack = async (reason: string): Promise<never> => {
+    const { error: delErr } = await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+    if (delErr) throw new Error(`${reason} (also failed to roll back photo row: ${delErr.message})`);
+    throw new Error(reason);
+  };
+
+  if (signal?.aborted) {
+    await rollBack("Upload cancelled.").catch(() => undefined);
+    signal.throwIfAborted();
+  }
   const uploadPromise = supabase.storage.from(PHOTO_BUCKET).upload(path, file, {
     cacheControl: "3600",
     upsert: false,
     contentType: file.type || undefined,
   });
-  const { error: upErr } = await raceAbort(uploadPromise, signal);
-  if (upErr) {
-    const { error: delErr } = await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
-    if (delErr) {
-      throw new Error(`${upErr.message} (also failed to roll back photo row: ${delErr.message})`);
-    }
-    throw new Error(upErr.message);
+  let upErr: { message: string } | null;
+  try {
+    ({ error: upErr } = await raceAbort(uploadPromise, signal));
+  } catch (err) {
+    // Aborted while uploading: drop the row once the upload settles, so a late
+    // success cannot leave a file without a row or a row without a file.
+    void uploadPromise.then(async ({ error }) => {
+      if (error) {
+        await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+      } else {
+        await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+        await supabase.from("MaintenanceRequestPhotos").delete().eq("id", data!.id);
+      }
+    });
+    throw err;
   }
+  if (upErr) await rollBack(upErr.message);
 
   signal?.throwIfAborted();
   const { data: signed } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrl(path, 3600);
@@ -2026,8 +2057,26 @@ export async function uploadMaintenancePhoto(
     caption: data!.caption,
     created_at: data!.created_at,
     uploaded_by_role: data!.uploaded_by_role,
+    uploaded_by_user_id: data!.uploaded_by_user_id ?? null,
     url: signed?.signedUrl ?? null,
+    missing: false,
   };
+}
+
+/**
+ * Finish a photo whose row was saved but whose file never arrived (`missing`):
+ * upload `file` to the row's own storage path, so the photo keeps its place.
+ */
+export async function retryMissingMaintenancePhoto(
+  photo: Pick<MaintenancePhoto, "storage_path">,
+  file: File,
+): Promise<void> {
+  const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(photo.storage_path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (error) throw new Error(error.message);
 }
 
 /** Reject with AbortError when `signal` aborts before `promise` settles. */
@@ -2172,6 +2221,33 @@ export async function listInProgressSince(
 /** Worker: take a job offered to the pool. The RPC assigns it and sets status Scheduled. */
 export async function acceptMaintenanceRequest(requestId: number): Promise<void> {
   const { error } = await supabase.rpc("accept_maintenance_request", { p_request_id: requestId });
+  if (error) throwSb(error);
+}
+
+/** Worker: hand an accepted job back to the admin. The reason goes to the office only. */
+export async function releaseMaintenanceRequest(requestId: number, reason: string): Promise<void> {
+  const { error } = await supabase.rpc("release_maintenance_request", {
+    p_request_id: requestId,
+    p_reason: reason.trim(),
+  });
+  if (error) throwSb(error);
+}
+
+/** Reporting tenant: the completed fix holds. */
+export async function confirmMaintenanceRequestFixed(requestId: number): Promise<void> {
+  const { error } = await supabase.rpc("confirm_maintenance_request_fixed", {
+    p_request_id: requestId,
+    p_fixed: true,
+  });
+  if (error) throwSb(error);
+}
+
+/** Reporting tenant: still a problem. Saves the note as a message and reopens the request. */
+export async function reopenMaintenanceRequestNotFixed(requestId: number, note: string): Promise<void> {
+  const { error } = await supabase.rpc("reopen_maintenance_request_not_fixed", {
+    p_request_id: requestId,
+    p_note: note.trim(),
+  });
   if (error) throwSb(error);
 }
 
