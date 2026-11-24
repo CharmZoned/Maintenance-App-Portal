@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import type { AccountStatus, AppRole } from "../types.supabase";
+import { plainAuthError } from "../components/auth/auth-errors";
 
 export interface UserRoleRow {
   user_id: string;
@@ -49,8 +50,10 @@ export function useAuth() {
       .eq("user_id", session.user.id)
       .maybeSingle();
     if (error) {
-      setAuthError(error.message);
-      setGate({ state: "error", user: session.user, message: error.message });
+      console.warn("[auth] role lookup failed", error.message);
+      const message = "We couldn’t load your account details. Check your connection and try again.";
+      setAuthError(message);
+      setGate({ state: "error", user: session.user, message });
       return;
     }
     if (!data) {
@@ -101,15 +104,8 @@ export function useAuth() {
     setAuthError(null);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      // AuthRetryableFetchError often surfaces as opaque "fetch failed" / "Failed to fetch".
-      const lower = error.message.trim().toLowerCase();
-      const message =
-        lower === "fetch failed" ||
-        lower === "failed to fetch" ||
-        lower.includes("load failed")
-          ? "Can't reach Supabase (network). For local, use pnpm dev:local; for staging, check VITE_SUPABASE_URL / anon key."
-          : error.message;
-      setAuthError(message);
+      // Plain language, incl. opaque "fetch failed" from AuthRetryableFetchError.
+      setAuthError(plainAuthError(error));
       throw error;
     }
   }, []);
@@ -159,7 +155,7 @@ export function useAuth() {
         },
       });
       if (error) {
-        setAuthError(error.message);
+        setAuthError(plainAuthError(error));
         throw error;
       }
       if (data.session) return "session";
@@ -178,7 +174,7 @@ export function useAuth() {
     const redirectTo = `${window.location.origin}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     if (error) {
-      setAuthError(error.message);
+      setAuthError(plainAuthError(error));
       throw error;
     }
   }, []);
@@ -187,7 +183,7 @@ export function useAuth() {
     setAuthError(null);
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
-      setAuthError(error.message);
+      setAuthError(plainAuthError(error));
       throw error;
     }
   }, []);

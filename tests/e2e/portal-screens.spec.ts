@@ -132,7 +132,7 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.getByLabel("Email").fill("admin@test.local");
     await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByText("Invalid login credentials")).toBeVisible();
+    await expect(page.getByText("That email and password don’t match")).toBeVisible();
     await expect(nav(page)).toHaveCount(0);
     await shot(page, testInfo, "Wrong password");
   });
