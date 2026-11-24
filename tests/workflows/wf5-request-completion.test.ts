@@ -1,5 +1,5 @@
 /**
- * WF4 — Completing a job, and the tenant's "Is it fixed?"
+ * WF5 — Completing a job, and the tenant's "Is it fixed?"
  *
  *   Worker uploads a photo of the finished work  →  completes the job  →  the
  *   tenant confirms it is fixed, or says it is still a problem, which reopens
@@ -79,7 +79,7 @@ beforeAll(async () => {
   ]);
 });
 
-describe("[WF4] a completion photo must be a real file", () => {
+describe("[WF5] a completion photo must be a real file", () => {
   test("a photo row without its file does not let the worker complete", async () => {
     const id = await startedBySam("Row but no file");
     const {
@@ -144,7 +144,7 @@ describe("[WF4] a completion photo must be a real file", () => {
   });
 });
 
-describe("[WF4] the tenant's \"Is it fixed?\"", () => {
+describe("[WF5] the tenant's \"Is it fixed?\"", () => {
   let id: number;
 
   test("only the reporting tenant can reopen, and only a completed request", async () => {

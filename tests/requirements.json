@@ -30,6 +30,11 @@
       "id": "WF4",
       "title": "Sign-up approval as tenant or owner",
       "summary": "Someone signs up from the website as a tenant or owner with no record on file; the admin sees their name, chosen role and address, and approves them in one step by linking an existing record or creating one from the sign-up; they then sign in to their own home."
+    },
+    {
+      "id": "WF5",
+      "title": "Job completion and the tenant's fix check",
+      "summary": "A worker completes a job only with their own photo whose file actually arrived, including after a reopen; the tenant then answers \"Is it fixed?\" — yes confirms it, \"Still a problem\" reopens it with a note."
     }
   ]
 }
