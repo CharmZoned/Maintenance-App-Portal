@@ -52,5 +52,7 @@ URL, demo password. The same demo password is entered in Vercel's staging variab
 - Staging will not reproduce oddities that exist only in real data. Data-shape risks in a
   migration are covered by the checks in [ADR-0004](0004-database-promotion.md), not by
   copying production.
-- Uploaded files are not seeded by SQL. The script uploads a few sample photos and
-  documents to staging storage so those screens are not empty.
+- Uploaded files are not seeded by SQL. After seeding, the script uploads a committed file
+  for every seeded row with a `storage_path` (job photos to `maintenance-photos`, property
+  documents to `property-documents`; see `tests/emulator/demo-files.ts`), reads each one
+  back, and fails the reset if any is missing. `pnpm dev:local` loads the same files.
