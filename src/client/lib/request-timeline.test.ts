@@ -368,3 +368,39 @@ describe("RequestTimeline markup", () => {
     expect(html).not.toContain("Send");
   });
 });
+
+describe("review fixes: one name per person, real initials", () => {
+  it("'You' entries keep the viewer's real initials", () => {
+    const comments = [msg(700, "2026-11-15T10:00:00Z", "Still dripping.", { role: "tenant", tenant: 11 })];
+    const tenant = buildTimeline(wo(), [], comments, { ...people, viewerTenantId: 11 }, "tenant", opts);
+    expect(tenant[0].actor).toMatchObject({ name: "You", initials: "TR" });
+    expect(tenant[1].actor).toMatchObject({ name: "You", initials: "TR" });
+
+    const worker = buildTimeline(
+      wo(),
+      [],
+      [msg(701, "2026-11-15T10:00:00Z", "On my way.", { role: "maintenance", staff: 4 })],
+      { ...people, viewerStaffId: 4 },
+      "maintenance",
+      opts,
+    );
+    expect(worker[1].actor).toMatchObject({ name: "You", initials: "SF" });
+  });
+
+  it("an admin's status changes and messages read the same way", () => {
+    const history = [
+      { ...ev("Open", "Scheduled", "2026-11-15T09:00:00Z", "admin", null, 702), changed_by_user_id: "u-ada" },
+    ];
+    // The admin login has no staff id on its comments; the page passes the sole admin's Staff id.
+    const comments = [msg(703, "2026-11-15T10:00:00Z", "Ordered the part.", { role: "admin" }, "internal")];
+    const base = { ...people, nameForUserId: (u: string) => (u === "u-ada" ? "Ada Admin" : null), soleAdminStaffId: 9 };
+
+    const asAda = buildTimeline(wo(), history, comments, { ...base, viewerUserId: "u-ada", viewerStaffId: 9 }, "admin", opts);
+    expect(asAda[1].actor).toMatchObject({ name: "You", initials: "AA" });
+    expect(asAda[2].actor).toMatchObject({ name: "You", initials: "AA" });
+
+    const asSam = buildTimeline(wo(), history, comments, { ...base, viewerStaffId: 4 }, "maintenance", opts);
+    expect(asSam[1].actor.name).toBe("Ada Admin");
+    expect(asSam[2].actor).toMatchObject({ name: "Ada Admin", role: "Admin", initials: "AA" });
+  });
+});

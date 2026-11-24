@@ -107,7 +107,7 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
   test("Worker · opens the job from My jobs and starts work", async ({ page }, testInfo) => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
-    await page.getByRole("button", { name: new RegExp(TITLE) }).filter({ visible: true }).first().click();
+    await requestRow(page, TITLE).click();
     await expect(page).toHaveURL(/\/maintenance\/\d+$/);
 
     await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
@@ -153,7 +153,7 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
   test("Worker · adds a photo of the finished work and marks the job completed", async ({ page }, testInfo) => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
-    await page.getByRole("button", { name: new RegExp(TITLE) }).filter({ visible: true }).first().click();
+    await requestRow(page, TITLE).click();
     await expect(page.getByText(TENANT_REPLY)).toBeVisible();
 
     await page.getByRole("button", { name: "Mark completed" }).filter({ visible: true }).first().click();

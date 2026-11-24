@@ -46,19 +46,27 @@ export interface RequestPhotosCardProps {
 }
 
 /**
- * Counter copy (spec §2.3). A viewer who can add sees their own upload group:
- * "{used} of 5 · {left} more can be added", or "5 of 5" when full. A viewer
- * who cannot add (landlord) sees the total: "{total} of 5", or "{total} photos"
- * past the cap (worker and other photos are capped separately).
+ * Counter copy (spec §2.3, adjusted after review). The first number always
+ * matches the thumbnails on screen.
+ *   - Viewer can add: "{total} of 5 · {left} more can be added", or "5 of 5"
+ *     when full. The DB caps the worker's photos and everyone else's photos
+ *     separately, so when photos from the other group are on screen the
+ *     "of 5" would not add up: then it reads "{total} photos · {left} more can
+ *     be added" (e.g. a tenant seeing their own photo and the worker's).
+ *   - Viewer cannot add (landlord): "{total} of 5", or "{total} photos" past the cap.
  */
 export function photosCounterLabel(opts: { total: number; max: number; slotsLeft: number; canAdd: boolean }): string {
   const { total, max, canAdd } = opts;
+  const noun = total === 1 ? "photo" : "photos";
   if (canAdd) {
     const left = Math.max(0, Math.min(max, opts.slotsLeft));
-    const used = max - left;
-    return left > 0 ? `${used} of ${max} · ${left} more can be added` : `${max} of ${max}`;
+    const fromMyGroup = max - left;
+    if (left === 0) return total === max ? `${max} of ${max}` : `${total} ${noun}`;
+    return total === fromMyGroup
+      ? `${total} of ${max} · ${left} more can be added`
+      : `${total} ${noun} · ${left} more can be added`;
   }
-  return total <= max ? `${total} of ${max}` : `${total} photos`;
+  return total <= max ? `${total} of ${max}` : `${total} ${noun}`;
 }
 
 function onlyImages(files: FileList): FileList | null {

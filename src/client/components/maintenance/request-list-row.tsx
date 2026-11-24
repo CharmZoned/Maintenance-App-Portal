@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ArrowDownUp, Check, ChevronDown, ChevronRight, ChevronUp, ImageIcon } from "lucide-react";
-import { useApp } from "@/context";
+import { AppContext, useApp } from "@/context";
 import type { StaffMember } from "@/lib/data";
 import type { WorkOrder } from "@/types";
 import {
   formatActivityStamp,
+  inProgressSince,
   priorityLevel,
   requestNextStep,
   toRequestStatus,
@@ -117,17 +118,29 @@ function lowerFirst(s: string): string {
   return /^(Today|Yesterday)\b/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
 }
 
+/** A New request (open, nobody assigned) is never "scheduled", whatever scheduled_at holds. */
+export function scheduledDayFor(o: WorkOrder): string {
+  if (!o.scheduled_at || toRequestStatus(o) === "New") return "";
+  return formatActivityStamp(o.scheduled_at);
+}
+
 function dateValue(o: WorkOrder, col: RequestDateColumn): string {
-  if (col === "scheduled") return o.scheduled_at ? formatActivityStamp(o.scheduled_at) : "Not scheduled";
+  if (col === "scheduled") return scheduledDayFor(o) || "Not scheduled";
   return formatActivityStamp(o.created_at);
 }
 
 /**
  * Next-step words beside the status chip. `withName` is false for the desktop
- * grid, which has its own Assigned to column (spec §6.1).
+ * grid, which has its own Assigned to column (spec §6.1). `startedAt` (when the
+ * request last moved to In progress) gives "Started today", as on the page.
  */
-export function listNextStep(o: WorkOrder, assigneeName: string | null, withName: boolean): string | undefined {
-  return requestNextStep(o, { assigneeName, omitAssignee: !withName });
+export function listNextStep(
+  o: WorkOrder,
+  assigneeName: string | null,
+  withName: boolean,
+  startedAt?: string | null,
+): string | undefined {
+  return requestNextStep(o, { assigneeName, omitAssignee: !withName, startedAt });
 }
 
 function assigneeFallback(o: WorkOrder, name: string | null): string | null {
@@ -153,7 +166,7 @@ export function RequestListTab({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "inline-flex min-h-11 items-center rounded-sm px-3 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 md:min-h-8",
+        "inline-flex min-h-11 items-center whitespace-nowrap rounded-sm px-3 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 md:min-h-8",
         active
           ? "bg-brand-tint font-medium text-brand-text"
           : "border border-border font-normal text-muted-foreground hover:bg-muted",
@@ -191,7 +204,11 @@ function SortHeader({
         ? "descending"
         : "ascending";
   return (
-    <div className={cn("flex min-w-0", align === "end" && "justify-end", className)}>
+    <div
+      role="columnheader"
+      aria-sort={active ? (sort?.dir === "desc" ? "descending" : "ascending") : "none"}
+      className={cn("flex min-w-0", align === "end" && "justify-end", className)}
+    >
       <button
         type="button"
         onClick={() => onSortChange(nextSort(sort, field))}
@@ -287,9 +304,12 @@ export function RequestListTable({
 }: RequestListTableProps) {
   const grid = showAssignee ? GRID_WITH_ASSIGNEE : GRID_NO_ASSIGNEE;
   const dateField: RequestSortField = dateColumn === "scheduled" ? "scheduled" : "created";
+  const startedAt = useInProgressSince(items.map((i) => i.order));
   return (
     <div className={cn("w-full overflow-hidden rounded-md border border-border bg-card", className)}>
-      <div className={cn("hidden h-11 items-center gap-3 border-b border-border px-4 md:grid", grid)}>
+      {/* Column headers: a one-row table so each sortable header can carry aria-sort. */}
+      <div role="table" aria-label={`${ariaLabel}: columns`} className="hidden border-b border-border md:block">
+      <div role="row" className={cn("grid h-11 items-center gap-3 px-4", grid)}>
         <span aria-hidden />
         <SortHeader label="Request" field="title" sort={sort} onSortChange={onSortChange} />
         {showAssignee ? (
@@ -311,6 +331,7 @@ export function RequestListTable({
         />
         <span aria-hidden />
       </div>
+      </div>
       <ul aria-label={ariaLabel} className="divide-y divide-border">
         {items.map((item) => (
           <li key={item.order.id}>
@@ -319,6 +340,7 @@ export function RequestListTable({
               href={hrefFor(item.order)}
               onOpen={onOpen}
               thumbnailUrl={thumbnails?.get(item.order.id) ?? null}
+              startedAt={startedAt.get(item.order.id) ?? null}
               showAssignee={showAssignee}
               dateColumn={dateColumn}
               grid={grid}
@@ -335,6 +357,7 @@ function RequestListRow({
   href,
   onOpen,
   thumbnailUrl,
+  startedAt,
   showAssignee,
   dateColumn,
   grid,
@@ -343,6 +366,7 @@ function RequestListRow({
   href: string;
   onOpen: (order: WorkOrder) => void;
   thumbnailUrl: string | null;
+  startedAt: string | null;
   showAssignee: boolean;
   dateColumn: RequestDateColumn;
   grid: string;
@@ -351,8 +375,8 @@ function RequestListRow({
   const status = toRequestStatus(o);
   const level = priorityLevel(o.priority);
   const assignee = assigneeFallback(o, item.assigneeName);
-  const stepWithName = listNextStep(o, item.assigneeName, true);
-  const stepNoName = listNextStep(o, item.assigneeName, false);
+  const stepWithName = listNextStep(o, item.assigneeName, true, startedAt);
+  const stepNoName = listNextStep(o, item.assigneeName, false, startedAt);
   const when = dateValue(o, dateColumn);
   const ariaLabel = [
     o.title,
@@ -538,6 +562,63 @@ export function useRequestThumbnails(ids: readonly number[]): ReadonlyMap<number
       })();
     }
   }, [key, listFirstMaintenancePhotos]);
+
+  return snapshot;
+}
+
+// ── "Started today" for In progress rows ────────────────────────────
+
+const STARTED_MAX = 30;
+
+/**
+ * When each In progress row last moved to In progress (spec §1: "Started today"),
+ * from the existing per-request status history. Only In progress rows are
+ * fetched (a handful at a time), after the rows render; a failure just leaves
+ * the words out. Cached for the page's lifetime.
+ */
+export function useInProgressSince(orders: readonly WorkOrder[]): ReadonlyMap<number, string | null> {
+  // Optional context: the table also renders outside the app (tests, gallery).
+  const listMaintenanceStatusHistory = useContext(AppContext)?.listMaintenanceStatusHistory;
+  const cacheRef = useRef(new Map<number, string | null>());
+  const inflightRef = useRef(new Set<number>());
+  const mountedRef = useRef(true);
+  const [snapshot, setSnapshot] = useState<ReadonlyMap<number, string | null>>(() => new Map());
+  const key = orders
+    .filter((o) => o.status === "in_progress")
+    .slice(0, STARTED_MAX)
+    .map((o) => o.id)
+    .join(",");
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!listMaintenanceStatusHistory) return;
+    const queue = key
+      .split(",")
+      .filter(Boolean)
+      .map(Number)
+      .filter((id) => !cacheRef.current.has(id) && !inflightRef.current.has(id));
+    if (queue.length === 0) return;
+    for (const id of queue) inflightRef.current.add(id);
+    void Promise.all(
+      queue.map(async (id) => {
+        try {
+          cacheRef.current.set(id, inProgressSince(await listMaintenanceStatusHistory(id)));
+        } catch {
+          cacheRef.current.set(id, null);
+        } finally {
+          inflightRef.current.delete(id);
+        }
+      }),
+    ).then(() => {
+      if (mountedRef.current) setSnapshot(new Map(cacheRef.current));
+    });
+  }, [key, listMaintenanceStatusHistory]);
 
   return snapshot;
 }

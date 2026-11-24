@@ -1,6 +1,6 @@
 import type { WorkOrder, WorkOrderPriority, WorkOrderStatus } from "@/types";
 import { workOrderStatusFromDb } from "@/lib/mappers";
-import { formatDate } from "@/lib/utils";
+import { formatWeekdayDayMonth, toDay } from "@/lib/admin-dates";
 
 /**
  * THE single source for request status / priority language (design brief §2.3).
@@ -83,19 +83,44 @@ export function isOpenRequest(wo: Pick<WorkOrder, "status">): boolean {
   return wo.status !== "closed";
 }
 
+/**
+ * THE day form for request screens: "Sat 14 Nov" (plus the year when it is not
+ * this year). Every request date (page, lightbox, timeline, lists) goes through
+ * here so one screen never mixes "Sun, Nov 15", "Nov 15" and "Sun 15 Nov".
+ */
+export function formatRequestDay(d: Date, now: Date = new Date()): string {
+  const base = formatWeekdayDayMonth(toDay(d));
+  return d.getFullYear() === now.getFullYear() ? base : `${base} ${d.getFullYear()}`;
+}
+
+/** Parse an ISO / date-only value; date-only (and the noon-UTC sentinel) keep their calendar day. */
+function parseRequestDate(iso: string): { date: Date; dateOnly: boolean } | null {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE_SENTINEL.test(iso);
+  const d = dateOnly ? new Date(`${iso.slice(0, 10)}T00:00:00`) : new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : { date: d, dateOnly };
+}
+
+function daysBefore(d: Date, now: Date): number {
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.round((startToday - startThat) / 86_400_000);
+}
+
 /** "Today" / "Yesterday" / "Tue 17 Nov" (date-only values keep their calendar day). */
 export function requestDayWord(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return "";
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE_SENTINEL.test(iso);
-  const key = dateOnly ? iso.slice(0, 10) : null;
-  const d = key ? new Date(`${key}T00:00:00`) : new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diff = Math.round((startToday - startThat) / 86_400_000);
+  const parsed = parseRequestDate(iso);
+  if (!parsed) return "";
+  const diff = daysBefore(parsed.date, now);
   if (diff === 0) return "Today";
   if (diff === 1) return "Yesterday";
-  return formatDate(key ?? iso, { weekday: "short", day: "numeric", month: "short" });
+  return formatRequestDay(parsed.date, now);
+}
+
+/** requestDayWord for use inside a sentence: "today", "yesterday", "Tue 17 Nov". */
+export function requestDayInSentence(iso: string | null | undefined, now: Date = new Date()): string {
+  const word = requestDayWord(iso, now);
+  return word === "Today" || word === "Yesterday" ? word.toLowerCase() : word;
 }
 
 function capitaliseFirst(text: string): string {
@@ -129,8 +154,8 @@ export function requestNextStep(wo: WorkOrder, opts: RequestNextStepOptions = {}
       return join(requestDayWord(wo.scheduled_at, now), assignee) ?? "Not scheduled yet";
     case "In progress": {
       // Never surface draft resolution_notes until Completed.
-      const day = requestDayWord(opts.startedAt, now);
-      return join(day ? `Started ${day === "Today" || day === "Yesterday" ? day.toLowerCase() : day}` : null, assignee);
+      const day = requestDayInSentence(opts.startedAt, now);
+      return join(day ? `Started ${day}` : null, assignee);
     }
     case "On hold": {
       const reason = wo.hold_reason?.trim();
@@ -164,15 +189,24 @@ export function staffQueueTab(status: WorkOrderStatus, assigned: boolean): "need
   return "active";
 }
 
-export type JobSection = "Today" | "Upcoming" | "On hold" | "Recently completed";
+export type JobSection = "Today" | "Upcoming" | "Job offers" | "On hold" | "Recently completed";
+
+/** Display order of the My jobs sections. */
+export const JOB_SECTIONS: readonly JobSection[] = ["Today", "Upcoming", "Job offers", "On hold", "Recently completed"];
 
 /**
  * My jobs bucketing (Figma Worker / U7).
  * Past-day and unscheduled open work stay under Today; future calendar days → Upcoming.
  * `in_progress` stays under Today even when scheduled later.
+ * A job offered to the worker pool but not accepted yet (open, nobody assigned)
+ * is not one of the worker's jobs: it goes under "Job offers".
  */
-export function jobSectionFor(order: Pick<WorkOrder, "status" | "scheduled_at">, now: Date): JobSection {
+export function jobSectionFor(
+  order: Pick<WorkOrder, "status" | "scheduled_at"> & { assigned_staff_id?: number | null },
+  now: Date,
+): JobSection {
   if (order.status === "closed") return "Recently completed";
+  if (order.status === "open" && order.assigned_staff_id === null) return "Job offers";
   if (order.status === "on_hold") return "On hold";
   if (order.status === "in_progress") return "Today";
   if (order.scheduled_at) {
@@ -276,29 +310,19 @@ export function unitPropertyLabel(unit?: string | null, property?: string | null
 const NOON_UTC_DATE_SENTINEL =
   /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.\d+)?(?:Z|[+]00:00)$/;
 
-/** Human "Today 9:12 am" / "Yesterday" / short date for activity stamps. */
-export function formatActivityStamp(iso: string | null | undefined): string {
+/** Human "Today 9:12 am" / "Yesterday" / "Sat 14 Nov" for activity stamps. */
+export function formatActivityStamp(iso: string | null | undefined, now: Date = new Date()): string {
   if (!iso) return "";
-  const plainDate = /^\d{4}-\d{2}-\d{2}$/.test(iso);
-  const noonUtcSentinel = NOON_UTC_DATE_SENTINEL.test(iso);
-  // Noon-UTC sentinel is date-only intent — show calendar day from iso prefix, no clock.
-  const dateOnly = plainDate || noonUtcSentinel;
-  const dayKey = dateOnly ? iso.slice(0, 10) : null;
-  const d = dayKey ? new Date(`${dayKey}T00:00:00`) : new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const now = new Date();
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dayDiff = Math.round((startToday.getTime() - startThat.getTime()) / 86_400_000);
-  if (dateOnly) {
-    if (dayDiff === 0) return "Today";
-    if (dayDiff === 1) return "Yesterday";
-    return formatDate(dayKey!, { weekday: "short", day: "numeric", month: "short" });
+  const parsed = parseRequestDate(iso);
+  if (!parsed) return iso;
+  const { date: d, dateOnly } = parsed;
+  const dayDiff = daysBefore(d, now);
+  if (dayDiff === 0) {
+    // Date-only values carry no clock.
+    return dateOnly ? "Today" : `Today ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
   }
-  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  if (dayDiff === 0) return `Today ${time}`;
   if (dayDiff === 1) return "Yesterday";
-  return formatDate(iso, { day: "numeric", month: "short" });
+  return formatRequestDay(d, now);
 }
 
 /** Parse ISO / date-only the same way for bucketing and relative labels. */
@@ -327,7 +351,7 @@ export function formatRelativeWhen(iso: string | null | undefined, now: Date = n
   if (isSameLocalDay(d, yesterday)) {
     return "Yesterday";
   }
-  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return formatRequestDay(d, now);
 }
 
 /**

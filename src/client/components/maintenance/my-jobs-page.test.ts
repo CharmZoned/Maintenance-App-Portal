@@ -87,6 +87,22 @@ describe("My jobs routes to the one request page", () => {
     );
     expect(groups.map((g) => g.label)).toEqual(["Today", "Upcoming", "On hold", "Recently completed"]);
   });
+
+  it("puts an unaccepted pool offer under Job offers, not Upcoming", () => {
+    const now = new Date(2026, 10, 24, 12);
+    const groups = groupJobs(
+      [
+        job({ id: 1, status: "scheduled", scheduled_at: "2099-01-01" }),
+        job({ id: 2, status: "open", assigned_staff_id: null, scheduled_at: "2099-01-02" }),
+      ],
+      { key: "scheduled", dir: "asc" },
+      now,
+    );
+    expect(groups.map((g) => [g.label, g.items.map((o) => o.id)])).toEqual([
+      ["Upcoming", [1]],
+      ["Job offers", [2]],
+    ]);
+  });
 });
 
 function panel(props: Partial<RequestActionsPanelProps> & Pick<RequestActionsPanelProps, "role">): string {

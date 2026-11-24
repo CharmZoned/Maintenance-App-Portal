@@ -626,12 +626,13 @@ export function AdminNewRequestDialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={requestOpenChange}>
       <DialogPortal>
-        <DialogOverlay className="p-0 md:p-4">
+        {/* Phone: full screen below the staging ribbon (the offset is 0px outside staging / local). */}
+        <DialogOverlay className="p-0 pt-[var(--staging-ribbon-offset,0px)] md:p-4">
           <div className="flex min-h-full items-stretch justify-center md:items-center">
             <DialogPrimitive.Content
               className={cn(
                 "relative z-50 flex w-full flex-col bg-card text-card-foreground outline-none",
-                "min-h-[100dvh] md:min-h-0 md:max-w-[680px] md:rounded-lg md:shadow-float",
+                "min-h-[calc(100dvh-var(--staging-ribbon-offset,0px))] md:min-h-0 md:max-w-[680px] md:rounded-lg md:shadow-float",
               )}
             >
               <form noValidate onSubmit={(e) => void submit(e)} className="flex flex-1 flex-col">
@@ -729,7 +730,7 @@ export function AdminNewRequestDialog({
                   <Button
                     type="button"
                     variant="ghost"
-                    className="hidden md:inline-flex"
+                    className="h-11 px-4 md:h-7 md:px-2"
                     onClick={() => requestOpenChange(false)}
                     disabled={saving}
                   >
@@ -737,7 +738,7 @@ export function AdminNewRequestDialog({
                   </Button>
                   <Button
                     type="submit"
-                    className="h-11 w-full px-4 md:h-7 md:w-auto md:px-2"
+                    className="h-11 flex-1 px-4 md:h-7 md:flex-none md:px-2"
                     disabled={saving}
                   >
                     {saving ? "Creating…" : "Create request"}

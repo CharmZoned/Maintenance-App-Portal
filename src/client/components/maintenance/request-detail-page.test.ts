@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   RequestDetailView,
+  assignableStaff,
   costLabelFor,
   dayStamp,
   placeLabel,
@@ -16,6 +17,7 @@ import {
 } from "@/components/maintenance/request/request-states";
 import { notAvailableActionFor } from "@/components/maintenance/request/role-visibility";
 import type { StaffMember } from "@/lib/data";
+import { photosCounterLabel } from "@/components/maintenance/request/request-photos-card";
 import type { MaintenanceComment, MaintenancePhoto, MaintenanceStatusEvent, WorkOrder } from "@/types";
 
 function order(partial: Partial<WorkOrder> = {}): WorkOrder {
@@ -313,5 +315,40 @@ describe("request page states", () => {
     expect(notAvailableActionFor("admin").label).toBe("Go to Dashboard");
     expect(notAvailableActionFor("tenant").label).toBe("Go to Home");
     expect(notAvailableActionFor("landlord").label).toBe("Go to Home");
+  });
+});
+
+describe("review fixes: request page", () => {
+  it("photo counter matches the thumbnails on screen", () => {
+    // Tenant: own photo + the worker's photo (separate DB caps).
+    expect(photosCounterLabel({ total: 2, max: 5, slotsLeft: 4, canAdd: true })).toBe("2 photos · 4 more can be added");
+    // Worker seeing one tenant photo, none of their own.
+    expect(photosCounterLabel({ total: 1, max: 5, slotsLeft: 5, canAdd: true })).toBe("1 photo · 5 more can be added");
+    expect(photosCounterLabel({ total: 2, max: 5, slotsLeft: 3, canAdd: true })).toBe("2 of 5 · 3 more can be added");
+    expect(photosCounterLabel({ total: 0, max: 5, slotsLeft: 5, canAdd: true })).toBe("0 of 5 · 5 more can be added");
+    expect(photosCounterLabel({ total: 2, max: 5, slotsLeft: 0, canAdd: false })).toBe("2 of 5");
+  });
+
+  it("Assign to offers approved workers only", () => {
+    const people = [
+      { id: 1, first_name: "Ada", last_name: "Admin", email: "admin@test.local", job_title: "Operations manager", gets_request_alerts: true },
+      { id: 2, first_name: "Sam", last_name: "Fixit", email: "worker@test.local", job_title: null, gets_request_alerts: false },
+      { id: 3, first_name: "Pat", last_name: "New", email: "pending@test.local", job_title: null, gets_request_alerts: false },
+      { id: 4, first_name: "Off", last_name: "Line", email: "nologin@test.local", job_title: null, gets_request_alerts: false },
+    ];
+    const accounts = [
+      { staff_id: null, email: "admin@test.local", role: "admin" as const, account_status: "approved" as const },
+      { staff_id: 2, email: "worker@test.local", role: "maintenance" as const, account_status: "approved" as const },
+      { staff_id: 3, email: "pending@test.local", role: "maintenance" as const, account_status: "pending" as const },
+    ];
+    expect(assignableStaff(people, accounts, null).map((s) => s.id)).toEqual([2, 4]);
+    expect(assignableStaff(people, accounts, 3).map((s) => s.id)).toEqual([2, 3, 4]);
+    expect(assignableStaff(people, [], null)).toHaveLength(4);
+  });
+
+  it("dates use one day form", () => {
+    const now = new Date(2026, 10, 24, 12);
+    expect(dayStamp("2026-11-15", now)).toBe("Sun 15 Nov");
+    expect(dayStamp("2026-11-24", now)).toBe("Today");
   });
 });

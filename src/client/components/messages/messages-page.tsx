@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Wrench } from "lucide-react";
+import { queryId } from "@/lib/deep-link";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -32,11 +33,18 @@ export function MessagesPage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const { isTenant } = useApp();
+  const { isTenant, isLandlord } = useApp();
 
   // TODO(data-gap): messages backend not available — tenant path is mock-only
   if (isTenant) {
     return <TenantMessagesPage search={search} navigate={navigate} replace={replace} />;
+  }
+
+  // Request messaging with the landlord is out of scope (SOW). The request page
+  // shows the landlord status events only and no message box, so this page must
+  // not show the tenant's messages or a Send box either.
+  if (isLandlord) {
+    return <LandlordMessagesPage search={search} navigate={navigate} replace={replace} />;
   }
 
   return (
@@ -45,7 +53,45 @@ export function MessagesPage({
 }
 
 /**
- * Figma 05 Messages — staff/landlord list + thread (WO comments).
+ * Landlord Messages: no request threads. Old `?thread=wo:<id>` links (Home,
+ * notifications) go straight to that request's page, which carries its updates.
+ */
+function LandlordMessagesPage({
+  search = "",
+  navigate,
+  replace,
+}: {
+  search?: string;
+  navigate: (to: string) => void;
+  replace?: (to: string) => void;
+}) {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const thread = params.get("thread");
+  const match = thread ? /^wo:(\d+)$/.exec(thread) : null;
+  const requestId = match ? queryId(`?id=${match[1]}`, "id") : null;
+  useEffect(() => {
+    if (requestId == null) return;
+    const to = `/maintenance/${requestId}`;
+    if (replace) replace(to);
+    else navigate(to);
+  }, [requestId, replace, navigate]);
+
+  return (
+    <PageShell title="Messages">
+      <div className="rounded-md border border-border bg-card">
+        <EmptyState
+          icon={<Wrench className="size-5" aria-hidden />}
+          message="Updates on each maintenance request are on its page in Maintenance."
+          actionLabel="Go to Maintenance"
+          onAction={() => navigate("/maintenance")}
+        />
+      </div>
+    </PageShell>
+  );
+}
+
+/**
+ * Figma 05 Messages — staff list + thread (WO comments).
  * Request threads use MaintenanceRequestComments; direct DMs are stubbed.
  */
 function StaffMessagesPage({

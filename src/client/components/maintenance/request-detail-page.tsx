@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronLeft } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -29,12 +29,13 @@ import {
   PRIORITY_OPTIONS,
   priorityLevel,
   inProgressSince,
+  requestDayWord,
   requestNextStep,
   toRequestStatus,
   type RequestStatus,
 } from "@/lib/request-status";
 import { buildTimeline, type RequestViewerRole } from "@/lib/request-timeline";
-import { cn, formatDate, toIsoDate } from "@/lib/utils";
+import { cn, toIsoDate } from "@/lib/utils";
 import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceComment,
@@ -61,7 +62,7 @@ import {
   RequestNotAvailableState,
   type RequestBannerTone,
 } from "./request/request-states";
-import { RequestTimeline, type RequestTimelineComposer } from "./request/request-timeline";
+import { RequestComposer, RequestTimeline, type RequestTimelineComposer } from "./request/request-timeline";
 import {
   backLinkFor,
   notAvailableActionFor,
@@ -132,21 +133,44 @@ export function placeLabel(order: Pick<WorkOrder, "unit_name" | "property_name">
   return "";
 }
 
-const NOON_UTC_DATE = /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.\d+)?(?:Z|\+00:00)$/;
-
-/** Day form: "Today", "Yesterday", or "Sat 14 Nov". Date-only values keep their calendar day. */
+/** Day form: "Today", "Yesterday", or "Sat 14 Nov" — the one shared day word (requestDayWord). */
 export function dayStamp(iso: string | null | undefined, now: Date = new Date()): string {
-  if (!iso) return "";
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE.test(iso);
-  const key = dateOnly ? iso.slice(0, 10) : null;
-  const d = key ? new Date(`${key}T00:00:00`) : new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diff = Math.round((startToday - startThat) / 86_400_000);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return formatDate(key ?? iso, { weekday: "short", day: "numeric", month: "short" });
+  return requestDayWord(iso, now);
+}
+
+/**
+ * Who can be picked in "Assign to": staff whose login is an APPROVED worker
+ * account, plus staff with no login at all. Pending / rejected / suspended
+ * accounts (e.g. a worker still in the approval queue) and admin logins are
+ * left out. The current assignee always stays in the list. Without the
+ * accounts list (it failed to load) every staff record is offered.
+ */
+export function assignableStaff(
+  staff: readonly StaffMember[],
+  accounts: readonly Pick<data.UserAccountRow, "staff_id" | "email" | "role" | "account_status">[],
+  currentAssigneeId: number | null | undefined,
+): StaffMember[] {
+  if (accounts.length === 0) return [...staff];
+  return staff.filter((s) => {
+    if (s.id === currentAssigneeId) return true;
+    const email = s.email?.trim().toLowerCase();
+    const linked = accounts.filter(
+      (a) => a.staff_id === s.id || (email && a.email?.trim().toLowerCase() === email),
+    );
+    if (linked.length === 0) return true;
+    return linked.some((a) => a.role === "maintenance" && a.account_status === "approved");
+  });
+}
+
+/** Staff record behind a login: user_roles.staff_id, else the Staff row with the same email. */
+export function staffIdForAccount(
+  account: Pick<data.UserAccountRow, "staff_id" | "email">,
+  staff: readonly Pick<StaffMember, "id" | "email">[],
+): number | null {
+  if (account.staff_id != null) return account.staff_id;
+  const email = account.email?.trim().toLowerCase();
+  if (!email) return null;
+  return staff.find((s) => s.email?.trim().toLowerCase() === email)?.id ?? null;
 }
 
 /** "$42.00". */
@@ -212,8 +236,12 @@ export interface RequestDetailViewProps {
   staff: StaffMember[];
   viewerStaffId?: number | null;
   viewerTenantId?: number | null;
-  /** Auth user id → display name, for status changes (history `changed_by_user_id`). */
+  /** The viewer's auth user id: their own status changes read "You". */
+  viewerUserId?: string | null;
+  /** Auth user id → real name, for status changes (history `changed_by_user_id`). */
   nameForUserId?: (userId: string) => string | null | undefined;
+  /** Staff id of the only admin login, for admin messages without an author_staff_id. */
+  soleAdminStaffId?: number | null;
   busy?: boolean;
   uploading?: boolean;
   posting?: boolean;
@@ -250,7 +278,9 @@ export function RequestDetailView({
   staff,
   viewerStaffId = null,
   viewerTenantId = null,
+  viewerUserId = null,
   nameForUserId,
+  soleAdminStaffId = null,
   busy = false,
   uploading = false,
   posting = false,
@@ -276,10 +306,6 @@ export function RequestDetailView({
   const assignee = assigneeName(order, staffMap);
   const assigneeStaff = order.assigned_staff_id != null ? staffMap.get(order.assigned_staff_id) : undefined;
   const reporter = personName(order.tenant_first_name, order.tenant_last_name);
-  const reporterLabel =
-    role === "tenant" && viewerTenantId != null && viewerTenantId === order.tenant_id
-      ? "You"
-      : reporter || (order.tenant_id == null ? "Landlord Gopher" : "");
   const number = requestNumberLabel(order);
   const completed = status === "Completed";
   const isWorker = role === "maintenance";
@@ -296,12 +322,29 @@ export function RequestDetailView({
           tenantName: reporter || undefined,
           viewerStaffId,
           viewerTenantId,
+          viewerUserId,
           nameForUserId,
+          soleAdminStaffId,
         },
         role,
       ),
-    [order, history, comments, staffMap, reporter, viewerStaffId, viewerTenantId, nameForUserId, role],
+    [
+      order,
+      history,
+      comments,
+      staffMap,
+      reporter,
+      viewerStaffId,
+      viewerTenantId,
+      viewerUserId,
+      nameForUserId,
+      soleAdminStaffId,
+      role,
+    ],
   );
+  // "Reported by" uses the same person as the timeline's first entry, so the
+  // page never names the reporter two different ways.
+  const reporterLabel = entries.find((e) => e.kind === "reported")?.actor.name ?? reporter;
 
   const composer: RequestTimelineComposer | null =
     visibility.composer && !completed && onSend
@@ -332,7 +375,18 @@ export function RequestDetailView({
     <PageShell
       title={
         <>
-          <span className="md:hidden">{back.label}</span>
+          {/* Phone (Header / Phone, Type = Back): back icon + parent label. The number sits by the title below. */}
+          <span className="flex items-center gap-1 md:hidden">
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label={`Back to ${back.label}`}
+              className="-ml-3 flex size-11 shrink-0 items-center justify-center rounded-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            >
+              <ChevronLeft className="size-5" aria-hidden />
+            </button>
+            <span className="min-w-0 flex-1 truncate text-[17px] leading-[22px]">{back.label}</span>
+          </span>
           <span className="hidden md:inline">{order.title}</span>
           <span className="hidden pl-2 align-baseline text-sm font-normal tracking-normal text-muted-foreground md:inline">
             {number}
@@ -340,7 +394,8 @@ export function RequestDetailView({
         </>
       }
     >
-      <div className="flex flex-col gap-4 md:gap-6">
+      {/* Phone content is p-4 (16px): pull the shell's 24px padding in by 8px. */}
+      <div className="flex flex-col gap-4 max-md:-mx-2 max-md:-mt-2 md:gap-6">
         <RequestHeader
           title={order.title}
           requestNumber={number}
@@ -365,6 +420,7 @@ export function RequestDetailView({
               order={order}
               assignee={assignee}
               assigneeRole={assigneeStaff?.job_title?.trim() || "Maintenance"}
+              status={status}
               completed={completed}
               landlordCost={!visibility.actionsPanel && visibility.cost ? costLabel : null}
             />
@@ -388,6 +444,7 @@ export function RequestDetailView({
               }
               onReopen={completed ? onReopen : undefined}
               reopenBusy={busy}
+              composerOnPhone={false}
             />
           </div>
           {actions ? <div className="md:hidden">{actions}</div> : null}
@@ -397,6 +454,7 @@ export function RequestDetailView({
           role={role}
           visibility={visibility}
           status={status}
+          composer={composer}
           busy={busy}
           onAssign={onAssign}
           onChangeStatus={onChangeStatus}
@@ -421,12 +479,14 @@ function RequestDetailsCard({
   order,
   assignee,
   assigneeRole,
+  status,
   completed,
   landlordCost,
 }: {
   order: WorkOrder;
   assignee: string | null;
   assigneeRole: string;
+  status: RequestStatus;
   completed: boolean;
   /** Landlord: their price, shown in Details (no actions panel). */
   landlordCost: string | null;
@@ -450,7 +510,11 @@ function RequestDetailsCard({
           value={order.permission_to_enter ? "OK to enter if absent" : "Arrange a time with the tenant"}
         />
         <ReadOnlyField label="Assigned to" value={assignee ? `${assignee} · ${assigneeRole}` : "Not assigned yet"} />
-        <ReadOnlyField label="Scheduled" value={dayStamp(order.scheduled_at) || "Not scheduled yet"} />
+        <ReadOnlyField
+          label="Scheduled"
+          // New = open with nobody assigned: never "scheduled", whatever scheduled_at holds (spec §1).
+          value={(status !== "New" && dayStamp(order.scheduled_at)) || "Not scheduled yet"}
+        />
       </div>
       {completed ? (
         <ReadOnlyField
@@ -463,11 +527,15 @@ function RequestDetailsCard({
   );
 }
 
-/** Phone sticky action bar: one full-width primary (spec §4). Admin and worker only. */
+/**
+ * Phone sticky bottom (spec §4): the message box (staff and tenant), then one
+ * full-width primary (admin and worker). Landlord: nothing sticky.
+ */
 function PhoneActionBar({
   role,
   visibility,
   status,
+  composer,
   busy,
   onAssign,
   onChangeStatus,
@@ -476,6 +544,8 @@ function PhoneActionBar({
   role: RequestViewerRole;
   visibility: RequestSectionVisibility;
   status: RequestStatus;
+  /** Phone: the message box sits in this sticky bar, above the primary action. */
+  composer: RequestTimelineComposer | null;
   busy: boolean;
   onAssign?: () => void;
   onChangeStatus?: (next: WorkOrderStatus) => void;
@@ -517,11 +587,10 @@ function PhoneActionBar({
       );
     }
   }
-  if (!control) return null;
+  if (!control && !composer) return null;
   return (
-    <div
-      className="sticky bottom-0 z-20 -mx-6 -mb-6 border-t border-border bg-background px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:hidden"
-    >
+    <div className="sticky bottom-0 z-20 -mx-4 -mb-6 flex flex-col gap-3 border-t border-border bg-background px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:hidden">
+      {composer ? <RequestComposer composer={composer} variant="bar" /> : null}
       {control}
     </div>
   );
@@ -760,21 +829,42 @@ export function RequestDetailPage({
   const staffMap = useMemo(() => staffById(staff), [staff]);
   const goBack = () => navigate(back.to);
 
-  // Status changes carry the auth user id: "You" for the viewer; admins also
-  // resolve other staff (and the reporting tenant) through the accounts list.
+  // The viewer's own Staff record. An admin login is usually not linked to a
+  // Staff row by id, so match it by email through the accounts list.
+  const viewerAccount = useMemo(
+    () => (viewerUserId ? accounts.find((a) => a.user_id === viewerUserId) ?? null : null),
+    [accounts, viewerUserId],
+  );
+  const myStaffId = viewerStaffId ?? (viewerAccount ? staffIdForAccount(viewerAccount, staff) : null);
+  // Admin messages saved without an author_staff_id: name them when there is one admin.
+  const soleAdminStaffId = useMemo(() => {
+    const admins = accounts.filter((a) => a.role === "admin" && a.account_status === "approved");
+    return admins.length === 1 ? staffIdForAccount(admins[0], staff) : null;
+  }, [accounts, staff]);
+
+  // Status changes carry the auth user id. The timeline shows the viewer's own
+  // as "You" (with their real initials); admins also resolve other staff and
+  // the reporting tenant through the accounts list.
   const tenantIdOfOrder = order?.tenant_id ?? null;
   const tenantNameOfOrder = order ? personName(order.tenant_first_name, order.tenant_last_name) : "";
   const nameForUserId = useMemo(() => {
     const byUser = new Map(accounts.map((a) => [a.user_id, a]));
+    const myName =
+      role === "tenant"
+        ? tenantNameOfOrder || null
+        : myStaffId != null
+          ? assigneeName({ assigned_staff_id: myStaffId }, staffMap)
+          : null;
     return (userId: string): string | null => {
-      if (viewerUserId && userId === viewerUserId) return "You";
+      if (viewerUserId && userId === viewerUserId) return myName;
       const account = byUser.get(userId);
       if (!account) return null;
-      if (account.staff_id != null) return assigneeName({ assigned_staff_id: account.staff_id }, staffMap);
+      const staffId = staffIdForAccount(account, staff);
+      if (staffId != null) return assigneeName({ assigned_staff_id: staffId }, staffMap);
       if (account.tenant_id != null && account.tenant_id === tenantIdOfOrder) return tenantNameOfOrder || null;
       return null;
     };
-  }, [accounts, viewerUserId, staffMap, tenantIdOfOrder, tenantNameOfOrder]);
+  }, [accounts, viewerUserId, staff, staffMap, tenantIdOfOrder, tenantNameOfOrder, role, myStaffId]);
 
   if (loading) {
     return (
@@ -1065,8 +1155,10 @@ export function RequestDetailPage({
       comments={comments}
       history={history}
       staff={staff}
-      viewerStaffId={viewerStaffId}
+      viewerStaffId={myStaffId}
       viewerTenantId={viewerTenantId}
+      viewerUserId={viewerUserId}
+      soleAdminStaffId={soleAdminStaffId}
       busy={busy}
       uploading={uploading}
       posting={posting}
@@ -1105,7 +1197,7 @@ export function RequestDetailPage({
               <SelectValue placeholder="Choose a person" />
             </SelectTrigger>
             <SelectContent>
-              {staff.map((s) => (
+              {assignableStaff(staff, accounts, current.assigned_staff_id).map((s) => (
                 <SelectItem key={s.id} value={String(s.id)}>
                   {personName(s.first_name, s.last_name)} · {s.job_title?.trim() || "Maintenance"}
                 </SelectItem>

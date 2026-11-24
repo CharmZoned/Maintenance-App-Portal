@@ -77,8 +77,12 @@ export function RequestHeader({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <RequestBackLink label={backLabel} onBack={onBack} />
+      {/* Phone: the header bar carries the back button, so the link shows from tablet up. */}
+      <div className="hidden md:flex">
+        <RequestBackLink label={backLabel} onBack={onBack} />
+      </div>
       {hidePhoneTitle ? null : (
+        // Phone: the header bar holds the back button (with the chrome), so the title and number live here.
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 md:hidden">
           <h2 className="text-[22px] font-semibold leading-7 tracking-[-0.01em] text-foreground">{title}</h2>
           <span className="text-sm leading-5 text-muted-foreground">{number}</span>

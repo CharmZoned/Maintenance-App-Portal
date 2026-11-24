@@ -1,4 +1,5 @@
 import type { MaintenanceComment, WorkOrder } from "@/types";
+import { STATUS_LABEL } from "@/lib/request-status";
 
 /** Inbox thread — request-linked uses live WO comments; direct is UI-only stub. */
 export type MessageThreadKind = "request" | "direct";
@@ -53,7 +54,7 @@ export function workOrderThreadTitle(wo: WorkOrder): string {
 
 export function workOrderPreview(wo: WorkOrder): string {
   if (wo.status === "closed" && wo.resolution_notes?.trim()) {
-    return `Closed · ${wo.resolution_notes.trim()}`;
+    return `${STATUS_LABEL.closed} · ${wo.resolution_notes.trim()}`;
   }
   if (wo.description?.trim()) return wo.description.trim();
   return wo.title;

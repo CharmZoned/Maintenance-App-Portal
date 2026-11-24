@@ -120,3 +120,30 @@ describe("request list row", () => {
     expect(html).toContain("New");
   });
 });
+
+describe("review fixes: list rows", () => {
+  it("in-progress rows say when work started", () => {
+    const started = new Date().toISOString();
+    const row = wo({ status: "in_progress", assigned_staff_id: 5 });
+    expect(listNextStep(row, "Riley Wrench", true, started)).toBe("Started today · Riley Wrench");
+    expect(listNextStep(row, "Riley Wrench", false, started)).toBe("Started today");
+  });
+
+  it("a New request is never scheduled, and headers carry aria-sort", () => {
+    const html = renderToStaticMarkup(
+      createElement(RequestListTable, {
+        items: [{ order: wo({ scheduled_at: "2099-11-26" }), context: "Maple Court", assigneeName: null }],
+        onOpen: () => undefined,
+        showAssignee: false,
+        dateColumn: "scheduled",
+        sort: { field: "scheduled", dir: "asc" },
+        onSortChange: () => undefined,
+        ariaLabel: "Jobs",
+      }),
+    );
+    expect(html).toContain("Not scheduled");
+    expect(html).not.toContain("26 Nov");
+    expect(html).toContain('aria-sort="ascending"');
+    expect(html).toContain('aria-sort="none"');
+  });
+});

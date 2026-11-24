@@ -48,6 +48,11 @@ export interface RequestTimelineProps {
   /** Admin on a completed request: a secondary "Reopen" button in the locked strip. */
   onReopen?: () => void;
   reopenBusy?: boolean;
+  /**
+   * Phone: the page draws the message box in its sticky bottom bar instead
+   * (spec §4), so the card shows it from tablet up only.
+   */
+  composerOnPhone?: boolean;
 }
 
 export function RequestTimeline({
@@ -57,6 +62,7 @@ export function RequestTimeline({
   readOnlyNote,
   onReopen,
   reopenBusy,
+  composerOnPhone = true,
 }: RequestTimelineProps) {
   return (
     <section
@@ -76,7 +82,9 @@ export function RequestTimeline({
         </ol>
       )}
       {composer ? (
-        <TimelineComposer composer={composer} />
+        <div className={composerOnPhone ? undefined : "hidden md:block"}>
+          <RequestComposer composer={composer} />
+        </div>
       ) : readOnlyNote ? (
         <div className="flex items-center gap-2 rounded-sm bg-muted px-3 py-2.5">
           <Lock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -248,7 +256,17 @@ function InternalSwitch({ checked, onChange }: { checked: boolean; onChange: (ne
   );
 }
 
-function TimelineComposer({ composer }: { composer: RequestTimelineComposer }) {
+/**
+ * The message box. `variant="bar"` is the phone sticky bar (no top rule, 44px
+ * controls); the default sits at the bottom of the Timeline card.
+ */
+export function RequestComposer({
+  composer,
+  variant = "card",
+}: {
+  composer: RequestTimelineComposer;
+  variant?: "card" | "bar";
+}) {
   const [body, setBody] = useState("");
   const [internal, setInternal] = useState(false);
   const [sending, setSending] = useState(false);
@@ -271,7 +289,10 @@ function TimelineComposer({ composer }: { composer: RequestTimelineComposer }) {
   };
 
   return (
-    <form className="flex flex-col gap-2 border-t border-border pt-4" onSubmit={(e) => void send(e)}>
+    <form
+      className={cn("flex flex-col gap-2", variant === "card" && "border-t border-border pt-4")}
+      onSubmit={(e) => void send(e)}
+    >
       {composer.showInternalToggle ? <InternalSwitch checked={internal} onChange={setInternal} /> : null}
       <div className="flex gap-2">
         <Input

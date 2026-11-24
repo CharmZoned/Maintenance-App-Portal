@@ -468,7 +468,7 @@ function StaffLandlordMaintenancePage({
   return (
     <PageShell
       title="Maintenance"
-      meta={loading ? undefined : meta}
+      meta={loading || listError ? undefined : meta}
       width="max-w-none"
       actions={
         canCreate ? (
@@ -500,9 +500,13 @@ function StaffLandlordMaintenancePage({
         </div>
       ) : (
         <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-          <div className="flex flex-wrap gap-2" aria-label="Request queue">
+          {/* Phone: one row that scrolls sideways instead of wrapping "All" onto its own line. */}
+          <div
+            className="-mx-6 -my-1 flex gap-2 overflow-x-auto px-6 py-1 [scrollbar-width:none] md:mx-0 md:my-0 md:py-0 md:flex-wrap md:overflow-visible md:px-0 [&>*]:shrink-0"
+            aria-label="Request queue"
+          >
             <RequestListTab
-              label={`Needs action (${counts.needs})`}
+              label={loading || listError ? "Needs action" : `Needs action (${counts.needs})`}
               active={staffTab === "needs"}
               onClick={() => selectStaffTab("needs")}
             />

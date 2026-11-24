@@ -2,8 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type TouchEvent } from
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ChevronLeft, ChevronRight, ImageIcon, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatWeekdayDayMonth, toDay } from "@/lib/admin-dates";
-import { parseWhenDate } from "@/lib/request-status";
+import { formatRequestDay, parseWhenDate } from "@/lib/request-status";
 import { cn } from "@/lib/utils";
 import type { MaintenancePhoto } from "@/types";
 
@@ -39,7 +38,7 @@ const ROLE_FALLBACK: Record<string, string> = {
 export function photoAddedDay(iso: string | null | undefined): string {
   if (!iso) return "";
   const d = parseWhenDate(iso);
-  return d ? formatWeekdayDayMonth(toDay(d)) : "";
+  return d ? formatRequestDay(d) : "";
 }
 
 /** "Added by Tina Renter · Sat 14 Nov" (either half may be missing). */
@@ -117,7 +116,8 @@ export function PhotoLightbox({ photos, index, onIndexChange, uploaderName, retu
             }
           }}
           className={cn(
-            "fixed inset-0 z-50 flex flex-col bg-card text-card-foreground outline-none",
+            // Phone: full screen, starting below the staging ribbon (0px outside staging/local).
+            "fixed inset-0 top-[var(--staging-ribbon-offset,0px)] z-50 flex flex-col bg-card text-card-foreground outline-none",
             "md:inset-auto md:left-1/2 md:top-1/2 md:max-h-[calc(100vh-3rem)] md:w-[min(60rem,calc(100vw-3rem))]",
             "md:-translate-x-1/2 md:-translate-y-1/2 md:overflow-hidden md:rounded-lg md:shadow-float",
           )}

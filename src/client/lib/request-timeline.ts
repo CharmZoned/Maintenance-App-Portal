@@ -4,8 +4,7 @@ import type {
   WorkOrder,
 } from "@/types";
 import { workOrderStatusFromDb } from "@/lib/mappers";
-import { requestStatusFromDb, type RequestStatus } from "@/lib/request-status";
-import { formatDate } from "@/lib/utils";
+import { requestDayInSentence, requestStatusFromDb, type RequestStatus } from "@/lib/request-status";
 
 /**
  * Request timeline model (spec §2.4, owner review item 3).
@@ -42,7 +41,7 @@ export interface TimelinePerson {
   /** Display name, e.g. "Sam Fixit". "You" when the viewer did it. */
   name: string;
   role: TimelineRoleTag;
-  /** Initials for the avatar circle. */
+  /** Initials for the avatar circle — always from the REAL name, never from "You". */
   initials: string;
 }
 
@@ -89,8 +88,20 @@ export interface TimelinePeople {
   viewerTenantId?: number | null;
   /** Office display name for admin-made entries without a resolvable name. */
   officeName?: string;
-  /** Optional auth user id → display name (for history rows' changed_by_user_id). */
+  /**
+   * Optional auth user id → the person's REAL name (for history rows'
+   * changed_by_user_id). Return the viewer's own name too: the timeline turns
+   * it into "You" through `viewerUserId`, and keeps the real initials.
+   */
   nameForUserId?: (userId: string) => string | null | undefined;
+  /** The viewer's own auth user id: their status changes read "You". */
+  viewerUserId?: string | null;
+  /**
+   * Staff id for admin-written messages that carry no author_staff_id (an admin
+   * login is not linked to a Staff row): the page passes the only admin's Staff
+   * record when there is exactly one, so their messages get a name, not the office.
+   */
+  soleAdminStaffId?: number | null;
 }
 
 export interface TimelineOptions {
@@ -118,8 +129,18 @@ export function initialsOf(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-function person(name: string, role: TimelineRoleTag): TimelinePerson {
-  return { name, role, initials: initialsOf(name) };
+/**
+ * A person on the timeline. `realName` feeds the avatar initials, so an entry
+ * shown as "You" still gets the viewer's own initials ("TR", not "YO").
+ */
+function person(name: string, role: TimelineRoleTag, realName?: string | null): TimelinePerson {
+  const source = realName?.trim() || (name === "You" ? "" : name);
+  return { name, role, initials: initialsOf(source) };
+}
+
+/** The viewer's own entry: "You", with initials from their real name. */
+function you(role: TimelineRoleTag, realName?: string | null): TimelinePerson {
+  return person("You", role, realName);
 }
 
 function staffName(people: TimelinePeople, id: number | null | undefined): string | null {
@@ -138,8 +159,9 @@ function adminTag(viewer: RequestViewerRole): TimelineRoleTag {
   return isStaffViewer(viewer) ? "Admin" : "Landlord Gopher";
 }
 
+/** Same day words as the summary line and Details ("today", "Tue 17 Nov"). */
 function defaultFormatDay(iso: string): string {
-  return formatDate(iso, { weekday: "short", day: "numeric", month: "short" });
+  return requestDayInSentence(iso);
 }
 
 function quoted(text: string): string {
@@ -158,23 +180,31 @@ function statusActor(
   viewer: RequestViewerRole,
 ): TimelinePerson {
   const office = people.officeName ?? DEFAULT_OFFICE;
-  const named = ev.changed_by_user_id ? people.nameForUserId?.(ev.changed_by_user_id)?.trim() : null;
+  const named = ev.changed_by_user_id ? people.nameForUserId?.(ev.changed_by_user_id)?.trim() || null : null;
+  const mineByUser = people.viewerUserId != null && ev.changed_by_user_id === people.viewerUserId;
   switch (ev.changed_by_role) {
     case "maintenance": {
+      if (mineByUser) return you("Maintenance", named ?? staffName(people, people.viewerStaffId));
       if (named) return person(named, "Maintenance");
       // No staff id on the history row: the assigned worker is the best guess.
+      const assigned = staffName(people, order.assigned_staff_id);
       const mine = people.viewerStaffId != null && people.viewerStaffId === order.assigned_staff_id;
-      return person(mine ? "You" : staffName(people, order.assigned_staff_id) ?? "The worker", "Maintenance");
+      return mine ? you("Maintenance", assigned) : person(assigned ?? "The worker", "Maintenance");
     }
     case "tenant": {
       const mine =
-        viewer === "tenant" && people.viewerTenantId != null && people.viewerTenantId === order.tenant_id;
-      return person(mine ? "You" : named || people.tenantName || "The tenant", "Tenant");
+        viewer === "tenant" &&
+        (mineByUser || (people.viewerTenantId != null && people.viewerTenantId === order.tenant_id));
+      const real = named || people.tenantName || null;
+      return mine ? you("Tenant", real) : person(real || "The tenant", "Tenant");
     }
     case "landlord":
-      return person(named || "The landlord", "Landlord");
-    case "admin":
-      return person(isStaffViewer(viewer) && named ? named : office, adminTag(viewer));
+      return mineByUser ? you("Landlord", named) : person(named || "The landlord", "Landlord");
+    case "admin": {
+      if (!isStaffViewer(viewer)) return person(office, adminTag(viewer));
+      if (mineByUser) return you("Admin", named ?? staffName(people, people.viewerStaffId) ?? office);
+      return person(named ?? office, "Admin");
+    }
     default:
       return person(office, isStaffViewer(viewer) ? "System" : "Landlord Gopher");
   }
@@ -185,18 +215,22 @@ function messageActor(c: MaintenanceComment, people: TimelinePeople, viewer: Req
   switch (c.author_role) {
     case "tenant": {
       const mine = people.viewerTenantId != null && people.viewerTenantId === c.author_tenant_id;
-      return person(mine ? "You" : people.tenantName || "The tenant", "Tenant");
+      const real = people.tenantName || null;
+      return mine ? you("Tenant", real) : person(real || "The tenant", "Tenant");
     }
     case "maintenance": {
+      const real = staffName(people, c.author_staff_id);
       const mine = c.author_staff_id != null && people.viewerStaffId === c.author_staff_id;
-      return person(mine ? "You" : staffName(people, c.author_staff_id) ?? "The worker", "Maintenance");
+      return mine ? you("Maintenance", real) : person(real ?? "The worker", "Maintenance");
     }
     case "landlord":
       return person("The landlord", "Landlord");
     case "admin": {
-      const mine = c.author_staff_id != null && people.viewerStaffId === c.author_staff_id;
-      const name = isStaffViewer(viewer) ? staffName(people, c.author_staff_id) : null;
-      return person(mine ? "You" : name ?? office, adminTag(viewer));
+      const id = c.author_staff_id ?? people.soleAdminStaffId ?? null;
+      const real = staffName(people, id);
+      const mine = id != null && people.viewerStaffId === id;
+      if (mine) return you(adminTag(viewer), real);
+      return person((isStaffViewer(viewer) ? real : null) ?? office, adminTag(viewer));
     }
     default:
       return person(office, isStaffViewer(viewer) ? "System" : "Landlord Gopher");
@@ -385,7 +419,7 @@ export function buildTimeline(
   let reporter: TimelinePerson;
   if (order.tenant_id != null) {
     const mine = role === "tenant" && people.viewerTenantId != null && people.viewerTenantId === order.tenant_id;
-    reporter = person(mine ? "You" : people.tenantName || "The tenant", "Tenant");
+    reporter = mine ? you("Tenant", people.tenantName) : person(people.tenantName || "The tenant", "Tenant");
   } else if (creation && creation.changed_by_role && creation.changed_by_role !== "tenant") {
     // Staff-reported: name whoever created it (falls back to the office).
     reporter = statusActor(creation, order, people, role);

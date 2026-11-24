@@ -259,7 +259,7 @@ export function TenantRequestsPage({
   return (
     <PageShell
       title="Requests"
-      meta={loading ? undefined : `${openCount} open`}
+      meta={loading || listError ? undefined : `${openCount} open`}
       width="max-w-none"
       actions={
         <Button
