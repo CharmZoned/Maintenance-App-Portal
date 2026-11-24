@@ -509,3 +509,39 @@ describe("landlord home review fixes", () => {
     if (overdue.kind === "link") expect(overdue.context).not.toContain("NaN");
   });
 });
+
+describe("landlord home: billed spend", () => {
+  const base = {
+    now,
+    name: "Lena",
+    properties: [maple],
+    charges: [],
+    leases: [],
+    units: [],
+    documents: [],
+    pending: [],
+    marketed: null,
+  };
+
+  it("shows the Billed figure from completed requests, the same as the Maintenance page", () => {
+    const model = buildReadyHome({
+      ...base,
+      orders: [order({ id: 4, title: "Leak", status: "open", created_at: "2026-11-10T08:00:00", landlord_price: 400 })],
+      billed: [
+        order({ id: 1, title: "Tap", status: "closed", created_at: "2026-11-02T08:00:00", completed_at: "2026-11-12T08:00:00", landlord_price: 120 }),
+        order({ id: 2, title: "Fan", status: "closed", created_at: "2026-03-02T08:00:00", completed_at: "2026-03-04T08:00:00", landlord_price: 80 }),
+        order({ id: 3, title: "Elsewhere", status: "closed", created_at: "2026-11-02T08:00:00", completed_at: "2026-11-12T08:00:00", landlord_price: 999, property_id: 99 }),
+      ],
+    });
+    expect(model.maintenance.billedLine).toBe(`Billed: ${formatMoney(120)} this month · ${formatMoney(200)} this year`);
+    const html = visibleText(renderReady(model));
+    expect(html).toContain(`Billed: ${formatMoney(120)} this month`);
+    expect(html).not.toContain("Spend isn't on these requests yet.");
+  });
+
+  it("says when billed amounts could not be loaded instead of showing zero", () => {
+    const model = buildReadyHome({ ...base, orders: [], billed: null });
+    expect(model.maintenance.billedLine).toBeNull();
+    expect(visibleText(renderReady(model))).toContain("Billed amounts couldn't be loaded.");
+  });
+});

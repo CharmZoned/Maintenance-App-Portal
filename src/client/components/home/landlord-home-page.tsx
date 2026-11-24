@@ -32,6 +32,7 @@ import {
   landlordDocumentRowModel,
   type LandlordDocumentRowModel,
 } from "@/lib/landlord-documents";
+import { billedSpend, billedSpendText, billedYearStart } from "@/lib/billed-spend";
 import { formatMessageTime, threadsFromWorkOrders } from "@/lib/messages";
 import { isOpenRequest, requestNextStep, toRequestStatus } from "@/lib/request-status";
 import { daysBetween, formatMoney, toIsoDate } from "@/lib/utils";
@@ -149,8 +150,8 @@ export type ReadyHomeModel = {
   maintenance: {
     unavailable: boolean;
     countLine: string;
-    spendDesktop: string | null;
-    spendCompact: string | null;
+    /** "Billed: $120 this month · $120 this year"; null when the billed read failed. */
+    billedLine: string | null;
     rows: MaintenanceRowModel[];
   };
   messages: { unavailable: boolean; unread: number; threads: ThreadRowModel[] };
@@ -161,6 +162,8 @@ type PendingPayment = { amount: number; method: string; propertyId: number | nul
 
 type Bundle = {
   orders: WorkOrder[] | null;
+  /** Requests completed this year, with prices, for the Billed line. */
+  billed: WorkOrder[] | null;
   charges: RentCharge[] | null;
   leases: Lease[] | null;
   units: Unit[] | null;
@@ -192,6 +195,11 @@ export function buildReadyHome(input: {
   name: string | null;
   properties: Property[];
   orders: WorkOrder[] | null;
+  /**
+   * Requests completed this year, with prices (see `billedSpend`). Defaults to
+   * the completed requests in `orders`; null when that read failed.
+   */
+  billed?: WorkOrder[] | null;
   charges: RentCharge[] | null;
   leases: Lease[] | null;
   units: Unit[] | null;
@@ -201,6 +209,7 @@ export function buildReadyHome(input: {
 }): ReadyHomeModel {
   const ids = new Set(input.properties.map((property) => property.id));
   const orders = owned(input.orders, ids);
+  const billed = input.billed === undefined ? orders : owned(input.billed, ids);
   const charges =
     owned(input.charges, ids)?.filter((charge) => charge.period === currentPeriodFrom(input.now)) ?? null;
   const leases = owned(input.leases, ids);
@@ -280,7 +289,7 @@ export function buildReadyHome(input: {
       vacant,
       pending,
     }),
-    maintenance: maintenanceCard(orders, input.now),
+    maintenance: maintenanceCard(orders, billed, input.now),
     messages: messageCard(orders, input.now),
     activity:
       orders == null
@@ -329,12 +338,17 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       // Open requests cover counts, attention, maintenance, and messages.
       // A short closed slice is enough for recent completions in activity.
       // Ended leases and the full unit graph are not used by these cards.
-      const [openOrders, recentClosed, charges, leases, documents, pending] = await Promise.all([
+      // Billed spend needs every request completed this year, with its price.
+      const [openOrders, recentClosed, billed, charges, leases, documents, pending] = await Promise.all([
         listWorkOrders({ open_only: true, skip_staff_notes: true }).then(
           (rows) => rows,
           () => null,
         ),
         listWorkOrders({ status: "closed", limit: ACTIVITY_CAP, skip_staff_notes: true }).then(
+          (rows) => rows,
+          () => null,
+        ),
+        listWorkOrders({ status: "closed", closed_since: billedYearStart(now) }).then(
           (rows) => rows,
           () => null,
         ),
@@ -355,6 +369,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       if (cancelled) return;
       setBundle({
         orders: openOrders == null ? null : [...openOrders, ...(recentClosed ?? [])],
+        billed,
         charges,
         leases,
         units: null,
@@ -441,6 +456,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       name,
       properties,
       orders: bundle.orders,
+      billed: bundle.billed,
       charges: bundle.charges,
       leases: bundle.leases,
       units: bundle.units,
@@ -916,13 +932,10 @@ function MaintenanceCard({
           <p className="text-lg font-semibold leading-[1.625rem] text-foreground xl:text-2xl xl:leading-8">
             {maintenance.countLine}
           </p>
-          {maintenance.spendDesktop ? (
-            <p className="mt-1 lg-body text-foreground">
-              <span className="xl:hidden">{maintenance.spendCompact}</span>
-              <span className="hidden xl:inline">{maintenance.spendDesktop}</span>
-            </p>
+          {maintenance.billedLine ? (
+            <p className="mt-1 lg-body text-foreground">{maintenance.billedLine}</p>
           ) : (
-            <p className="mt-1 lg-caption text-muted-foreground">Spend isn&apos;t on these requests yet.</p>
+            <p className="mt-1 lg-caption text-muted-foreground">Billed amounts couldn&apos;t be loaded.</p>
           )}
           {maintenance.rows.length === 0 ? (
             <p className="mt-4 lg-body text-muted-foreground">No open requests.</p>
@@ -1449,28 +1462,20 @@ function pendingLine(pending: PendingPayment[] | null): string | null {
     : `Awaiting verification ${formatMoney(total)}`;
 }
 
-function maintenanceCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel["maintenance"] {
+function maintenanceCard(
+  orders: WorkOrder[] | null,
+  billed: WorkOrder[] | null,
+  now: Date,
+): ReadyHomeModel["maintenance"] {
   if (orders == null) {
-    return { unavailable: true, countLine: "", spendDesktop: null, spendCompact: null, rows: [] };
+    return { unavailable: true, countLine: "", billedLine: null, rows: [] };
   }
   const open = orders.filter(isOpenRequest);
   const hold = open.filter((order) => order.status === "on_hold").length;
-  const priced = orders.filter((order) => order.landlord_price != null && Number.isFinite(order.landlord_price));
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
-  const at = (order: WorkOrder) => new Date(order.completed_at || order.created_at).getTime();
-  const monthSpend = priced
-    .filter((order) => at(order) >= monthStart)
-    .reduce((sum, order) => sum + Number(order.landlord_price), 0);
-  const yearSpend = priced
-    .filter((order) => at(order) >= yearStart)
-    .reduce((sum, order) => sum + Number(order.landlord_price), 0);
-  const spendCompact = priced.length ? `${formatMoney(monthSpend)} this month · ${formatMoney(yearSpend)} this year` : null;
   return {
     unavailable: false,
     countLine: `${open.length} open · ${hold} on hold`,
-    spendDesktop: spendCompact ? `Spend: ${spendCompact}` : null,
-    spendCompact,
+    billedLine: billed == null ? null : billedSpendText(billedSpend(billed, now)).line,
     rows: open
       .slice()
       .sort((a, b) => b.created_at.localeCompare(a.created_at))

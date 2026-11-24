@@ -293,8 +293,7 @@ function Summary({ model }: { model: LandlordQueueModel }) {
           detailCompact={model.onHoldDetailCompact}
         />
         <SummaryCard
-          label="Maintenance spend"
-          labelCompact="Spend"
+          label="Billed"
           value={model.spendMonthLabel}
           valueCompact={model.spendMonthAmount}
           detail={model.spendYearLabel}

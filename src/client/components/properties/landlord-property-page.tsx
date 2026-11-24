@@ -83,7 +83,8 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
         const leaseIds = nextLeases.map((lease) => lease.id);
         const [nextCharges, nextOrders, nextDocs] = await Promise.all([
           listCharges(currentPeriod(), { lease_ids: leaseIds }),
-          listWorkOrders({ property_id: id, skip_staff_notes: true }),
+          // Prices are needed for the Billed figure, so no skip_staff_notes here.
+          listWorkOrders({ property_id: id }),
           listPropertyDocuments({ property_id: id }),
         ]);
         if (cancelled) return;
@@ -382,7 +383,7 @@ function Overview({
             <h2 className="lg-section text-foreground">Maintenance</h2>
             <p className="lg-body-medium text-foreground">{model.maintenance.summary}</p>
             <div className="rounded-sm bg-muted p-3">
-              <p className="lg-label uppercase text-muted-foreground">Spend this year</p>
+              <p className="lg-label uppercase text-muted-foreground">{model.maintenance.spendLabel}</p>
               <p className="mt-0.5 lg-heading text-foreground">{model.maintenance.spendValue}</p>
               <p className="mt-0.5 lg-caption text-muted-foreground">{model.maintenance.spendCaption}</p>
             </div>
