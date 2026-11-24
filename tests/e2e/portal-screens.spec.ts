@@ -95,7 +95,7 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/home");
     await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
     await expect(page.getByText("Read-only")).toHaveCount(0);
-    await expect(page.getByText("Maple Court")).toBeVisible();
+    await expect(page.getByText("Maple Court").first()).toBeVisible();
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);
     await expect(page.getByRole("button", { name: "New property" })).toHaveCount(0);
     await page.goto("/documents");

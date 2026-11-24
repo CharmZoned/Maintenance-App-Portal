@@ -7,8 +7,9 @@ import {
   CircleCheck,
   DollarSign,
   FileText,
+  MessageSquare,
+  Plus,
   TriangleAlert,
-  User,
   Wrench,
 } from "lucide-react";
 import { useApp } from "@/context";
@@ -16,9 +17,9 @@ import { useShellChrome } from "@/components/chrome/shell-chrome-context";
 import {
   LandlordDocumentRow,
   LandlordPageIntro,
-  LandlordPropertyHeading,
   LandlordScopeHeading,
 } from "@/components/landlord";
+import { LandlordSubmitDialog } from "@/components/maintenance/landlord-submit-dialog";
 import { PageShell } from "@/components/page-shell";
 import { ErrorRetry } from "@/components/patterns";
 import { StatusChip, type RequestStatus } from "@/components/patterns/status-chip";
@@ -30,8 +31,15 @@ import {
   landlordDocumentRowModel,
   type LandlordDocumentRowModel,
 } from "@/lib/landlord-documents";
-import { formatMessageTime, threadsFromWorkOrders } from "@/lib/messages";
-import { isOpenRequest, requestNextStep, toRequestStatus } from "@/lib/request-status";
+import { formatMessageTime } from "@/lib/messages";
+import { officeThreadKey } from "@/lib/office-messages";
+import { useOfficeThreadPreview, type OfficeThreadPreview } from "@/hooks/use-office-thread-preview";
+import {
+  isOpenRequest,
+  landlordNextStep,
+  priorityLabel,
+  toRequestStatus,
+} from "@/lib/request-status";
 import { daysBetween, formatMoney, toIsoDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import {
@@ -50,23 +58,31 @@ import {
  * Read-only. Portfolio edits stay on the staff shell. Shared patterns are
  * imported, not restyled: intro, property heading, day labels, document rows.
  *
+ * Landlord wave LG-D (Figma "UPGRADED — Home" `20:77`, landlord rows):
+ * - "New request" and "Message Landlord Gopher" sit at the top.
+ * - Rent and lease content is hidden for landlords (owner decision D7). The
+ *   code stays behind `showRentAndLease` so the client can buy it later.
+ * - "Needs your input" lists requests waiting on the landlord
+ *   (`landlordNextStep().who === "landlord"`) and unread office messages.
+ * - Open requests are grouped by unit.
+ * - The messages card is the landlord's office conversation only. It never
+ *   lists tenant names or request comment text.
+ *
  * TODO(data-gap): no landlord rent-roll route, so the rent card states the
  * totals and does not link to a page this portal will bounce away from.
- * TODO(data-gap): no support-contact record and no property photo column.
- * TODO(data-gap): no document-share event for this read-only role, so the
- * success banner (document shared) has nothing live to show.
- * TODO(data-gap): message rows are request threads, not a messages table.
+ * TODO(data-gap): no property photo column, so property cards use an icon tile.
  */
 
 const LEASE_SOON_DAYS = 60;
 const NEW_DOCUMENT_DAYS = 21;
 const ATTENTION_CAP = 5;
-const MAINTENANCE_CAP = 3;
-const MESSAGE_CAP = 3;
+const OPEN_REQUEST_CAP = 8;
 const ACTIVITY_CAP = 6;
+const OFFICE_PREVIEW_CHARS = 140;
+const OFFICE_HREF = `/messages?thread=${officeThreadKey()}`;
 
 type AttentionTone = "warning" | "info" | "muted";
-type AttentionIcon = "alert" | "calendar" | "wrench" | "building";
+type AttentionIcon = "alert" | "calendar" | "wrench" | "building" | "message";
 type ActivityIcon = "wrench" | "file" | "dollar";
 type ChipTone = "neutral" | "warning" | "info" | "success";
 
@@ -89,14 +105,25 @@ export type AttentionItem =
       model: LandlordDocumentRowModel;
     };
 
+/** A "Needs your input" row: something only the landlord can answer. */
+export type InputItem = {
+  id: string;
+  score: number;
+  tone: AttentionTone;
+  icon: AttentionIcon;
+  title: string;
+  context: string;
+  href: string;
+};
+
 export type PropertyCardModel = {
   id: number;
   name: string;
   address: string;
   href: string;
+  stats: { label: string; value: string }[];
+  /** Late-rent signal; only filled when rent is shown (never for landlords, D7). */
   chips: { label: string; tone: ChipTone }[];
-  unread: number;
-  phoneMeta: string;
 };
 
 export type RentCardModel = {
@@ -112,20 +139,31 @@ export type RentCardModel = {
 export type MaintenanceRowModel = {
   id: number;
   title: string;
+  meta: string;
   href: string;
   status: RequestStatus;
+  priority: "High" | "Emergency" | null;
   nextStep?: string;
 };
 
-export type ThreadRowModel = {
+export type UnitGroupModel = {
   id: string;
-  name: string;
-  preview: string;
-  time: string;
-  unread: boolean;
-  href: string;
-  icon: "user" | "wrench";
+  label: string;
+  rows: MaintenanceRowModel[];
 };
+
+export type OfficeCardModel =
+  | { state: "loading"; unread: number; href: string }
+  | { state: "error"; unread: number; href: string }
+  | { state: "empty"; unread: number; href: string }
+  | {
+      state: "ready";
+      unread: number;
+      href: string;
+      from: "office" | "you";
+      preview: string;
+      time: string;
+    };
 
 export type ActivityItemModel = {
   id: string;
@@ -140,18 +178,25 @@ export type ReadyHomeModel = {
   greeting: string;
   subtitle: string;
   kpis: { id: string; label: string; value: string; detail: string; href: string }[];
+  /** False for landlords (owner decision D7): no rent card, rent rows or lease reminders. */
+  showRentAndLease: boolean;
+  input: { items: InputItem[]; partial: boolean };
   attention: AttentionItem[];
   attentionPartial: boolean;
   properties: PropertyCardModel[];
-  rent: RentCardModel;
+  /** Null when rent is hidden. */
+  rent: RentCardModel | null;
   maintenance: {
     unavailable: boolean;
     countLine: string;
     spendDesktop: string | null;
     spendCompact: string | null;
-    rows: MaintenanceRowModel[];
+    /** Open requests shown, grouped by unit (common areas per property). */
+    groups: UnitGroupModel[];
+    shown: number;
+    total: number;
   };
-  messages: { unavailable: boolean; unread: number; threads: ThreadRowModel[] };
+  office: OfficeCardModel;
   activity: { unavailable: boolean; days: { label: string; items: ActivityItemModel[] }[] };
 };
 
@@ -196,12 +241,18 @@ export function buildReadyHome(input: {
   documents: PropertyDocument[] | null;
   pending: PendingPayment[] | null;
   marketed: Map<number, boolean> | null;
+  /** Off for landlords (D7). Defaults to off: this page is the landlord home. */
+  showRentAndLease?: boolean;
+  /** The landlord's office conversation (`useOfficeThreadPreview()`). */
+  office?: OfficeThreadPreview | null;
 }): ReadyHomeModel {
+  const showRentAndLease = input.showRentAndLease ?? false;
   const ids = new Set(input.properties.map((property) => property.id));
   const orders = owned(input.orders, ids);
-  const charges =
-    owned(input.charges, ids)?.filter((charge) => charge.period === currentPeriodFrom(input.now)) ?? null;
-  const leases = owned(input.leases, ids);
+  const charges = showRentAndLease
+    ? (owned(input.charges, ids)?.filter((charge) => charge.period === currentPeriodFrom(input.now)) ?? null)
+    : null;
+  const leases = showRentAndLease ? owned(input.leases, ids) : null;
   const units = input.units?.filter((unit) => ids.has(unit.property_id)) ?? null;
   const documents = owned(input.documents, ids);
   const pending =
@@ -216,8 +267,11 @@ export function buildReadyHome(input: {
   const nameDetail =
     names.length <= 2 ? names.join(" · ") : `${names.slice(0, 2).join(" · ")} · +${names.length - 2}`;
 
-  const unreadByProperty = unreadCounts(orders ?? []);
   const lateByProperty = lateCounts(charges ?? [], input.now);
+  const inputItems = rankInput({ orders, office: input.office ?? null });
+  const waitingOnLandlord = new Set(
+    inputItems.flatMap((item) => (item.id.startsWith("ask-") ? [item.id.slice(4)] : [])),
+  );
 
   return {
     greeting: greetingTitle(input.now, input.name),
@@ -252,34 +306,42 @@ export function buildReadyHome(input: {
         href: "/maintenance",
       },
     ],
+    showRentAndLease,
+    input: {
+      items: inputItems,
+      partial: orders == null || Boolean(input.office?.error),
+    },
     attention: rankAttention({
       now: input.now,
       properties: input.properties,
-      orders,
+      // Requests waiting on the landlord already lead "Needs your input".
+      orders: orders?.filter((order) => !waitingOnLandlord.has(String(order.id))) ?? null,
       charges,
       leases,
       units,
       documents,
       marketed: input.marketed,
     }),
-    attentionPartial: orders == null || charges == null || leases == null || documents == null,
+    attentionPartial:
+      orders == null || documents == null || (showRentAndLease && (charges == null || leases == null)),
     properties: input.properties.map((property) =>
       propertyCard(property, {
-        open: (orders ?? []).filter((order) => order.property_id === property.id && isOpenRequest(order)).length,
+        orders: orders == null ? null : orders.filter((order) => order.property_id === property.id),
         late: lateByProperty.get(property.id) ?? 0,
-        unread: unreadByProperty.get(property.id) ?? 0,
-        ordersKnown: orders != null,
-        chargesKnown: charges != null,
+        chargesKnown: showRentAndLease && charges != null,
+        now: input.now,
       }),
     ),
-    rent: rentCard({
-      now: input.now,
-      charges,
-      vacant,
-      pending,
-    }),
-    maintenance: maintenanceCard(orders, input.now),
-    messages: messageCard(orders, input.now),
+    rent: showRentAndLease
+      ? rentCard({
+          now: input.now,
+          charges,
+          vacant,
+          pending,
+        })
+      : null,
+    maintenance: maintenanceCard(orders, input.now, input.properties.length > 1),
+    office: officeCard(input.office ?? null, input.now),
     activity:
       orders == null
         ? { unavailable: true, days: [] }
@@ -302,12 +364,17 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
     getPropertyDocumentDownloadUrl,
     setError,
     refreshLookups,
+    isLandlord,
   } = useApp();
   const chrome = useShellChrome();
+  const office = useOfficeThreadPreview();
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [bundleLoading, setBundleLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [submitOpen, setSubmitOpen] = useState(false);
+  // Owner decision D7: rent and lease stay hidden for landlords (code kept).
+  const showRentAndLease = !(isLandlord || chrome?.role === "landlord");
 
   const propertyKey = properties.map((property) => property.id).join(",");
   const now = useMemo(() => new Date(), [propertyKey, reloadKey, portfolioLoading]);
@@ -327,6 +394,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       // Open requests cover counts, attention, maintenance, and messages.
       // A short closed slice is enough for recent completions in activity.
       // Ended leases and the full unit graph are not used by these cards.
+      // Rent, leases and pending payments are only read when they are shown (D7).
       const [openOrders, recentClosed, charges, leases, documents, pending] = await Promise.all([
         listWorkOrders({ open_only: true, skip_staff_notes: true }).then(
           (rows) => rows,
@@ -336,19 +404,23 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
           (rows) => rows,
           () => null,
         ),
-        listCharges(period).then(
-          (rows) => rows,
-          () => null,
-        ),
-        listLeases({ status: "active" }).then(
-          (rows) => rows,
-          () => null,
-        ),
+        showRentAndLease
+          ? listCharges(period).then(
+              (rows) => rows,
+              () => null,
+            )
+          : null,
+        showRentAndLease
+          ? listLeases({ status: "active" }).then(
+              (rows) => rows,
+              () => null,
+            )
+          : null,
         listPropertyDocuments().then(
           (rows) => rows,
           () => null,
         ),
-        loadPendingPayments(),
+        showRentAndLease ? loadPendingPayments() : null,
       ]);
       if (cancelled) return;
       setBundle({
@@ -371,6 +443,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
     reloadKey,
     now,
     properties.length,
+    showRentAndLease,
     listWorkOrders,
     listCharges,
     listLeases,
@@ -402,12 +475,13 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
   };
 
   const greeting = greetingTitle(now, name);
-  const onMessage = () => navigate("/messages");
+  const onMessage = () => navigate(OFFICE_HREF);
+  const onNewRequest = () => setSubmitOpen(true);
   const unitCount = properties.reduce((sum, property) => sum + (property.unit_count ?? 0), 0);
 
   let body: ReactNode;
   if (portfolioLoading) {
-    body = <LoadingHome greeting={greeting} onMessage={onMessage} />;
+    body = <LoadingHome greeting={greeting} onMessage={onMessage} onNewRequest={onNewRequest} />;
   } else if (portfolioError && properties.length === 0) {
     body = (
       <ErrorHome
@@ -431,6 +505,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
         greeting={greeting}
         subtitle={portfolioSubtitle("ready", { properties: properties.length, units: unitCount }, now)}
         onMessage={onMessage}
+        onNewRequest={onNewRequest}
       />
     );
   } else {
@@ -445,6 +520,8 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       documents: bundle.documents,
       pending: bundle.pending,
       marketed: bundle.marketed,
+      showRentAndLease,
+      office,
     });
     body = (
       <ReadyHome
@@ -453,14 +530,19 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
         onDownload={(id) => void download(id)}
         downloadingId={downloadingId}
         onRetry={retry}
+        onNewRequest={onNewRequest}
       />
     );
   }
 
   return (
     <PageShell title="Home" width="max-w-none">
-      <div className="pb-24 md:pb-0">{body}</div>
-      <PhoneActions onMessage={onMessage} />
+      {body}
+      <LandlordSubmitDialog
+        open={submitOpen}
+        onOpenChange={setSubmitOpen}
+        onCreated={() => setReloadKey((key) => key + 1)}
+      />
     </PageShell>
   );
 }
@@ -469,16 +551,18 @@ function LoadingHome({
   greeting,
   subtitle,
   onMessage,
+  onNewRequest,
 }: {
   greeting: string;
   subtitle?: string;
   onMessage: () => void;
+  onNewRequest: () => void;
 }) {
   return (
     <div role="status" aria-busy="true" aria-label="Loading home" className="flex flex-col gap-6">
       <span className="sr-only">Loading home</span>
       <div>
-        <HomeIntro greeting={greeting} subtitle={subtitle} onMessage={onMessage} />
+        <HomeIntro greeting={greeting} subtitle={subtitle} onMessage={onMessage} onNewRequest={onNewRequest} />
         {subtitle ? null : <Bone className="mt-2 h-3.5 w-60" />}
       </div>
       <div aria-hidden className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -545,9 +629,6 @@ function EmptyHome({
           Landlord Gopher links your properties once your management agreement is set up. Message us and
           we&apos;ll get you connected.
         </p>
-        <Button type="button" variant="brand" size="touch" className="mt-4 hidden md:inline-flex" onClick={onMessage}>
-          Message Landlord Gopher
-        </Button>
       </section>
     </div>
   );
@@ -559,16 +640,24 @@ export function ReadyHome({
   onDownload,
   downloadingId,
   onRetry,
+  onNewRequest,
 }: {
   model: ReadyHomeModel;
   navigate: (to: string) => void;
   onDownload: (documentId: number) => void;
   downloadingId: number | null;
   onRetry: () => void;
+  onNewRequest?: () => void;
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <HomeIntro greeting={model.greeting} subtitle={model.subtitle} onMessage={() => navigate("/messages")} />
+      <HomeIntro
+        greeting={model.greeting}
+        subtitle={model.subtitle}
+        onMessage={() => navigate(model.office.href)}
+        onNewRequest={onNewRequest}
+      />
+      <InputCard input={model.input} navigate={navigate} />
       <ul aria-label="Portfolio" className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {model.kpis.map((tile) => (
           <li key={tile.id} className="min-w-0">
@@ -586,41 +675,40 @@ export function ReadyHome({
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_23rem] xl:items-start">
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
-          <AttentionCard
+          <MaintenanceCard
             className="order-1 md:col-span-2 xl:order-none"
-            items={model.attention}
-            partial={model.attentionPartial}
+            maintenance={model.maintenance}
             navigate={navigate}
-            onDownload={onDownload}
-            downloadingId={downloadingId}
+            onRetry={onRetry}
           />
           <PropertiesSection
-            className="order-3 md:order-4 md:col-span-2 xl:order-none"
+            className="order-5 md:col-span-2 xl:order-none"
             properties={model.properties}
             navigate={navigate}
           />
           <ActivityCard
-            className="order-6 md:order-7 md:col-span-2 xl:order-none"
+            className="order-6 md:col-span-2 xl:order-none"
             activity={model.activity}
             navigate={navigate}
             onRetry={onRetry}
           />
         </div>
         <div className="contents xl:flex xl:min-w-0 xl:flex-col xl:gap-6">
-          <RentCard className="order-2 xl:order-none" rent={model.rent} onRetry={onRetry} />
-          <MaintenanceCard
-            className="order-4 md:order-3 xl:order-none"
-            maintenance={model.maintenance}
+          <OfficeCard className="order-2 xl:order-none" office={model.office} navigate={navigate} />
+          <AttentionCard
+            className="order-3 xl:order-none"
+            items={model.attention}
+            partial={model.attentionPartial}
+            emptyHint={
+              model.showRentAndLease
+                ? "Late rent, leases ending soon and anything waiting on you will show up here."
+                : "Jobs on hold, vacant units and new documents from Landlord Gopher will show up here."
+            }
             navigate={navigate}
-            onRetry={onRetry}
+            onDownload={onDownload}
+            downloadingId={downloadingId}
           />
-          <MessagesCard
-            className="order-5 xl:order-none"
-            messages={model.messages}
-            navigate={navigate}
-            onRetry={onRetry}
-          />
-          <SupportCard className="order-7 md:order-6 xl:order-none" onMessage={() => navigate("/messages")} />
+          {model.rent ? <RentCard className="order-4 xl:order-none" rent={model.rent} onRetry={onRetry} /> : null}
         </div>
       </div>
     </div>
@@ -631,10 +719,13 @@ function HomeIntro({
   greeting,
   subtitle,
   onMessage,
+  onNewRequest,
 }: {
   greeting: string;
   subtitle?: string;
   onMessage: () => void;
+  /** Omitted when there is nothing to file against (no properties yet). */
+  onNewRequest?: () => void;
 }) {
   return (
     <LandlordPageIntro
@@ -642,8 +733,19 @@ function HomeIntro({
       title={greeting}
       description={subtitle}
       action={
-        <div className="hidden md:block">
-          <Button type="button" variant="brand" size="touch" onClick={onMessage}>
+        <div className="flex flex-col gap-3 md:flex-row">
+          {onNewRequest ? (
+            <Button type="button" variant="brand" size="touch" onClick={onNewRequest}>
+              <Plus className="size-4" strokeWidth={2} aria-hidden />
+              New request
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant={onNewRequest ? "secondary" : "brand"}
+            size="touch"
+            onClick={onMessage}
+          >
             Message Landlord Gopher
           </Button>
         </div>
@@ -652,19 +754,64 @@ function HomeIntro({
   );
 }
 
-function PhoneActions({ onMessage }: { onMessage: () => void }) {
+function InputCard({ input, navigate }: { input: ReadyHomeModel["input"]; navigate: (to: string) => void }) {
+  const count = input.items.length;
   return (
-    <div className="fixed inset-x-0 bottom-[3.25rem] z-30 border-t border-border bg-background px-4 py-3 md:hidden">
-      <Button type="button" variant="brand" size="touch" className="w-full" onClick={onMessage}>
-        Message Landlord Gopher
-      </Button>
-    </div>
+    <section className="rounded-lg border border-border bg-card p-5 md:p-6" aria-labelledby="home-input">
+      <div className="flex items-center gap-3">
+        <h2 id="home-input" className="min-w-0 flex-1 lg-section text-foreground">
+          Needs your input
+        </h2>
+        {count === 0 ? (
+          <Badge variant="success">Nothing waiting</Badge>
+        ) : (
+          <Badge variant="warning">{plural(count, "item", "items")}</Badge>
+        )}
+      </div>
+      {count === 0 ? (
+        <div className="mt-4 flex gap-3">
+          <IconBox tone="success">
+            <CircleCheck className="size-5" strokeWidth={2} aria-hidden />
+          </IconBox>
+          <div className="min-w-0">
+            <p className="lg-body-medium text-foreground">Nothing needs your input right now.</p>
+            <p className="lg-caption text-muted-foreground">
+              When Landlord Gopher needs an answer from you, or sends you a message, it shows up here.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <ul className="mt-2 divide-y divide-border">
+          {input.items.map((item) => (
+            <li key={item.id}>
+              <a
+                {...go(navigate, item.href)}
+                className="flex min-h-16 items-center gap-3 py-3 transition-colors hover:bg-muted/60"
+              >
+                <IconBox tone={item.tone}>
+                  <AttentionGlyph name={item.icon} />
+                </IconBox>
+                <span className="min-w-0 flex-1">
+                  <span className="block lg-body-medium text-foreground">{item.title}</span>
+                  <span className="block lg-caption text-muted-foreground">{item.context}</span>
+                </span>
+                <ChevronRight className="size-5 shrink-0 text-foreground" strokeWidth={2} aria-hidden />
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {input.partial ? (
+        <p className="mt-3 lg-caption text-muted-foreground">Some of this list couldn&apos;t be loaded.</p>
+      ) : null}
+    </section>
   );
 }
 
 function AttentionCard({
   items,
   partial,
+  emptyHint,
   navigate,
   onDownload,
   downloadingId,
@@ -672,6 +819,7 @@ function AttentionCard({
 }: {
   items: AttentionItem[];
   partial: boolean;
+  emptyHint: string;
   navigate: (to: string) => void;
   onDownload: (documentId: number) => void;
   downloadingId: number | null;
@@ -705,9 +853,7 @@ function AttentionCard({
           </IconBox>
           <div className="min-w-0">
             <p className="lg-body-medium text-foreground">Nothing needs you right now.</p>
-            <p className="lg-caption text-muted-foreground">
-              Late rent, leases ending soon and anything waiting on you will show up here.
-            </p>
+            <p className="lg-caption text-muted-foreground">{emptyHint}</p>
           </div>
         </div>
       ) : (
@@ -760,65 +906,55 @@ function PropertiesSection({
 }) {
   return (
     <section className={className} aria-labelledby="home-properties">
-      <div className="rounded-lg border border-border bg-card p-4 md:rounded-none md:border-0 md:bg-transparent md:p-0">
-        <div className="flex items-center justify-between gap-3">
-          <h2 id="home-properties" className="lg-section text-foreground">
-            Your properties
-          </h2>
-          <Button type="button" variant="ghost" size="touch" onClick={() => navigate("/properties")}>
-            <span className="xl:hidden">View all</span>
-            <span className="hidden xl:inline">View all properties</span>
-          </Button>
-        </div>
-        <ul className="mt-1 divide-y divide-border md:hidden">
-          {properties.map((property) => (
-            <li key={property.id}>
-              <a {...go(navigate, property.href)} className="flex min-h-16 items-center gap-3 py-3">
-                <IconBox tone="muted">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="home-properties" className="lg-section text-foreground">
+          Your properties
+        </h2>
+        <Button type="button" variant="ghost" size="touch" onClick={() => navigate("/properties")}>
+          <span className="xl:hidden">View all</span>
+          <span className="hidden xl:inline">View all properties</span>
+        </Button>
+      </div>
+      <ul className="mt-2 grid grid-cols-1 gap-4 md:grid-cols-2">
+        {properties.map((property) => (
+          <li key={property.id} className="min-w-0">
+            <a
+              {...go(navigate, property.href)}
+              className="flex h-full flex-col rounded-lg border border-border bg-card p-4 transition-colors hover:border-ring focus-visible:border-ring md:p-5"
+            >
+              <span className="flex items-center gap-3">
+                <IconBox tone="brand">
                   <Building2 className="size-5" strokeWidth={2} aria-hidden />
                 </IconBox>
                 <span className="min-w-0 flex-1">
-                  <span className="block lg-body-medium text-foreground">{property.name}</span>
-                  <span className="block lg-caption text-muted-foreground">{property.phoneMeta}</span>
-                </span>
-                <ChevronRight className="size-5 shrink-0" strokeWidth={2} aria-hidden />
-              </a>
-            </li>
-          ))}
-        </ul>
-        <ul className="mt-4 hidden gap-4 md:grid md:grid-cols-2">
-          {properties.map((property) => (
-            <li key={property.id} className="min-w-0">
-              <a
-                {...go(navigate, property.href)}
-                className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-ring"
-              >
-                <span className="flex h-[140px] flex-col items-center justify-center gap-1.5 bg-muted text-muted-foreground">
-                  <Building2 className="size-5" strokeWidth={2} aria-hidden />
-                  <span className="lg-caption">Property photo</span>
-                </span>
-                <span className="flex flex-col gap-2 px-5 pb-5 pt-4">
-                  <LandlordPropertyHeading name={property.name} />
-                  {property.address ? <span className="lg-body text-muted-foreground">{property.address}</span> : null}
-                  <span className="flex flex-wrap gap-1.5">
-                    {property.chips.map((chip) => (
-                      <Badge key={chip.label} variant={chip.tone === "neutral" ? "neutral" : chip.tone}>
-                        {chip.label}
-                      </Badge>
-                    ))}
-                  </span>
-                  {property.unread > 0 ? (
-                    <span className="flex items-center gap-2 lg-caption text-foreground">
-                      <span className="size-2 rounded-full bg-foreground" aria-hidden />
-                      {plural(property.unread, "unread message", "unread messages")}
-                    </span>
+                  <span className="block truncate lg-body-medium text-foreground">{property.name}</span>
+                  {property.address ? (
+                    <span className="block truncate lg-body text-muted-foreground">{property.address}</span>
                   ) : null}
                 </span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      </div>
+                <ChevronRight className="size-5 shrink-0 text-foreground" strokeWidth={2} aria-hidden />
+              </span>
+              <span className="mt-4 grid grid-cols-3 gap-3 border-t border-border pt-4">
+                {property.stats.map((stat) => (
+                  <span key={stat.label} className="flex min-w-0 flex-col gap-0.5">
+                    <span className="lg-caption text-muted-foreground">{stat.label}</span>
+                    <span className="lg-body text-foreground">{stat.value}</span>
+                  </span>
+                ))}
+              </span>
+              {property.chips.length > 0 ? (
+                <span className="mt-3 flex flex-wrap gap-1.5">
+                  {property.chips.map((chip) => (
+                    <Badge key={chip.label} variant={chip.tone === "neutral" ? "neutral" : chip.tone}>
+                      {chip.label}
+                    </Badge>
+                  ))}
+                </span>
+              ) : null}
+            </a>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -892,7 +1028,7 @@ function MaintenanceCard({
     <section className={cn("rounded-lg border border-border bg-card p-5 md:p-6", className)} aria-labelledby="home-maintenance">
       <div className="flex items-center justify-between gap-2">
         <h2 id="home-maintenance" className="lg-section text-foreground">
-          Maintenance
+          Open requests
         </h2>
         <Button type="button" variant="ghost" size="touch" onClick={() => navigate("/maintenance")}>
           View all
@@ -900,108 +1036,149 @@ function MaintenanceCard({
       </div>
       {maintenance.unavailable ? (
         <div className="mt-3">
-          <p className="lg-body text-muted-foreground">Maintenance couldn&apos;t be loaded.</p>
+          <p className="lg-body text-muted-foreground">Requests couldn&apos;t be loaded.</p>
           <Button type="button" variant="secondary" size="touch" className="mt-3" onClick={onRetry}>
             Retry
           </Button>
         </div>
       ) : (
-        <div className="mt-2">
-          <p className="text-lg font-semibold leading-[1.625rem] text-foreground xl:text-2xl xl:leading-8">
-            {maintenance.countLine}
-          </p>
+        <div className="mt-1">
+          <p className="lg-body text-foreground">{maintenance.countLine}</p>
           {maintenance.spendDesktop ? (
-            <p className="mt-1 lg-body text-foreground">
+            <p className="mt-0.5 lg-caption text-muted-foreground">
               <span className="xl:hidden">{maintenance.spendCompact}</span>
               <span className="hidden xl:inline">{maintenance.spendDesktop}</span>
             </p>
-          ) : (
-            <p className="mt-1 lg-caption text-muted-foreground">Spend isn&apos;t on these requests yet.</p>
-          )}
-          {maintenance.rows.length === 0 ? (
+          ) : null}
+          {maintenance.groups.length === 0 ? (
             <p className="mt-4 lg-body text-muted-foreground">No open requests.</p>
           ) : (
-            <ul className="mt-3 divide-y divide-border">
-              {maintenance.rows.map((row) => (
-                <li key={row.id}>
-                  <a {...go(navigate, row.href)} className="flex items-center gap-3 py-3 hover:bg-muted/60">
-                    <span className="min-w-0 flex-1">
-                      <span className="block lg-body-medium text-foreground">{row.title}</span>
-                      <StatusChip className="mt-1" status={row.status} nextStep={row.nextStep} />
-                    </span>
-                    <ChevronRight className="size-5 shrink-0" strokeWidth={2} aria-hidden />
-                  </a>
-                </li>
+            <div className="mt-4 flex flex-col gap-4">
+              {maintenance.groups.map((group) => (
+                <div key={group.id}>
+                  <LandlordScopeHeading label={group.label} />
+                  <ul className="mt-1 divide-y divide-border rounded-md border border-border">
+                    {group.rows.map((row) => (
+                      <li key={row.id}>
+                        <a
+                          {...go(navigate, row.href)}
+                          className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/60 md:px-4"
+                        >
+                          <span className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-start md:gap-4">
+                            <span className="min-w-0 md:flex-1">
+                              <span className="block lg-body-medium text-foreground">{row.title}</span>
+                              <span className="block lg-caption text-muted-foreground">{row.meta}</span>
+                            </span>
+                            <span className="flex flex-col items-start gap-1 md:w-[16rem] md:shrink-0">
+                              <span className="flex flex-wrap items-center gap-2">
+                                <StatusChip status={row.status} />
+                                {row.priority ? (
+                                  <Badge variant={row.priority === "Emergency" ? "destructive" : "warning"}>
+                                    {row.priority}
+                                  </Badge>
+                                ) : null}
+                              </span>
+                              {row.nextStep ? (
+                                <span className="block lg-caption text-muted-foreground">{row.nextStep}</span>
+                              ) : null}
+                            </span>
+                          </span>
+                          <ChevronRight className="size-5 shrink-0 text-foreground" strokeWidth={2} aria-hidden />
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
+          {maintenance.total > maintenance.shown ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="touch"
+              className="mt-4 w-full"
+              onClick={() => navigate("/maintenance")}
+            >
+              See all {maintenance.total} open requests
+            </Button>
+          ) : null}
         </div>
       )}
     </section>
   );
 }
 
-function MessagesCard({
-  messages,
+function OfficeCard({
+  office,
   navigate,
-  onRetry,
   className,
 }: {
-  messages: ReadyHomeModel["messages"];
+  office: OfficeCardModel;
   navigate: (to: string) => void;
-  onRetry: () => void;
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-lg border border-border bg-card p-5 md:p-6", className)} aria-labelledby="home-messages">
+    <section className={cn("rounded-lg border border-border bg-card p-5 md:p-6", className)} aria-labelledby="home-office">
       <div className="flex items-center gap-3">
-        <h2 id="home-messages" className="min-w-0 flex-1 lg-section text-foreground">
+        <h2 id="home-office" className="min-w-0 flex-1 lg-section text-foreground">
           Messages
         </h2>
-        {!messages.unavailable && messages.threads.length > 0 ? (
-          <Badge variant={messages.unread > 0 ? "warning" : "success"}>
-            {messages.unread > 0 ? `${messages.unread} unread` : "All read"}
+        {office.state === "ready" ? (
+          <Badge variant={office.unread > 0 ? "warning" : "success"}>
+            {office.unread > 0 ? `${office.unread} unread` : "All read"}
           </Badge>
         ) : null}
       </div>
-      {messages.unavailable ? (
-        <div className="mt-3">
-          <p className="lg-body text-muted-foreground">Messages couldn&apos;t be loaded.</p>
-          <Button type="button" variant="secondary" size="touch" className="mt-3" onClick={onRetry}>
-            Retry
-          </Button>
+      <p className="mt-1 lg-caption text-muted-foreground">Your conversation with Landlord Gopher</p>
+      {office.state === "loading" ? (
+        <div aria-hidden className="mt-4 flex gap-3">
+          <Bone className="size-9 rounded-full" />
+          <div className="flex-1 space-y-2 py-1">
+            <Bone className="h-3 w-32" />
+            <Bone className="h-2.5 w-full" />
+          </div>
         </div>
-      ) : messages.threads.length === 0 ? (
-        <p className="mt-3 lg-body text-muted-foreground">No conversations yet.</p>
+      ) : office.state === "error" ? (
+        <p className="mt-4 lg-body text-muted-foreground">
+          Messages couldn&apos;t be loaded. Open the conversation to try again.
+        </p>
+      ) : office.state === "empty" ? (
+        <p className="mt-4 lg-body text-muted-foreground">
+          No messages yet. Ask Landlord Gopher anything about your properties or requests.
+        </p>
       ) : (
-        <ul className="mt-2 divide-y divide-border">
-          {messages.threads.map((thread) => (
-            <li key={thread.id}>
-              <a {...go(navigate, thread.href)} className="flex min-h-14 items-center gap-3 py-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-foreground">
-                  {thread.icon === "user" ? (
-                    <User className="size-5" strokeWidth={2} aria-hidden />
-                  ) : (
-                    <Wrench className="size-5" strokeWidth={2} aria-hidden />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className={cn("min-w-0 flex-1 truncate text-foreground", thread.unread ? "lg-body-medium" : "lg-body")}>
-                      {thread.name}
-                    </span>
-                    <span className="shrink-0 lg-caption text-muted-foreground">{thread.time}</span>
-                  </span>
-                  <span className="block truncate lg-caption text-muted-foreground">{thread.preview}</span>
-                </span>
-                {thread.unread ? <span className="size-2.5 shrink-0 rounded-full bg-foreground" aria-label="Unread" /> : null}
-              </a>
-            </li>
-          ))}
-        </ul>
+        <a {...go(navigate, office.href)} className="mt-3 flex min-h-14 items-start gap-3 py-2">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-tint text-foreground">
+            <MessageSquare className="size-5" strokeWidth={2} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              <span
+                className={cn(
+                  "min-w-0 flex-1 truncate text-foreground",
+                  office.unread > 0 ? "lg-body-medium" : "lg-body",
+                )}
+              >
+                {office.from === "office" ? "Landlord Gopher" : "You"}
+              </span>
+              <span className="shrink-0 lg-caption text-muted-foreground">{office.time}</span>
+            </span>
+            <span className="line-clamp-2 lg-caption text-muted-foreground">{office.preview}</span>
+          </span>
+          {office.unread > 0 ? (
+            <span className="mt-2 size-2.5 shrink-0 rounded-full bg-foreground" aria-label="Unread" />
+          ) : null}
+        </a>
       )}
-      <Button type="button" variant="secondary" size="touch" className="mt-3 w-full" onClick={() => navigate("/messages")}>
-        Open messages
+      <Button
+        type="button"
+        variant="secondary"
+        size="touch"
+        className="mt-4 w-full"
+        onClick={() => navigate(office.href)}
+      >
+        Open conversation
       </Button>
     </section>
   );
@@ -1071,22 +1248,6 @@ function ActivityCard({
   );
 }
 
-function SupportCard({ onMessage, className }: { onMessage: () => void; className?: string }) {
-  return (
-    <section className={cn("rounded-lg border border-border bg-card p-5 md:p-6", className)} aria-labelledby="home-support">
-      <h2 id="home-support" className="lg-section text-foreground">
-        A little help, when you need it.
-      </h2>
-      <p className="mt-3 hidden lg-body text-muted-foreground md:block">Your Landlord Gopher contact</p>
-      <p className="mt-2 lg-body text-foreground">Support contact not configured.</p>
-      <p className="mt-1 lg-caption text-muted-foreground">Message us and we&apos;ll get you connected.</p>
-      <Button type="button" variant="secondary" size="touch" className="mt-4 w-full" onClick={onMessage}>
-        Message
-      </Button>
-    </section>
-  );
-}
-
 function IconBox({
   tone,
   size = "md",
@@ -1121,6 +1282,7 @@ function AttentionGlyph({ name }: { name: AttentionIcon }) {
   if (name === "alert") return <TriangleAlert className={className} strokeWidth={2} aria-hidden />;
   if (name === "calendar") return <Calendar className={className} strokeWidth={2} aria-hidden />;
   if (name === "wrench") return <Wrench className={className} strokeWidth={2} aria-hidden />;
+  if (name === "message") return <MessageSquare className={className} strokeWidth={2} aria-hidden />;
   return <Building2 className={className} strokeWidth={2} aria-hidden />;
 }
 
@@ -1340,38 +1502,33 @@ function vacantItems(
 
 function propertyCard(
   property: Property,
-  facts: { open: number; late: number; unread: number; ordersKnown: boolean; chargesKnown: boolean },
+  facts: { orders: WorkOrder[] | null; late: number; chargesKnown: boolean; now: Date },
 ): PropertyCardModel {
   const units = property.unit_count ?? 0;
   const occupied = property.occupied_count ?? 0;
-  const chips: PropertyCardModel["chips"] = [
-    { label: plural(units, "unit", "units"), tone: "neutral" },
-    { label: `${occupied} of ${units} occupied`, tone: "neutral" },
-  ];
-  if (facts.chargesKnown && facts.late > 0) chips.push({ label: `Rent · ${facts.late} late`, tone: "warning" });
-  if (facts.ordersKnown) {
-    chips.push(
-      facts.open > 0
-        ? { label: plural(facts.open, "open request", "open requests"), tone: "info" }
-        : { label: "No open requests", tone: "neutral" },
-    );
-  }
-  const phone = [
-    `${occupied} of ${units} occupied`,
-    facts.chargesKnown && facts.late > 0 ? `Rent: ${facts.late} late` : null,
-    facts.ordersKnown ? `${facts.open} open` : null,
-    facts.unread > 0 ? `${facts.unread} unread` : null,
-  ]
+  const vacant = Math.max(0, units - occupied);
+  const open = facts.orders?.filter(isOpenRequest).length ?? null;
+  const last = (facts.orders ?? [])
+    .flatMap((order) => [order.created_at, order.completed_at ?? ""])
     .filter(Boolean)
-    .join(" · ");
+    .sort()
+    .pop();
+  const chips: PropertyCardModel["chips"] = [];
+  if (facts.chargesKnown && facts.late > 0) chips.push({ label: `Rent · ${facts.late} late`, tone: "warning" });
   return {
     id: property.id,
     name: property.name,
     address: [property.address, property.city].filter(Boolean).join(", "),
     href: `/properties/${property.id}`,
+    stats: [
+      {
+        label: "Units",
+        value: units === 0 ? "None yet" : vacant > 0 ? `${units} · ${vacant} vacant` : `${units} · ${occupied} occupied`,
+      },
+      { label: "Open requests", value: open == null ? "—" : String(open) },
+      { label: "Last activity", value: last ? relativeDay(last, facts.now) : "—" },
+    ],
     chips,
-    unread: facts.unread,
-    phoneMeta: phone,
   };
 }
 
@@ -1443,9 +1600,21 @@ function pendingLine(pending: PendingPayment[] | null): string | null {
     : `Awaiting verification ${formatMoney(total)}`;
 }
 
-function maintenanceCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel["maintenance"] {
+function maintenanceCard(
+  orders: WorkOrder[] | null,
+  now: Date,
+  multiProperty: boolean,
+): ReadyHomeModel["maintenance"] {
   if (orders == null) {
-    return { unavailable: true, countLine: "", spendDesktop: null, spendCompact: null, rows: [] };
+    return {
+      unavailable: true,
+      countLine: "",
+      spendDesktop: null,
+      spendCompact: null,
+      groups: [],
+      shown: 0,
+      total: 0,
+    };
   }
   const open = orders.filter(isOpenRequest);
   const hold = open.filter((order) => order.status === "on_hold").length;
@@ -1460,49 +1629,134 @@ function maintenanceCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel[
     .filter((order) => at(order) >= yearStart)
     .reduce((sum, order) => sum + Number(order.landlord_price), 0);
   const spendCompact = priced.length ? `${formatMoney(monthSpend)} this month · ${formatMoney(yearSpend)} this year` : null;
+
+  const groups = groupByUnit(open, multiProperty);
+  let room = OPEN_REQUEST_CAP;
+  const shownGroups: UnitGroupModel[] = [];
+  for (const group of groups) {
+    if (room <= 0) break;
+    const rows = group.orders.slice(0, room).map((order) => openRequestRow(order, now));
+    room -= rows.length;
+    shownGroups.push({ id: group.id, label: group.label, rows });
+  }
+  const shown = shownGroups.reduce((sum, group) => sum + group.rows.length, 0);
+
   return {
     unavailable: false,
     countLine: `${open.length} open · ${hold} on hold`,
     spendDesktop: spendCompact ? `Spend: ${spendCompact}` : null,
     spendCompact,
-    rows: open
-      .slice()
-      .sort((a, b) => b.created_at.localeCompare(a.created_at))
-      .slice(0, MAINTENANCE_CAP)
-      .map((order) => ({
-        id: order.id,
-        title: maintenanceTitle(order),
-        href: `/maintenance/${order.id}`,
-        status: toRequestStatus(order),
-        nextStep: requestNextStep(order),
-      })),
+    groups: shownGroups,
+    shown,
+    total: open.length,
   };
 }
 
-function messageCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel["messages"] {
-  if (orders == null) return { unavailable: true, unread: 0, threads: [] };
-  const byId = new Map(orders.map((order) => [order.id, order]));
-  const all = threadsFromWorkOrders(orders, { now });
-  const threads = all.slice(0, MESSAGE_CAP);
+/**
+ * Open requests by unit. Units sort by property, then unit name (1A before
+ * 2B, 2 before 10); each property's common-area requests come after its units.
+ * Newest request first inside a group.
+ */
+function groupByUnit(
+  orders: WorkOrder[],
+  multiProperty: boolean,
+): { id: string; label: string; orders: WorkOrder[] }[] {
+  const groups = new Map<
+    string,
+    { id: string; label: string; property: string; unit: string | null; orders: WorkOrder[] }
+  >();
+  for (const order of orders) {
+    const property = order.property_name?.trim() || "Property";
+    const unit = order.unit_id != null ? order.unit_name?.trim() || `#${order.unit_id}` : null;
+    const id = order.unit_id != null ? `unit-${order.unit_id}` : `common-${order.property_id ?? "none"}`;
+    const place = unit ? unitLabel(unit) : "Common area";
+    const label = multiProperty ? `${property} · ${place}` : place;
+    const group = groups.get(id) ?? { id, label, property, unit, orders: [] };
+    group.orders.push(order);
+    groups.set(id, group);
+  }
+  return [...groups.values()]
+    .sort((a, b) => {
+      const byProperty = a.property.localeCompare(b.property);
+      if (byProperty !== 0) return byProperty;
+      if (a.unit == null || b.unit == null) return a.unit == null ? (b.unit == null ? 0 : 1) : -1;
+      return a.unit.localeCompare(b.unit, undefined, { numeric: true });
+    })
+    .map((group) => ({
+      id: group.id,
+      label: group.label,
+      orders: group.orders.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    }));
+}
+
+function openRequestRow(order: WorkOrder, now: Date): MaintenanceRowModel {
+  const priority = priorityLabel(order.priority);
+  const day = relativeDay(order.created_at, now);
+  const reported = /^(Today|Yesterday)$/.test(day) ? day.toLowerCase() : day;
   return {
-    unavailable: false,
-    unread: all.filter((thread) => thread.unread).length,
-    threads: threads.map((thread) => {
-      const order = thread.requestId != null ? byId.get(thread.requestId) : undefined;
-      const tenant = order ? person(order.tenant_first_name, order.tenant_last_name) : "";
-      const place = order?.unit_name
-        ? `Unit ${order.unit_name}`
-        : order?.property_name || "";
-      return {
-        id: thread.id,
-        name: [tenant || order?.title || thread.title, place].filter(Boolean).join(" · "),
-        preview: thread.preview,
-        time: formatMessageTime(thread.updatedAt, now),
-        unread: thread.unread,
-        href: `/messages?thread=${encodeURIComponent(thread.id)}`,
-        icon: tenant ? "user" : "wrench",
-      };
-    }),
+    id: order.id,
+    title: order.title,
+    meta: [requestLabel(order), reported ? `reported ${reported}` : null].filter(Boolean).join(" · "),
+    href: `/maintenance/${order.id}`,
+    status: toRequestStatus(order),
+    priority: priority === "Normal" ? null : priority,
+    nextStep: landlordNextStep(order).text,
+  };
+}
+
+/**
+ * "Needs your input": requests where Landlord Gopher is waiting on the
+ * landlord (`landlordNextStep().who === "landlord"`), then unread office
+ * messages. The office row never quotes request comments or tenant names.
+ */
+function rankInput(input: { orders: WorkOrder[] | null; office: OfficeThreadPreview | null }): InputItem[] {
+  const items: InputItem[] = [];
+  const office = input.office;
+  if (office && !office.loading && office.unread > 0) {
+    const last = office.lastMessage;
+    items.push({
+      id: "office-unread",
+      score: 2000,
+      tone: "info",
+      icon: "message",
+      title: `${plural(office.unread, "new message", "new messages")} from Landlord Gopher`,
+      context:
+        last && last.author_role === "admin"
+          ? clip(last.body, 90)
+          : "Open the conversation to read and reply.",
+      href: OFFICE_HREF,
+    });
+  }
+  for (const order of input.orders ?? []) {
+    if (!isOpenRequest(order)) continue;
+    const next = landlordNextStep(order);
+    if (next.who !== "landlord") continue;
+    items.push({
+      id: `ask-${order.id}`,
+      score: 1500,
+      tone: "warning",
+      icon: "alert",
+      title: `${requestLabel(order)} ${order.title}`,
+      context: [requestPlace(order), next.text].filter(Boolean).join(" · "),
+      href: `/maintenance/${order.id}`,
+    });
+  }
+  return items.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+}
+
+function officeCard(preview: OfficeThreadPreview | null, now: Date): OfficeCardModel {
+  const href = OFFICE_HREF;
+  if (preview == null || preview.loading) return { state: "loading", unread: 0, href };
+  if (preview.error && !preview.lastMessage) return { state: "error", unread: 0, href };
+  const last = preview.lastMessage;
+  if (!last) return { state: "empty", unread: preview.unread, href };
+  return {
+    state: "ready",
+    unread: preview.unread,
+    href,
+    from: last.author_role === "admin" ? "office" : "you",
+    preview: clip(last.body, OFFICE_PREVIEW_CHARS),
+    time: formatMessageTime(last.created_at, now),
   };
 }
 
@@ -1564,18 +1818,6 @@ function groupActivity(items: ActivityItemModel[], now: Date): { label: string; 
   return groups;
 }
 
-function unreadCounts(orders: WorkOrder[]): Map<number, number> {
-  const byId = new Map(orders.map((order) => [order.id, order]));
-  const counts = new Map<number, number>();
-  for (const thread of threadsFromWorkOrders(orders)) {
-    if (!thread.unread || thread.requestId == null) continue;
-    const propertyId = byId.get(thread.requestId)?.property_id;
-    if (propertyId == null) continue;
-    counts.set(propertyId, (counts.get(propertyId) ?? 0) + 1);
-  }
-  return counts;
-}
-
 function lateCounts(charges: RentCharge[], now: Date): Map<number, number> {
   const counts = new Map<number, number>();
   const today = toIsoDate(now);
@@ -1588,9 +1830,36 @@ function lateCounts(charges: RentCharge[], now: Date): Map<number, number> {
   return counts;
 }
 
-function maintenanceTitle(order: WorkOrder): string {
-  const where = order.unit_name?.trim() || order.property_name?.trim() || "";
-  return `${requestLabel(order)} ${order.title}${where ? ` · ${where}` : ""}`;
+/** "1A" → "Unit 1A"; a name that already says "Unit …" is kept. */
+function unitLabel(name: string): string {
+  const trimmed = name.trim();
+  return /^unit\b/i.test(trimmed) ? trimmed : `Unit ${trimmed}`;
+}
+
+/** "Maple Court · Unit 1A" or "Maple Court · common area". */
+function requestPlace(order: WorkOrder): string {
+  const property = order.property_name?.trim() ?? "";
+  const unit = order.unit_name?.trim();
+  return [property, unit ? unitLabel(unit) : "common area"].filter(Boolean).join(" · ");
+}
+
+/** "Today", "Yesterday", or "Tue 3 Nov". */
+function relativeDay(iso: string, now: Date): string {
+  const key = dayKey(iso);
+  if (!key) return "";
+  const diff = daysBetween(key, toIsoDate(now));
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return new Date(`${key}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
 }
 
 function activityPlace(order: WorkOrder, when: string): string {

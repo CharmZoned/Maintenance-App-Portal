@@ -5,6 +5,8 @@ import { ShellChromeProvider } from "@/components/chrome/shell-chrome-context";
 import { AppContext } from "@/context";
 import type { AppStateValue } from "@/hooks/use-app-state";
 import { formatMoney } from "@/lib/utils";
+import type { OfficeThreadPreview } from "@/hooks/use-office-thread-preview";
+import type { OfficeMessage } from "@/lib/office-messages";
 import type { Lease, Property, PropertyDocument, RentCharge, Unit, WorkOrder } from "@/types";
 import {
   LandlordHomePage,
@@ -262,6 +264,7 @@ describe("buildReadyHome", () => {
       ],
       pending: [{ amount: 250, method: "zelle", propertyId: 1 }],
       marketed: new Map([[2, false]]),
+      showRentAndLease: true,
     });
 
     expect(model.attention.map((item) => item.id)).toEqual([
@@ -290,11 +293,13 @@ describe("buildReadyHome", () => {
       expect(vacant.context).toBe("Vacant · Ready");
     }
     expect(model.attentionPartial).toBe(false);
-    expect(model.rent.headline).toContain(formatMoney(725 + 400));
-    expect(model.rent.pendingLine).toBe(`Awaiting verification ${formatMoney(250)} · Zelle`);
+    expect(model.rent?.headline).toContain(formatMoney(725 + 400));
+    expect(model.rent?.pendingLine).toBe(`Awaiting verification ${formatMoney(250)} · Zelle`);
     expect(model.maintenance.countLine).toBe("1 open · 1 on hold");
-    expect(model.maintenance.rows[0]?.title).toBe("#MR-000995 Boiler · Birch House");
-    expect(model.maintenance.rows[0]?.href).toBe("/maintenance/995");
+    expect(model.maintenance.groups.map((group) => group.label)).toEqual(["Birch House · Common area"]);
+    expect(model.maintenance.groups[0]?.rows[0]?.title).toBe("Boiler");
+    expect(model.maintenance.groups[0]?.rows[0]?.meta).toContain("#MR-000995 · reported ");
+    expect(model.maintenance.groups[0]?.rows[0]?.href).toBe("/maintenance/995");
   });
 
   it("describes an all-clear month without inventing a verification queue", () => {
@@ -317,15 +322,16 @@ describe("buildReadyHome", () => {
       documents: [],
       pending: [],
       marketed: new Map(),
+      showRentAndLease: true,
     });
 
     expect(model.attention).toEqual([]);
-    expect(model.rent.title).toBe(`Rent · ${month}`);
-    expect(model.rent.headline).toBe(`All ${formatMoney(2900)} collected`);
-    expect(model.rent.percent).toBe(100);
-    expect(model.rent.caption).toBe("Nothing outstanding");
-    expect(model.rent.pendingLine).toBe("No payments awaiting verification");
-    expect(model.rent.badges.map((badge) => badge.label)).toEqual(["Paid 2", "Vacant 1"]);
+    expect(model.rent?.title).toBe(`Rent · ${month}`);
+    expect(model.rent?.headline).toBe(`All ${formatMoney(2900)} collected`);
+    expect(model.rent?.percent).toBe(100);
+    expect(model.rent?.caption).toBe("Nothing outstanding");
+    expect(model.rent?.pendingLine).toBe("No payments awaiting verification");
+    expect(model.rent?.badges.map((badge) => badge.label)).toEqual(["Paid 2", "Vacant 1"]);
     expect(model.kpis.find((tile) => tile.id === "occupancy")?.value).toBe("67%");
 
     const html = visibleText(renderReady(model));
@@ -334,7 +340,7 @@ describe("buildReadyHome", () => {
     expect(html).toContain("All clear");
     expect(html).toContain("No payments awaiting verification");
     expect(html).toContain("The rent roll isn't in this portal yet.");
-    expect(html).toContain("Support contact not configured.");
+    expect(html).toContain("Nothing needs your input right now.");
     expect(html).not.toContain("Document shared");
   });
 
@@ -350,10 +356,11 @@ describe("buildReadyHome", () => {
       documents: [],
       pending: null,
       marketed: null,
+      showRentAndLease: true,
     });
     expect(model.attentionPartial).toBe(true);
-    expect(model.rent.unavailable).toBe(true);
-    expect(model.rent.pendingLine).toBeNull();
+    expect(model.rent?.unavailable).toBe(true);
+    expect(model.rent?.pendingLine).toBeNull();
     expect(model.kpis.find((tile) => tile.id === "requests")?.value).toBe("—");
     const html = visibleText(renderReady(model));
     expect(html).toContain("Some of this list couldn't be loaded.");
@@ -399,6 +406,7 @@ describe("LandlordHomePage states", () => {
     expect(html).toContain("Loading home");
     expect(html).toContain("Good ");
     expect(html).toContain("Lena");
+    expect(html).toContain("New request");
     expect(html).toContain("Message Landlord Gopher");
     expect(html).not.toContain("Report an issue");
   });
@@ -420,37 +428,14 @@ describe("LandlordHomePage states", () => {
       "Landlord Gopher links your properties once your management agreement is set up. Message us and we'll get you connected.",
     );
     expect(html).toContain(`No properties linked yet · ${monthYear}`);
+    expect(html).toContain("Message Landlord Gopher");
+    expect(html).not.toContain("New request");
     expect(html).not.toContain("Report an issue");
   });
 });
 
 describe("landlord home review fixes", () => {
-  it("counts an unread thread that sits past the three shown", () => {
-    const model = buildReadyHome({
-      now,
-      name: "Lena",
-      properties: [maple],
-      orders: [
-        order({ id: 1, title: "Newest closed", status: "closed", created_at: "2026-11-16T08:00:00", property_id: 1 }),
-        order({ id: 2, title: "Second closed", status: "closed", created_at: "2026-11-15T08:00:00", property_id: 1 }),
-        order({ id: 3, title: "Third closed", status: "closed", created_at: "2026-11-14T08:00:00", property_id: 1 }),
-        order({ id: 4, title: "Older open", status: "open", created_at: "2026-11-04T08:00:00", property_id: 1 }),
-      ],
-      charges: [],
-      leases: [],
-      units: [],
-      documents: [],
-      pending: [],
-      marketed: null,
-    });
-
-    expect(model.messages.unavailable).toBe(false);
-    expect(model.messages.unread).toBe(1);
-    expect(model.messages.threads.map((thread) => thread.id)).toEqual(["wo:1", "wo:2", "wo:3"]);
-    expect(model.messages.threads.every((thread) => !thread.unread)).toBe(true);
-  });
-
-  it("treats a failed request load as unavailable instead of an empty inbox", () => {
+  it("treats a failed request load as unavailable instead of an empty list", () => {
     const model = buildReadyHome({
       now,
       name: "Lena",
@@ -464,19 +449,16 @@ describe("landlord home review fixes", () => {
       marketed: null,
     });
 
-    expect(model.messages.unavailable).toBe(true);
-    expect(model.messages.threads).toEqual([]);
-    expect(model.messages.unread).toBe(0);
     expect(model.activity.unavailable).toBe(true);
     expect(model.activity.days).toEqual([]);
     expect(model.maintenance.unavailable).toBe(true);
+    expect(model.input.partial).toBe(true);
 
     const html = visibleText(renderReady(model));
-    expect(html).toContain("Messages couldn't be loaded.");
+    expect(html).toContain("Requests couldn't be loaded.");
     expect(html).toContain("Recent activity couldn't be loaded.");
-    expect(html).not.toContain("No conversations yet.");
+    expect(html).not.toContain("No open requests.");
     expect(html).not.toContain("Nothing new across your properties.");
-    expect(html).not.toContain("All read");
   });
 
   it("skips zero balances and dates that cannot be counted", () => {
@@ -498,6 +480,7 @@ describe("landlord home review fixes", () => {
       documents: [],
       pending: [],
       marketed: null,
+      showRentAndLease: true,
     });
 
     const titles = model.attention.flatMap((item) => (item.kind === "link" ? [item.title] : []));
@@ -506,5 +489,237 @@ describe("landlord home review fixes", () => {
     expect(model.attention.map((item) => item.id)).toEqual(["rent-2", "lease-9"]);
     const overdue = model.attention[0];
     if (overdue.kind === "link") expect(overdue.context).not.toContain("NaN");
+  });
+});
+
+function officeMessage(partial: Partial<OfficeMessage> & Pick<OfficeMessage, "id" | "body">): OfficeMessage {
+  return {
+    created_at: "2026-11-16T08:15:00",
+    thread_user_id: "landlord-user",
+    author_user_id: "admin-user",
+    author_role: "admin",
+    request_id: null,
+    ...partial,
+  };
+}
+
+function preview(partial: Partial<OfficeThreadPreview>): OfficeThreadPreview {
+  return { lastMessage: null, unread: 0, loading: false, error: null, ...partial };
+}
+
+function landlordHome(input: Partial<Parameters<typeof buildReadyHome>[0]> = {}) {
+  return buildReadyHome({
+    now,
+    name: "Lena",
+    properties: [maple],
+    orders: [],
+    charges: [],
+    leases: [],
+    units: [],
+    documents: [],
+    pending: [],
+    marketed: null,
+    ...input,
+  });
+}
+
+function officeSection(html: string): string {
+  const start = html.indexOf('aria-labelledby="home-office"');
+  expect(start).toBeGreaterThan(-1);
+  return html.slice(start, html.indexOf("</section>", start));
+}
+
+describe("landlord home (LG-D)", () => {
+  it("hides rent, rent rows and lease reminders for landlords by default (D7)", () => {
+    const model = landlordHome({
+      charges: [
+        charge({ id: 10, status: "overdue", amount: 725, amount_paid: 0, unit_name: "1B", property_name: "Maple Court" }),
+      ],
+      leases: [lease({ id: 4, end_date: "2026-12-01", unit_name: "1B" })],
+      pending: [{ amount: 250, method: "zelle", propertyId: 1 }],
+    });
+    expect(model.showRentAndLease).toBe(false);
+    expect(model.rent).toBeNull();
+    expect(model.attention.some((item) => item.id.startsWith("rent-") || item.id.startsWith("lease-"))).toBe(false);
+    expect(model.properties[0]?.chips).toEqual([]);
+
+    const html = visibleText(renderReady(model));
+    expect(html).not.toContain("Rent ·");
+    expect(html).not.toContain("rent roll");
+    expect(html).not.toContain("Lease ends");
+    expect(html).not.toContain("Awaiting verification");
+    expect(html).not.toContain("Late rent");
+  });
+
+  it("lists requests waiting on the landlord and unread office messages under Needs your input", () => {
+    const waiting = order({
+      id: 21,
+      title: "Replace water heater",
+      status: "on_hold",
+      created_at: "2026-11-12T10:00:00",
+      request_number: "MR-000021",
+      property_name: "Maple Court",
+      unit_id: 1,
+      unit_name: "1A",
+      hold_reason: "Waiting on owner approval",
+    });
+    const officeHold = order({
+      id: 22,
+      title: "Boiler",
+      status: "on_hold",
+      created_at: "2026-11-11T10:00:00",
+      property_name: "Maple Court",
+      hold_reason: "waiting for part",
+    });
+    const model = landlordHome({
+      orders: [waiting, officeHold],
+      office: preview({
+        unread: 2,
+        lastMessage: officeMessage({ id: 9, body: "Can we go ahead with the new water heater?" }),
+      }),
+    });
+
+    expect(model.input.items.map((item) => item.id)).toEqual(["office-unread", "ask-21"]);
+    expect(model.input.items[0]).toMatchObject({
+      title: "2 new messages from Landlord Gopher",
+      context: "Can we go ahead with the new water heater?",
+      href: "/messages?thread=office",
+    });
+    expect(model.input.items[1]?.title).toBe("#MR-000021 Replace water heater");
+    expect(model.input.items[1]?.context).toContain("Maple Court · Unit 1A");
+    expect(model.input.items[1]?.href).toBe("/maintenance/21");
+    // Already in Needs your input, so not repeated in Needs your attention.
+    expect(model.attention.map((item) => item.id)).toEqual(["hold-22"]);
+
+    const html = visibleText(renderReady(model));
+    expect(html).toContain("Needs your input");
+    expect(html).toContain("2 new messages from Landlord Gopher");
+  });
+
+  it("says nothing is waiting when no request needs the landlord", () => {
+    const model = landlordHome({ office: preview({}) });
+    expect(model.input.items).toEqual([]);
+    const html = visibleText(renderReady(model));
+    expect(html).toContain("Nothing needs your input right now.");
+  });
+
+  it("groups open requests by unit, common area last", () => {
+    const model = landlordHome({
+      orders: [
+        order({ id: 1, title: "Hall light", status: "open", created_at: "2026-11-14T08:00:00" }),
+        order({ id: 2, title: "Window", status: "open", created_at: "2026-11-13T08:00:00", unit_id: 2, unit_name: "10" }),
+        order({ id: 3, title: "Faucet", status: "scheduled", created_at: "2026-11-15T08:00:00", unit_id: 1, unit_name: "2" }),
+        order({ id: 4, title: "Sink", status: "in_progress", created_at: "2026-11-16T08:00:00", unit_id: 1, unit_name: "2" }),
+        order({ id: 5, title: "Done", status: "closed", created_at: "2026-11-16T07:00:00", unit_id: 1, unit_name: "2" }),
+      ],
+    });
+    expect(model.maintenance.groups.map((group) => group.label)).toEqual(["Unit 2", "Unit 10", "Common area"]);
+    expect(model.maintenance.groups[0]?.rows.map((row) => row.id)).toEqual([4, 3]);
+    expect(model.maintenance.total).toBe(4);
+    expect(model.maintenance.shown).toBe(4);
+    expect(model.maintenance.groups[0]?.rows[0]?.nextStep).toContain("Nothing needed from you.");
+
+    const html = visibleText(renderReady(model));
+    expect(html).toContain("Open requests");
+    expect(html).toContain("Unit 10");
+    expect(html).toContain("Common area");
+  });
+
+  it("names the property in group labels when there are several", () => {
+    const model = landlordHome({
+      properties: [maple, birch],
+      orders: [
+        order({ id: 1, title: "Boiler", status: "open", created_at: "2026-11-14T08:00:00", property_id: 2, property_name: "Birch House" }),
+        order({ id: 2, title: "Faucet", status: "open", created_at: "2026-11-14T08:00:00", unit_id: 1, unit_name: "1A", property_name: "Maple Court" }),
+      ],
+    });
+    expect(model.maintenance.groups.map((group) => group.label)).toEqual([
+      "Birch House · Common area",
+      "Maple Court · Unit 1A",
+    ]);
+  });
+
+  it("shows the office conversation only, never tenant names or request comments", () => {
+    const model = landlordHome({
+      orders: [
+        order({
+          id: 7,
+          title: "Leaky tap",
+          status: "open",
+          created_at: "2026-11-15T08:00:00",
+          tenant_first_name: "Raj",
+          tenant_last_name: "Patel",
+          unit_id: 1,
+          unit_name: "1A",
+        }),
+      ],
+      office: preview({
+        unread: 0,
+        lastMessage: officeMessage({ id: 3, body: "Sam is booked for Tuesday." }),
+      }),
+    });
+    expect(model.office).toMatchObject({ state: "ready", from: "office", preview: "Sam is booked for Tuesday." });
+
+    const office = visibleText(officeSection(renderReady(model)));
+    expect(office).toContain("Landlord Gopher");
+    expect(office).toContain("Sam is booked for Tuesday.");
+    expect(office).toContain("All read");
+    expect(office).toContain("Open conversation");
+    expect(office).not.toContain("Raj");
+    expect(office).not.toContain("Patel");
+    expect(office).not.toContain("Leaky tap");
+  });
+
+  it("covers the office card loading, error, empty and own-message states", () => {
+    expect(landlordHome({ office: null }).office.state).toBe("loading");
+    expect(landlordHome({ office: preview({ loading: true }) }).office.state).toBe("loading");
+    expect(landlordHome({ office: preview({ error: "offline" }) }).office.state).toBe("error");
+    expect(landlordHome({ office: preview({}) }).office.state).toBe("empty");
+    const mine = landlordHome({
+      office: preview({ lastMessage: officeMessage({ id: 4, body: "Thanks!", author_role: "landlord" }) }),
+    });
+    expect(mine.office).toMatchObject({ state: "ready", from: "you" });
+
+    expect(visibleText(officeSection(renderReady(landlordHome({ office: preview({ error: "x" }) }))))).toContain(
+      "Messages couldn't be loaded.",
+    );
+    expect(visibleText(officeSection(renderReady(landlordHome({ office: preview({}) }))))).toContain(
+      "No messages yet.",
+    );
+  });
+
+  it("uses an icon tile and facts on property cards instead of a photo placeholder", () => {
+    const model = landlordHome({
+      properties: [birch],
+      orders: [order({ id: 1, title: "Boiler", status: "open", created_at: "2026-11-16T08:00:00", property_id: 2 })],
+    });
+    expect(model.properties[0]?.stats).toEqual([
+      { label: "Units", value: "2 · 1 vacant" },
+      { label: "Open requests", value: "1" },
+      { label: "Last activity", value: "Today" },
+    ]);
+    const html = visibleText(renderReady(model));
+    expect(html).not.toContain("Property photo");
+    expect(html).toContain("Birch House");
+  });
+
+  it("puts New request and Message Landlord Gopher at the top", () => {
+    const html = visibleText(
+      renderToStaticMarkup(
+        createElement(ReadyHome, {
+          model: landlordHome(),
+          navigate: () => undefined,
+          onDownload: () => undefined,
+          downloadingId: null,
+          onRetry: () => undefined,
+          onNewRequest: () => undefined,
+        }),
+      ),
+    );
+    const newRequest = html.indexOf("New request");
+    const message = html.indexOf("Message Landlord Gopher");
+    expect(newRequest).toBeGreaterThan(-1);
+    expect(message).toBeGreaterThan(newRequest);
+    expect(html.indexOf("Needs your input")).toBeGreaterThan(message);
   });
 });
