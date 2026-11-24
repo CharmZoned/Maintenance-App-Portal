@@ -28,6 +28,18 @@ describe("landlord pattern components", () => {
     expect(html).toContain("md:inline");
   });
 
+  it("lets a screen replace the phone label without changing the breadcrumb", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandlordPortalTitle, {
+        crumb: "Landlord portal / Maintenance / #MR-001000",
+        mobileLabel: "#MR-001000",
+      }),
+    );
+    expect(html).toContain("#MR-001000");
+    expect(html).toContain("Landlord portal / Maintenance / #MR-001000");
+    expect(html).not.toContain("Landlord Gopher");
+  });
+
   it("renders the document row copy for both layouts", () => {
     const html = renderToStaticMarkup(
       createElement(LandlordDocumentRow, {
