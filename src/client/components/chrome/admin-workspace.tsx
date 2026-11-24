@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import type { PortalNavItem } from "@/lib/portal-nav";
 import { AdminNavDrawer } from "./admin-nav-drawer";
@@ -9,27 +17,11 @@ import {
   type ShellChromeValue,
 } from "./shell-chrome-context";
 
+/** The admin palette scope class (see `.lg-admin` in styles.css). */
+const ADMIN_SCOPE = "lg-admin";
+
 /** Tailwind `lg` — the rail shows from here up; below it navigation is the drawer. */
 const RAIL_QUERY = "(min-width: 1024px)";
-
-/**
- * Mounted admin workspaces. While there is at least one, `<body>` carries the
- * `lg-admin` scope too, so surfaces Radix portals out of the page (dialogs,
- * selects, menus, popovers) get the same palette — and the same navy primary
- * button — as the page they were opened from.
- */
-let mountedWorkspaces = 0;
-
-function useAdminBodyScope() {
-  useEffect(() => {
-    mountedWorkspaces += 1;
-    document.body.classList.add("lg-admin");
-    return () => {
-      mountedWorkspaces -= 1;
-      if (mountedWorkspaces === 0) document.body.classList.remove("lg-admin");
-    };
-  }, []);
-}
 
 /**
  * Admin workspace frame (Figma "001 - Admin Pages"): the navy 224px rail on
@@ -37,10 +29,10 @@ function useAdminBodyScope() {
  * Provides `onOpenNav` to pages through ShellChrome so their headers can show
  * the menu button on tablet and phone.
  *
- * The rail and drawer carry the `lg-admin` palette themselves, and pages get it
- * from the admin page frame (`AdminPageShell`, which `PageShell` hands over to
- * when `onOpenNav` is set). `<body>` carries it as well while the workspace is
- * mounted, for portalled surfaces.
+ * While mounted it puts the `lg-admin` palette on the document root, so every
+ * admin page — and everything portalled to `body` (dialogs, menus, popovers) —
+ * shares the admin workspace colours. Other shells never mount this, so their
+ * palette is untouched.
  */
 export function AdminWorkspace({
   items,
@@ -73,7 +65,13 @@ export function AdminWorkspace({
   const chrome = useShellChrome();
   const railVisible = useMediaQuery(RAIL_QUERY);
   const [drawerOpen, setDrawerOpen] = useState(defaultDrawerOpen);
-  useAdminBodyScope();
+
+  // Layout effect, so the first admin frame is already in the admin palette.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.add(ADMIN_SCOPE);
+    return () => root.classList.remove(ADMIN_SCOPE);
+  }, []);
 
   // The drawer only exists below `lg`: growing the window past it closes it.
   useEffect(() => {

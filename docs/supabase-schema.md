@@ -242,7 +242,7 @@ Website contact form (`uuid` id). RLS on, **no policies** — intentional so onl
 | `public.report_zelle_sent` / `confirm_zelle_payment` | LD-27: tenant awaiting-verification → admin settle |
 | `public.submit_tenant_property_document(...)` | LD-30: tenant document metadata insert |
 
-**Realtime (LD-30):** `supabase_realtime` publishes `MaintenanceRequests` + `MaintenanceRequestComments` only (not messages).
+**Realtime (LD-30 + worker pool):** `supabase_realtime` publishes `MaintenanceRequests`, `MaintenanceRequestComments`, and `OfficeMessages`.
 
 ---
 

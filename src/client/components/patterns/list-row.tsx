@@ -27,7 +27,7 @@ export function ListRow({
       type={interactive ? "button" : undefined}
       onClick={onClick}
       className={cn(
-        "flex w-full items-center justify-between gap-4 border-b border-border bg-background px-4 py-3 text-left transition-colors",
+        "flex w-full items-center justify-between gap-4 border-b border-border bg-background px-4 py-3 text-left transition-colors admin:bg-card",
         interactive && "hover:bg-muted/60 focus-visible:bg-muted/60",
         className,
       )}

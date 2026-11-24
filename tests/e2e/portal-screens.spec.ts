@@ -10,6 +10,18 @@ const nav = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 /** The admin dashboard's page heading is its greeting. */
 const GREETING = /^Good (morning|afternoon|evening)/;
 const navLinks = async (page: Page) => (await nav(page).getByRole("link").allInnerTexts()).map((t) => t.trim());
+/**
+ * The landlord Documents page titles itself twice on purpose: once in the shell toolbar and once
+ * in the page's own intro, under the "Your property records" eyebrow. This is the intro's heading.
+ */
+const landlordDocumentsHeading = (page: Page) =>
+  page.locator("header", { hasText: "Your property records" }).getByRole("heading", { level: 1, name: "Documents", exact: true });
+/**
+ * A file on the landlord Documents page. Each row renders a phone and a desktop layout, so the
+ * title text is in the DOM twice; the row's Download button is the one accessible handle.
+ */
+const landlordDocument = (page: Page, title: string) =>
+  page.getByRole("button", { name: `Download ${title}`, exact: true });
 
 test.describe("[R8] Admin web portal — who sees what", () => {
   test.beforeAll(async () => {
@@ -96,11 +108,14 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     // Home's one h1 is the greeting (the toolbar "Home" is a label, not a second h1).
     await expect(page.getByRole("heading", { level: 1, name: GREETING })).toBeVisible();
     await expect(page.getByText("Read-only")).toHaveCount(0);
-    await expect(page.getByText("Maple Court").first()).toBeVisible();
+    // Their own property is listed under "Your properties"; the other landlord's is nowhere on the page.
+    const theirProperties = page.getByRole("region", { name: "Your properties" });
+    await expect(theirProperties.getByRole("heading", { name: "Maple Court", exact: true })).toBeVisible();
+    await expect(theirProperties.getByRole("listitem")).toHaveCount(1);
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);
     await expect(page.getByRole("button", { name: "New property" })).toHaveCount(0);
     await page.goto("/documents");
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(landlordDocumentsHeading(page)).toBeVisible();
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await shot(page, testInfo, "Landlord portal");
   });
@@ -368,14 +383,16 @@ test.describe("[R5] Property documents — screens", () => {
     );
     await signIn(page, "landlord");
     await page.goto("/documents");
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
-    // Rows render a phone and a desktop layout (one is display:none), so match the visible one.
-    await expect(page.getByText("Landlord lease copy", { exact: true }).filter({ visible: true })).toBeVisible();
-    await expect(page.getByText("House rules", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(landlordDocumentsHeading(page)).toBeVisible();
+    await expect(landlordDocument(page, "Landlord lease copy")).toBeVisible();
+    await expect(landlordDocument(page, "House rules")).toBeVisible();
     await expect(page.getByText("Staff only binder")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
+    // The landlord's property page keeps documents on their own tab.
     await page.goto(`/properties/${world.property.id}`);
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await page.getByRole("tab", { name: "Documents" }).click();
+    await expect(page.getByRole("heading", { name: `Documents · ${world.property.name}` })).toBeVisible();
+    await expect(page.getByText("Staff only binder")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await shot(page, testInfo, "Landlord Documents page");
   });

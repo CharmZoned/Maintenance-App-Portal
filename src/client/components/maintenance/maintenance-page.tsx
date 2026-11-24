@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { WorkOrderDialog } from "./work-order-dialog";
 import { TenantRequestsPage } from "./tenant-requests-page";
+import { LandlordMaintenancePage } from "./landlord-maintenance-page";
 import { formatStaffMember } from "./work-order-assignee-date-fields";
 import type { WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
@@ -80,10 +81,13 @@ export function MaintenancePage(
   if (app.isTenant) {
     return <TenantRequestsPage {...props} />;
   }
+  if (app.isLandlord) {
+    return <LandlordMaintenancePage {...props} />;
+  }
   return <StaffLandlordMaintenancePage {...props} />;
 }
 
-/** Staff / landlord maintenance queue (unchanged tabs + filters). */
+/** Staff maintenance queue. Landlords use LandlordMaintenancePage instead. */
 function StaffLandlordMaintenancePage({
   search = "",
   replace,

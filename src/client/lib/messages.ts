@@ -1,8 +1,9 @@
-import type { StaffMember, UserAccountRow } from "@/lib/data";
+import type { OfficeMessage, OfficeThreadSummary, StaffMember, UserAccountRow } from "@/lib/data";
 import { requestKey, type InboxConversation } from "@/lib/inbox";
+import { displayNameFromEmail, roleLabel } from "@/lib/portal-nav";
 import type { Landlord, MaintenanceComment, Tenant, WorkOrder } from "@/types";
 
-/** Inbox thread — request-linked uses live WO comments; direct is UI-only stub. */
+/** Inbox thread — request-linked uses WO comments; direct uses OfficeMessages. */
 export type MessageThreadKind = "request" | "direct";
 
 export type MessageThread = {
@@ -68,10 +69,30 @@ export function workOrderPreview(wo: WorkOrder): string {
   return wo.title;
 }
 
+export function workOrderThreadId(requestId: number): string {
+  return `wo:${requestId}`;
+}
+
+export function parseWorkOrderThreadId(id: string): number | null {
+  if (!id.startsWith("wo:")) return null;
+  const n = Number(id.slice(3));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function officeThreadId(threadUserId: string): string {
+  return `office:${threadUserId}`;
+}
+
+export function parseOfficeThreadId(id: string): string | null {
+  if (!id.startsWith("office:")) return null;
+  const uid = id.slice("office:".length).trim();
+  return uid || null;
+}
+
 /**
  * Build inbox threads from work orders the caller can already see.
- * Unread is a client stub (no read-state API): open/non-closed WOs from the
- * last 14 days count as unread until the user opens them in-session.
+ * Unread is a client stub (no MaintenanceThreadReads write yet): open/non-closed
+ * WOs from the last 14 days count as unread until the user opens them in-session.
  */
 export function threadsFromWorkOrders(
   workOrders: WorkOrder[],
@@ -83,7 +104,7 @@ export function threadsFromWorkOrders(
 
   return workOrders
     .map((wo) => {
-      const id = `wo:${wo.id}`;
+      const id = workOrderThreadId(wo.id);
       const updated = wo.scheduled_at || wo.created_at;
       const age = now.getTime() - new Date(updated).getTime();
       const unreadStub =
@@ -101,8 +122,109 @@ export function threadsFromWorkOrders(
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-/** Direct / property threads — no message-center API yet. */
-export const STUB_DIRECT_THREADS: MessageThread[] = [];
+/**
+ * Map OfficeMessages summaries into inbox rows.
+ * Pass `titles` (thread_user_id → label) for admin inbox names; non-admins usually
+ * see a single own-thread titled via `ensureOwnThread`.
+ */
+export function threadsFromOfficeSummaries(
+  summaries: OfficeThreadSummary[],
+  opts?: {
+    titles?: Map<string, string>;
+    /** When set, guarantee an inbox row for this user even with no messages yet. */
+    ensureOwnThread?: { userId: string; title?: string };
+  },
+): MessageThread[] {
+  const titles = opts?.titles;
+  const threads: MessageThread[] = summaries.map((s) => ({
+    id: officeThreadId(s.thread_user_id),
+    kind: "direct" as const,
+    title: titles?.get(s.thread_user_id) ?? "Office conversation",
+    preview: s.last_message_body,
+    updatedAt: s.last_message_at,
+    unread: s.unread,
+    threadUserId: s.thread_user_id,
+  }));
+
+  const ensure = opts?.ensureOwnThread;
+  if (ensure && !threads.some((t) => t.threadUserId === ensure.userId)) {
+    threads.push({
+      id: officeThreadId(ensure.userId),
+      kind: "direct",
+      title: ensure.title ?? "Landlord Gopher office",
+      preview: "Message the office — no messages yet.",
+      updatedAt: new Date(0).toISOString(),
+      unread: false,
+      threadUserId: ensure.userId,
+    });
+  }
+
+  return threads.sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+}
+
+/** Merge request + direct threads, newest first. */
+export function mergeMessageThreads(...groups: MessageThread[][]): MessageThread[] {
+  return groups
+    .flat()
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+}
+
+/**
+ * Resolve `/messages` deep links used by Requests and the dashboard.
+ * - `?thread=wo:123` / `?thread=office:<uuid>` — select that inbox id when present
+ * - `?request=<pk>` — prefer matching request thread, else synthesize `wo:<pk>`
+ */
+export type MessagesDeepLink =
+  | { kind: "thread"; threadId: string }
+  | { kind: "request"; requestId: number; threadId: string; known: boolean }
+  | { kind: "not-found"; raw: string }
+  | { kind: "none" };
+
+export function resolveStaffMessagesDeepLink(
+  search: string,
+  threads: MessageThread[],
+  opts?: {
+    /** When set, unknown `office:<uuid>` deep links are allowed only for this user or admins. */
+    currentUserId?: string | null;
+    isAdmin?: boolean;
+  },
+): MessagesDeepLink {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const thread = params.get("thread");
+  if (thread) {
+    if (threads.some((t) => t.id === thread)) {
+      return { kind: "thread", threadId: thread };
+    }
+    // Soft-open an office thread the inbox has not listed yet (admin new DM, or own empty thread).
+    const officeUser = parseOfficeThreadId(thread);
+    if (officeUser) {
+      const allowed =
+        Boolean(opts?.isAdmin) ||
+        (opts?.currentUserId != null && officeUser === opts.currentUserId);
+      if (allowed) return { kind: "thread", threadId: thread };
+      return { kind: "not-found", raw: thread };
+    }
+    const woId = parseWorkOrderThreadId(thread);
+    if (woId != null) {
+      return { kind: "request", requestId: woId, threadId: thread, known: false };
+    }
+    return { kind: "not-found", raw: thread };
+  }
+  const request = params.get("request");
+  if (request != null && request.trim() !== "") {
+    const raw = request.trim();
+    const asNum = Number(raw.replace(/^wo[-_]?/i, ""));
+    if (Number.isFinite(asNum) && asNum > 0) {
+      const id = workOrderThreadId(asNum);
+      const known = threads.some((t) => t.id === id);
+      return { kind: "request", requestId: asNum, threadId: id, known };
+    }
+    return { kind: "not-found", raw };
+  }
+  return { kind: "none" };
+}
 
 export function notificationsFromWorkOrders(
   workOrders: WorkOrder[],
@@ -128,7 +250,7 @@ export function notificationsFromWorkOrders(
         sentence,
         time: formatMessageTime(wo.created_at, now),
         unread: true,
-        href: `/messages?thread=wo:${wo.id}`,
+        href: `/messages?thread=${workOrderThreadId(wo.id)}`,
         stub: true,
       };
     });
@@ -309,4 +431,44 @@ export function adminInboxThreads(input: {
     (a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || a.id.localeCompare(b.id),
   );
+}
+
+export function officeMessageSenderLabel(
+  message: OfficeMessage,
+  opts?: { currentUserId?: string | null; currentRole?: string | null },
+): { label: string; outgoing: boolean } {
+  // Prefer author_user_id so two admins in one thread are not both "You".
+  // Fall back to role only when authorship was cleared (ON DELETE SET NULL).
+  const byUser =
+    opts?.currentUserId != null &&
+    message.author_user_id != null &&
+    message.author_user_id === opts.currentUserId;
+  const byRoleFallback =
+    message.author_user_id == null &&
+    Boolean(opts?.currentRole && message.author_role === opts.currentRole);
+  const outgoing = byUser || byRoleFallback;
+  const pretty =
+    message.author_role === "admin"
+      ? "Landlord Gopher office"
+      : message.author_role === "maintenance"
+        ? "Maintenance"
+        : message.author_role === "tenant"
+          ? "Tenant"
+          : message.author_role === "landlord"
+            ? "Landlord"
+            : "Portal user";
+  return {
+    label: outgoing ? `You · ${pretty}` : pretty,
+    outgoing,
+  };
+}
+
+/** Title for an office thread participant from an admin account list row. */
+export function officeThreadTitleFromAccount(account: {
+  email: string | null;
+  role: string | null;
+}): string {
+  const name = displayNameFromEmail(account.email);
+  const role = account.role ? roleLabel(account.role) : null;
+  return role ? `${name} · ${role}` : name;
 }

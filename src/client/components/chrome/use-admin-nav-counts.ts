@@ -14,7 +14,11 @@ export type AdminNavCounts = {
   maintenance?: number;
   /** Accounts waiting for approval — admins only. */
   people?: number;
-  /** Unread conversations — the same count as the Messages page header and the dashboard KPI. */
+  /**
+   * Unread conversations. Admins: the office inbox — the same count as the
+   * Messages page header and the dashboard KPI. Other staff: their unread
+   * OfficeMessages threads.
+   */
   messages?: number;
 };
 
@@ -37,6 +41,11 @@ async function countPendingAccounts(): Promise<number | undefined> {
   // Same source as the Users approval queue (admin-only RPC).
   const accounts = await data.listUserAccounts();
   return accounts.filter((a) => a.account_status === "pending").length;
+}
+
+async function countUnreadOfficeThreads(): Promise<number | undefined> {
+  // Slim scan (no message bodies) — see data.countUnreadOfficeThreads.
+  return data.countUnreadOfficeThreads();
 }
 
 /**
@@ -75,20 +84,12 @@ export function useAdminNavCounts({
           setCounts((prev) => (prev[key] === value ? prev : { ...prev, [key]: value }));
         });
     };
-    const loadMessages = () => load("messages", countAdminUnread);
+    const loadMessages = () => load("messages", isAdmin ? countAdminUnread : countUnreadOfficeThreads);
     load("maintenance", countRequestsNeedingAction);
-    if (isAdmin) {
-      load("people", countPendingAccounts);
-      // The office inbox is admin-only.
-      loadMessages();
-      window.addEventListener(INBOX_CHANGED_EVENT, loadMessages);
-    } else {
-      setCounts((prev) =>
-        prev.people === undefined && prev.messages === undefined
-          ? prev
-          : { ...prev, people: undefined, messages: undefined },
-      );
-    }
+    loadMessages();
+    window.addEventListener(INBOX_CHANGED_EVENT, loadMessages);
+    if (isAdmin) load("people", countPendingAccounts);
+    else setCounts((prev) => (prev.people === undefined ? prev : { ...prev, people: undefined }));
     return () => {
       cancelled = true;
       window.removeEventListener(INBOX_CHANGED_EVENT, loadMessages);

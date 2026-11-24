@@ -10,6 +10,8 @@ import { PortalErrorBoundary } from "./components/portal-error-boundary";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { PropertiesList } from "./components/properties/properties-list";
 import { PropertyPage } from "./components/properties/property-page";
+import { LandlordPropertiesPage } from "./components/properties/landlord-properties-page";
+import { LandlordPropertyPage } from "./components/properties/landlord-property-page";
 import { TenantsList } from "./components/tenants/tenants-list";
 import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
@@ -425,8 +427,8 @@ export function App() {
         ) : isLandlord ? (
           <>
             {route.name === "home" && <LandlordHomePage navigate={navigate} />}
-            {route.name === "properties" && <PropertiesList navigate={navigate} />}
-            {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+            {route.name === "properties" && <LandlordPropertiesPage navigate={navigate} />}
+            {route.name === "property" && <LandlordPropertyPage id={route.id} navigate={navigate} />}
             {route.name === "maintenance" && (
               <MaintenancePage search={search} replace={replace} navigate={navigate} />
             )}

@@ -9,6 +9,7 @@ import {
   buildDashboardState,
   buildErrorState,
   dashboardChargePeriods,
+  dashboardClosedSince,
   type AdminDashboardSources,
   type AdminDashboardViewer,
 } from "@/lib/admin-dashboard";
@@ -57,7 +58,8 @@ export async function loadAdminDashboardSources(input: {
     // with a real read before the page is allowed to show the empty state.
     input.properties.length > 0 ? Promise.resolve(input.properties) : data.listProperties(),
     data.listUnits(),
-    data.listWorkOrders(),
+    // Open requests plus recently closed ones — not the whole history.
+    data.listWorkOrdersForDashboard(dashboardClosedSince(input.now)),
     soft(data.listLeases()),
     soft(data.listChargesForPeriods(dashboardChargePeriods(input.now))),
     // The approval queue is an admin-only RPC.
