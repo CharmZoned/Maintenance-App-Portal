@@ -135,8 +135,8 @@ function isStaffViewer(role: RequestViewerRole): boolean {
 }
 
 /** "Admin" to staff, "Landlord Gopher" to tenants and landlords. */
-function adminTag(viewer: RequestViewerRole, people: TimelinePeople): TimelineRoleTag {
-  return isStaffViewer(viewer) ? "Admin" : ((people.officeName ?? DEFAULT_OFFICE) === DEFAULT_OFFICE ? "Landlord Gopher" : "Admin");
+function adminTag(viewer: RequestViewerRole): TimelineRoleTag {
+  return isStaffViewer(viewer) ? "Admin" : "Landlord Gopher";
 }
 
 function defaultFormatDay(iso: string): string {
@@ -175,7 +175,7 @@ function statusActor(
     case "landlord":
       return person(named || "The landlord", "Landlord");
     case "admin":
-      return person(isStaffViewer(viewer) && named ? named : office, adminTag(viewer, people));
+      return person(isStaffViewer(viewer) && named ? named : office, adminTag(viewer));
     default:
       return person(office, isStaffViewer(viewer) ? "System" : "Landlord Gopher");
   }
@@ -197,7 +197,7 @@ function messageActor(c: MaintenanceComment, people: TimelinePeople, viewer: Req
     case "admin": {
       const mine = c.author_staff_id != null && people.viewerStaffId === c.author_staff_id;
       const name = isStaffViewer(viewer) ? staffName(people, c.author_staff_id) : null;
-      return person(mine ? "You" : name ?? office, adminTag(viewer, people));
+      return person(mine ? "You" : name ?? office, adminTag(viewer));
     }
     default:
       return person(office, isStaffViewer(viewer) ? "System" : "Landlord Gopher");
