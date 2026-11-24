@@ -1,12 +1,27 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { LandlordRequestDetail } from "@/components/maintenance/request-detail-page";
-import { formatDocumentDate } from "@/lib/landlord-documents";
+import {
+  RequestDetailView,
+  costLabelFor,
+  dayStamp,
+  placeLabel,
+  requestNumberLabel,
+  type RequestDetailViewProps,
+} from "@/components/maintenance/request-detail-page";
+import {
+  RequestErrorState,
+  RequestLoadingState,
+  RequestNotAvailableState,
+} from "@/components/maintenance/request/request-states";
+import { notAvailableActionFor } from "@/components/maintenance/request/role-visibility";
+import type { StaffMember } from "@/lib/data";
 import type { MaintenanceComment, MaintenancePhoto, MaintenanceStatusEvent, WorkOrder } from "@/types";
 
-function order(partial: Partial<WorkOrder> & Pick<WorkOrder, "id" | "title">): WorkOrder {
+function order(partial: Partial<WorkOrder> = {}): WorkOrder {
   return {
+    id: 10,
+    title: "Kitchen faucet leaking",
     property_id: 1,
     unit_id: 1,
     tenant_id: 1,
@@ -14,14 +29,14 @@ function order(partial: Partial<WorkOrder> & Pick<WorkOrder, "id" | "title">): W
     description: "Kitchen faucet drips constantly.",
     category: "Plumbing",
     priority: "high",
-    status: "scheduled",
+    status: "in_progress",
     permission_to_enter: true,
     assigned_staff_id: 4,
     request_number: "MR-001000",
     scheduled_at: "2026-11-17",
     completed_at: null,
-    worker_price: null,
-    landlord_price: null,
+    worker_price: 42,
+    landlord_price: 55,
     notes: null,
     created_at: "2026-11-14T14:12:00.000Z",
     property_name: "Maple Court",
@@ -32,11 +47,15 @@ function order(partial: Partial<WorkOrder> & Pick<WorkOrder, "id" | "title">): W
   };
 }
 
+const staff: StaffMember[] = [
+  { id: 4, first_name: "Sam", last_name: "Fixit", email: "sam@example.test", job_title: null, gets_request_alerts: false },
+];
+
 const photos: MaintenancePhoto[] = [
   {
     id: 1,
     maintenance_request_id: 10,
-    storage_path: "a.jpg",
+    storage_path: "10/a.jpg",
     caption: null,
     created_at: "2026-11-14T14:20:00.000Z",
     uploaded_by_role: "tenant",
@@ -86,216 +105,178 @@ const history: MaintenanceStatusEvent[] = [
     note: null,
     created_at: "2026-11-16T13:30:00.000Z",
   },
+  {
+    id: 3,
+    maintenance_request_id: 10,
+    from_status: "Scheduled",
+    to_status: "In Progress",
+    changed_by_role: "maintenance",
+    note: null,
+    created_at: "2026-11-24T09:40:00.000Z",
+  },
 ];
 
-function render(props: Partial<Parameters<typeof LandlordRequestDetail>[0]> = {}) {
+function render(props: Partial<RequestDetailViewProps> = {}): string {
   return renderToStaticMarkup(
-    createElement(LandlordRequestDetail, {
-      loading: false,
-      loadError: null,
-      order: order({ id: 10, title: "Kitchen faucet leaking" }),
+    createElement(RequestDetailView, {
+      role: "admin",
+      order: order(),
       photos,
       comments,
       history,
-      onRetry: () => undefined,
-      navigate: () => undefined,
+      staff,
+      onBack: () => undefined,
+      onChangeStatus: () => undefined,
+      onAssign: () => undefined,
+      onAddPhotos: () => undefined,
+      onSend: () => undefined,
       ...props,
     }),
   );
 }
 
-describe("landlord request detail", () => {
-  it("renders the read-only assigned frame and only tenant-visible comments", () => {
+describe("one request page for every role", () => {
+  it("admin: title with number beside it, status in the summary line, actions panel", () => {
     const html = render();
-    const scheduled = formatDocumentDate("2026-11-17");
-    expect(html).toContain("‹ Maintenance");
-    expect(html).toContain("Landlord portal / Maintenance / #MR-001000");
-    expect(html).toContain("#MR-001000");
     expect(html).toContain("Kitchen faucet leaking");
-    expect(html).toContain("Assigned");
-    expect(html).toContain("High priority");
+    expect(html).toContain("#MR-001000");
+    expect(html).not.toContain("Request #");
+    expect(html).toContain("In progress");
+    expect(html).toContain("High");
     expect(html).toContain("Unit 1A · Maple Court · Reported by Tina Renter");
-    expect(html).toContain("Plumbing");
-    expect(html).toContain("Kitchen faucet drips constantly.");
-    expect(html).toContain("OK to enter if Tina isn’t home");
-    expect(html).toContain("Maintenance");
-    expect(html).toContain(scheduled);
-    expect(html).toContain("Photos · 1");
-    expect(html).toContain("Tap a photo to see it full size.");
-    expect(html).toContain("https://example.test/faucet.jpg");
-    expect(html).toContain("Status timeline");
-    expect(html).toContain("bg-brand-tint text-brand-text\">Assigned");
-    expect(html).not.toContain("bg-info-tint text-info\">Assigned");
-    expect(html).toContain("Tina Renter reported this");
-    expect(html).toContain(`Visit scheduled for ${scheduled}`);
-    expect(html).toContain("The drip is getting worse.");
+    expect(html).toContain("Sam Fixit · Maintenance");
+    expect(html).not.toContain("Assigned (staff)");
+    expect(html).toContain("Actions");
+    expect(html).toContain("Office only: waiting on the owner.");
+    expect(html).toContain("Internal only");
+    expect(html).not.toContain("Visible to tenant");
+    expect(html).not.toContain("Landlord conversation");
+    expect(html).toContain("Worker $42.00 · Landlord $55.00");
+  });
+
+  it("tenant: same page, worker's name, no actions or internal notes, replies on the page", () => {
+    const html = render({ role: "tenant", viewerTenantId: 1 });
+    expect(html).toContain("Kitchen faucet leaking");
+    expect(html).toContain("Requests");
+    expect(html).toContain("Sam Fixit · Maintenance");
+    expect(html).not.toContain("Assigned (staff)");
     expect(html).not.toContain("Office only: waiting on the owner.");
-    expect(html).not.toContain("Created");
-    expect(html).not.toContain("Write to Landlord Gopher");
-    expect(html).not.toContain(">Send<");
-    expect(html).not.toContain("Your messages with Landlord Gopher");
+    expect(html).toContain("The drip is getting worse.");
+    expect(html).toContain("Send");
+    expect(html).not.toContain("Internal only");
+    expect(html).not.toContain("Open request conversation");
+    expect(html).not.toContain(">Updates<");
+    expect(html).not.toContain(">Actions<");
+    expect(html).not.toContain("$42.00");
+    expect(html).not.toContain("$55.00");
+  });
+
+  it("tenant timeline is in time order: In progress comes after the report and the message", () => {
+    const html = render({ role: "tenant", viewerTenantId: 1 });
+    const reported = html.indexOf("You reported this");
+    const message = html.indexOf("The drip is getting worse.");
+    const started = html.indexOf("Sam Fixit started work");
+    expect(reported).toBeGreaterThan(-1);
+    expect(message).toBeGreaterThan(reported);
+    expect(started).toBeGreaterThan(message);
+  });
+
+  it("landlord: Emergency everywhere, status events only, no composer or actions", () => {
+    const html = render({ role: "landlord", order: order({ priority: "urgent" }) });
+    expect(html).toContain("Emergency");
+    expect(html).not.toContain("Urgent");
+    expect(html).not.toContain("The drip is getting worse.");
+    expect(html).not.toContain("Office only: waiting on the owner.");
     expect(html).not.toContain("<textarea");
+    expect(html).not.toContain(">Send<");
+    expect(html).not.toContain(">Actions<");
     expect(html).not.toContain('type="file"');
+    expect(html).toContain("$55.00");
+    expect(html).not.toContain("$42.00");
+    expect(html).toContain("Sam Fixit started work");
   });
 
-  it("renders the completed cost summary without an entry row", () => {
+  it("worker: Start work / Put on hold, no edit or delete, worker price only", () => {
+    const html = render({ role: "maintenance", order: order({ status: "scheduled" }), viewerStaffId: 4 });
+    expect(html).toContain("Start work");
+    expect(html).toContain("Put on hold");
+    expect(html).toContain("My jobs");
+    expect(html).not.toContain("Edit details");
+    expect(html).not.toContain("$55.00");
+    expect(html).toContain("$42.00");
+    expect(html).toContain("Internal only");
+  });
+
+  it("completed: shows what fixed it and closes messages", () => {
     const html = render({
-      photos: [],
-      comments: [],
-      history: [
-        {
-          id: 9,
-          maintenance_request_id: 11,
-          from_status: "In Progress",
-          to_status: "Closed",
-          changed_by_role: "maintenance",
-          note: null,
-          created_at: "2026-11-13T19:45:00.000Z",
-        },
-      ],
-      order: order({
-        id: 11,
-        title: "Bathroom fan",
-        request_number: "MR-000990",
-        status: "closed",
-        priority: "normal",
-        category: "Electrical",
-        description: "Bathroom fan stopped working.",
-        unit_name: "1B",
-        tenant_first_name: "Raj",
-        tenant_last_name: "Patel",
-        vendor_name: "Harbor Electric",
-        vendor_id: 3,
-        landlord_price: 180,
-        resolution_notes: "Fan motor replaced",
-        completed_at: "2026-11-13T19:45:00.000Z",
-        scheduled_at: null,
-        assigned_staff_id: null,
-        permission_to_enter: false,
-        created_at: "2026-11-09T15:00:00.000Z",
-      }),
+      order: order({ status: "closed", resolution_notes: "Replaced the faucet cartridge.", completed_at: "2026-11-24T10:00:00.000Z" }),
     });
-    expect(html).toContain("#MR-000990");
-    expect(html).toContain("Bathroom fan");
     expect(html).toContain("Completed");
-    expect(html).toContain("Cost · Completed");
-    expect(html).toContain("$180 · Harbor Electric");
-    expect(html).toContain("Fan motor replaced · $180 · Harbor Electric");
-    expect(html).toContain("Electrical");
-    expect(html).not.toContain("High priority");
-    expect(html).not.toContain("Entry");
-    expect(html).not.toContain("Please schedule first");
-    expect(html).toContain("Photos · 0");
-    expect(html).toContain("No photos yet.");
+    expect(html).toContain("What fixed it");
+    expect(html).toContain("Replaced the faucet cartridge.");
+    expect(html).toContain("This request is completed. Messages are closed.");
   });
 
-  it("renders loading, error, and not-available frames", () => {
-    const loading = render({ loading: true, order: null, photos: [], comments: [], history: [] });
-    expect(loading).toContain('aria-busy="true"');
-    expect(loading).toContain("‹ Maintenance");
+  it("unassigned: Not assigned yet, never a placeholder name", () => {
+    const html = render({ role: "tenant", order: order({ status: "open", assigned_staff_id: null, scheduled_at: null }) });
+    expect(html).toContain("New");
+    expect(html).toContain("Not assigned yet");
+    expect(html).toContain("Not scheduled yet");
+  });
+});
 
-    const error = render({
-      loadError: "The network dropped.",
-      order: null,
-      photos: [],
-      comments: [],
-      history: [],
-    });
-    expect(error).toContain("Couldn’t load this request");
-    expect(error).toContain("The network dropped.");
-    expect(error).toContain("Retry");
+describe("request page helpers", () => {
+  it("labels the number, place and cost", () => {
+    expect(requestNumberLabel({ id: 7, request_number: "MR-001006" })).toBe("#MR-001006");
+    expect(requestNumberLabel({ id: 7, request_number: null })).toBe("#7");
+    expect(placeLabel({ unit_name: "1A", property_name: "Maple Court" })).toBe("Unit 1A · Maple Court");
+    expect(placeLabel({ unit_name: null, property_name: "Maple Court" })).toBe("Common area · Maple Court");
+    expect(placeLabel({ unit_name: null, property_name: null })).toBe("");
+    expect(costLabelFor({ worker_price: 42, landlord_price: null }, "both")).toBe("Worker $42.00");
+    expect(costLabelFor({ worker_price: 42, landlord_price: 55 }, "landlord")).toBe("$55.00");
+    expect(costLabelFor({ worker_price: null, landlord_price: null }, "both")).toBeNull();
+    expect(costLabelFor({ worker_price: 42, landlord_price: 55 }, null)).toBeNull();
+  });
 
-    const missing = render({ order: null, photos: [], comments: [], history: [] });
-    expect(missing).toContain("This request isn’t available");
-    expect(missing).toContain(
-      "It may have been removed, or it’s no longer linked to one of your properties. If you think this is a mistake, message Landlord Gopher.",
+  it("writes days as Today / Yesterday / a date, keeping date-only days", () => {
+    const now = new Date(2026, 10, 24, 15, 0);
+    expect(dayStamp("2026-11-24", now)).toBe("Today");
+    expect(dayStamp("2026-11-23T12:00:00.000Z", now)).toBe("Yesterday");
+    expect(dayStamp("2026-11-17", now)).not.toBe("");
+    expect(dayStamp(null, now)).toBe("");
+  });
+});
+
+describe("request page states", () => {
+  it("loading is a skeleton, never text", () => {
+    const html = renderToStaticMarkup(createElement(RequestLoadingState, { withActionsPanel: true }));
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain("Loading…");
+  });
+
+  it("error offers Retry with the designed copy", () => {
+    const html = renderToStaticMarkup(
+      createElement(RequestErrorState, { onRetry: () => undefined, backLabel: "Maintenance", onBack: () => undefined }),
     );
-    expect(missing).toContain("Back to Maintenance");
-    expect(missing).toContain("Message Landlord Gopher");
-    expect(missing).not.toContain("Write to Landlord Gopher");
+    expect(html).toContain("We couldn&#x27;t load this request. Check your connection and try again.");
+    expect(html).toContain("Retry");
+    expect(html).toContain("Maintenance");
   });
 
-  it("keeps an earlier scheduled visit off the live order date", () => {
-    const current = formatDocumentDate("2026-11-17");
-    const visit = `Visit scheduled for ${current}`;
-    const earlier = {
-      id: 2,
-      maintenance_request_id: 10,
-      from_status: "Open",
-      to_status: "Scheduled",
-      changed_by_role: "admin",
-      note: "First visit was 10 Nov",
-      created_at: "2026-11-10T15:00:00.000Z",
-    };
-    const latest = {
-      id: 3,
-      maintenance_request_id: 10,
-      from_status: "Scheduled",
-      to_status: "Scheduled",
-      changed_by_role: "admin",
-      note: null,
-      created_at: "2026-11-16T13:30:00.000Z",
-    };
-    const noted = render({ history: [earlier, latest] });
-    expect(noted).toContain("First visit was 10 Nov");
-    expect(noted.split(visit).length - 1).toBe(1);
-
-    const blank = render({
-      history: [{ ...earlier, note: null }, latest],
-    });
-    expect(blank.split(visit).length - 1).toBe(1);
-    expect(blank).toContain("lg-body-medium text-foreground mt-1.5\">Scheduled");
-  });
-
-  it("formats a noon-UTC scheduled_at from the calendar-day prefix", () => {
-    for (const iso of ["2026-11-17T12:00:00.000Z", "2026-11-17T12:00:00+00:00"]) {
-      const day = formatDocumentDate(iso.slice(0, 10));
-      const html = render({
-        order: order({ id: 10, title: "Kitchen faucet leaking", scheduled_at: iso }),
-      });
-      expect(day).not.toBe("");
-      expect(html).toContain(`Visit scheduled for ${day}`);
-      expect(html).toContain(`lg-body min-w-0 text-foreground">${day}`);
-    }
-  });
-
-  it("ignores worker_price when landlord_price is null or different", () => {
-    const closed = {
-      id: 9,
-      maintenance_request_id: 11,
-      from_status: "In Progress",
-      to_status: "Closed",
-      changed_by_role: "maintenance",
-      note: null,
-      created_at: "2026-11-13T19:45:00.000Z",
-    };
-    const base = {
-      id: 11,
-      title: "Bathroom fan",
-      status: "closed" as const,
-      vendor_name: "Harbor Electric",
-      vendor_id: 3,
-      resolution_notes: "Fan motor replaced",
-      completed_at: "2026-11-13T19:45:00.000Z",
-      scheduled_at: null,
-      worker_price: 77,
-    };
-
-    const missing = render({
-      history: [closed],
-      comments: [],
-      order: order({ ...base, landlord_price: null }),
-    });
-    expect(missing).not.toContain("$77");
-    expect(missing).toContain("Fan motor replaced · Harbor Electric");
-
-    const different = render({
-      history: [closed],
-      comments: [],
-      order: order({ ...base, landlord_price: 180 }),
-    });
-    expect(different).toContain("$180 · Harbor Electric");
-    expect(different).toContain("Fan motor replaced · $180 · Harbor Electric");
-    expect(different).not.toContain("$77");
+  it("not available names the role's way out", () => {
+    const action = notAvailableActionFor("maintenance");
+    const html = renderToStaticMarkup(
+      createElement(RequestNotAvailableState, {
+        backLabel: "My jobs",
+        onBack: () => undefined,
+        actionLabel: action.label,
+        onAction: () => undefined,
+      }),
+    );
+    expect(html).toContain("This request isn’t available. It may have been deleted, or you may not have access to it.");
+    expect(html).toContain("Go to My jobs");
+    expect(notAvailableActionFor("admin").label).toBe("Go to Dashboard");
+    expect(notAvailableActionFor("tenant").label).toBe("Go to Home");
+    expect(notAvailableActionFor("landlord").label).toBe("Go to Home");
   });
 });

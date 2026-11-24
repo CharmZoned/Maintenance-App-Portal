@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ImageIcon } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -179,8 +179,8 @@ export function costLabelFor(
   return null;
 }
 
-/** Who added a photo, by the uploader role stored on the row. */
-function photoAuthor(
+/** Who added a photo, by the uploader role stored on the row (lightbox caption). */
+export function photoAuthor(
   photo: MaintenancePhoto,
   names: { tenant: string; assignee: string | null },
 ): string {
@@ -222,7 +222,6 @@ export interface RequestDetailViewProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onAddPhotos?: (files: FileList) => void;
-  onOpenPhoto?: (photo: MaintenancePhoto, index: number) => void;
   onSend?: (body: string, internal: boolean) => void | Promise<void>;
   /** Extra nodes (dialogs, banners) rendered inside the page. */
   children?: ReactNode;
@@ -252,7 +251,6 @@ export function RequestDetailView({
   onEdit,
   onDelete,
   onAddPhotos,
-  onOpenPhoto,
   onSend,
   children,
 }: RequestDetailViewProps) {
@@ -360,7 +358,7 @@ export function RequestDetailView({
               canAdd={visibility.addPhotos}
               uploading={uploading}
               onAdd={visibility.addPhotos ? onAddPhotos : undefined}
-              onOpenPhoto={onOpenPhoto}
+              uploaderName={(photo) => photoAuthor(photo, { tenant: reporter, assignee })}
             />
             <RequestTimeline
               entries={entries}
@@ -539,98 +537,6 @@ function PhoneActionBar({
   );
 }
 
-// ── Lightbox ───────────────────────────────────────────────────────
-
-function PhotoLightbox({
-  photos,
-  index,
-  onIndexChange,
-  onClose,
-  authorOf,
-}: {
-  photos: MaintenancePhoto[];
-  index: number | null;
-  onIndexChange: (index: number) => void;
-  onClose: () => void;
-  authorOf: (photo: MaintenancePhoto) => string;
-}) {
-  const open = index != null && index >= 0 && index < photos.length;
-  const photo = open ? photos[index] : null;
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [index]);
-
-  const hasPrev = open && index > 0;
-  const hasNext = open && index < photos.length - 1;
-  const caption = photo
-    ? [`Added by ${authorOf(photo)}`, dayStamp(photo.created_at)].filter(Boolean).join(" · ")
-    : "";
-
-  return (
-    <Dialog open={open} onOpenChange={(next) => (next ? undefined : onClose())}>
-      <DialogContent
-        className="h-full max-h-none max-w-none gap-3 rounded-none p-4 md:h-auto md:max-w-3xl md:rounded-lg md:p-5"
-        onKeyDown={(e) => {
-          if (!open) return;
-          if (e.key === "ArrowLeft" && hasPrev) {
-            e.preventDefault();
-            onIndexChange(index - 1);
-          } else if (e.key === "ArrowRight" && hasNext) {
-            e.preventDefault();
-            onIndexChange(index + 1);
-          }
-        }}
-      >
-        <DialogHeader className="flex-row items-center gap-1 space-y-0 pr-10 text-left">
-          <DialogTitle className="flex-1">
-            {open ? `Photo ${index + 1} of ${photos.length}` : "Photo"}
-          </DialogTitle>
-          {hasPrev ? (
-            <Button
-              variant="ghost"
-              size="touch-icon"
-              className="md:size-7"
-              aria-label="Previous photo"
-              onClick={() => onIndexChange(index - 1)}
-            >
-              <ChevronLeft aria-hidden />
-            </Button>
-          ) : null}
-          {hasNext ? (
-            <Button
-              variant="ghost"
-              size="touch-icon"
-              className="md:size-7"
-              aria-label="Next photo"
-              onClick={() => onIndexChange(index + 1)}
-            >
-              <ChevronRight aria-hidden />
-            </Button>
-          ) : null}
-        </DialogHeader>
-        <DialogDescription className="sr-only">Use the left and right arrow keys to move between photos.</DialogDescription>
-        <div className="flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-sm bg-muted">
-          {photo?.url && !failed ? (
-            <img
-              src={photo.url}
-              alt={photo.caption?.trim() || `Photo ${index! + 1}`}
-              className="max-h-[80vh] w-auto object-contain"
-              onError={() => setFailed(true)}
-            />
-          ) : (
-            <ImageIcon className="size-6 text-muted-foreground" aria-hidden />
-          )}
-        </div>
-        {photo ? (
-          <p className="text-xs leading-4 text-muted-foreground">
-            {caption}
-            {photo.caption?.trim() ? ` · ${photo.caption.trim()}` : ""}
-          </p>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Short dialogs ──────────────────────────────────────────────────
 
 function ShortDialog({
@@ -738,7 +644,6 @@ export function RequestDetailPage({
   const [banner, setBanner] = useState<{ tone: RequestBannerTone; message: string } | null>(null);
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [lightbox, setLightbox] = useState<number | null>(null);
 
   // Dialog fields.
   const [assignStaffId, setAssignStaffId] = useState<string>("");
@@ -1083,7 +988,6 @@ export function RequestDetailPage({
     if (!open) setDialog(null);
   };
   const vendors: Vendor[] = app.vendors;
-  const tenantName = personName(current.tenant_first_name, current.tenant_last_name);
 
   return (
     <RequestDetailView
@@ -1106,16 +1010,8 @@ export function RequestDetailPage({
       onEdit={visibility.editAndDelete ? openEdit : undefined}
       onDelete={visibility.editAndDelete ? () => setDeleteOpen(true) : undefined}
       onAddPhotos={visibility.addPhotos ? (files) => void addPhotos(files) : undefined}
-      onOpenPhoto={(_photo, index) => setLightbox(index)}
       onSend={visibility.composer ? send : undefined}
     >
-      <PhotoLightbox
-        photos={photos}
-        index={lightbox}
-        onIndexChange={setLightbox}
-        onClose={() => setLightbox(null)}
-        authorOf={(photo) => photoAuthor(photo, { tenant: tenantName, assignee })}
-      />
 
       <ShortDialog
         open={dialog === "assign"}
