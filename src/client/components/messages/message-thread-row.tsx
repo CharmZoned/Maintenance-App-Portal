@@ -21,9 +21,10 @@ export function MessageThreadRow({
 }) {
   const time = formatMessageTime(thread.updatedAt, now);
   const heading = thread.counterpart ? `${thread.counterpart} — ${thread.title}` : thread.title;
+  const when = time ? `. ${time}` : "";
   const accessibleName = thread.unread
-    ? `${heading}, unread. ${thread.preview}. ${time}`
-    : `${heading}. ${thread.preview}. ${time}`;
+    ? `${heading}, unread. ${thread.preview}${when}`
+    : `${heading}. ${thread.preview}${when}`;
 
   return (
     <button
@@ -68,9 +69,16 @@ export function MessageThreadRow({
               ) : null}
               <span className="truncate text-sm font-semibold text-foreground">{thread.title}</span>
             </div>
-            <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+            {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
           </div>
-          <p className="mt-1 truncate text-[13px] text-muted-foreground">{thread.preview}</p>
+          <p
+            className={cn(
+              "mt-1 truncate text-[13px]",
+              thread.empty ? "italic text-muted-foreground/80" : "text-muted-foreground",
+            )}
+          >
+            {thread.preview}
+          </p>
         </div>
       )}
     </button>

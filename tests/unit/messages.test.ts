@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { InboxLastMessage } from "../../src/client/lib/inbox";
+import type { InboxConversation, InboxLastMessage } from "../../src/client/lib/inbox";
 import {
   adminInboxThreads,
   formatMessageTime,
@@ -9,6 +9,8 @@ import {
   officeThreadTitleFromAccount,
   parseOfficeThreadId,
   parseWorkOrderThreadId,
+  portalInboxThreads,
+  resolvePortalMessagesLink,
   resolveStaffMessagesDeepLink,
   threadsFromOfficeSummaries,
   threadsFromWorkOrders,
@@ -50,26 +52,150 @@ describe("formatMessageTime", () => {
   });
 });
 
+const last = (partial: Partial<InboxLastMessage> & Pick<InboxLastMessage, "at">): InboxLastMessage => ({
+  body: "Hello",
+  authorRole: "admin",
+  authorUserId: "u-admin",
+  authorTenantId: null,
+  authorStaffId: null,
+  ...partial,
+});
+
+const requestConversation = (
+  requestId: number,
+  message: InboxLastMessage,
+  unread = false,
+): InboxConversation => ({ key: `wo:${requestId}`, kind: "request", requestId, last: message, unread });
+
 describe("threadsFromWorkOrders", () => {
-  it("builds request threads newest first with unread stub", () => {
-    const threads = threadsFromWorkOrders(
-      [
-        wo({ id: 1, title: "Older", created_at: "2026-11-10T12:00:00.000Z", status: "closed" }),
-        wo({ id: 2, title: "Leaking tap", request_number: "WO-1842", created_at: "2026-11-14T11:00:00.000Z" }),
-      ],
-      { now: new Date("2026-11-14T18:00:00.000Z") },
-    );
+  it("never invents unread or dates: without messages a request is an empty row dated by its report", () => {
+    const threads = threadsFromWorkOrders([
+      // A visit booked for the future must not date (or sort) the thread.
+      wo({ id: 1, title: "Tap", created_at: "2026-11-10T12:00:00.000Z", scheduled_at: "2026-11-26T09:00:00.000Z" }),
+      wo({ id: 2, title: "Leaking tap", request_number: "WO-1842", created_at: "2026-11-14T11:00:00.000Z" }),
+    ]);
+    expect(threads.map((t) => t.id)).toEqual(["wo:2", "wo:1"]);
+    expect(threads.every((t) => t.empty && !t.unread)).toBe(true);
+    expect(threads[1]?.updatedAt).toBe("2026-11-10T12:00:00.000Z");
     expect(threads[0]?.title).toBe("WO-1842 · Leaking tap");
-    expect(threads[0]?.unread).toBe(true);
-    expect(threads[1]?.unread).toBe(false);
   });
 
-  it("marks opened threads read", () => {
+  it("dates, previews, orders and flags threads by their last visible message", () => {
     const threads = threadsFromWorkOrders(
-      [wo({ id: 9, title: "Tap" })],
-      { openedIds: new Set(["wo:9"]), now: new Date("2026-11-14T18:00:00.000Z") },
+      [
+        wo({ id: 1, title: "Old report, new reply", created_at: "2026-11-01T12:00:00.000Z" }),
+        wo({ id: 2, title: "New report, no messages", created_at: "2026-11-14T11:00:00.000Z" }),
+      ],
+      {
+        inbox: [requestConversation(1, last({ at: "2026-11-14T15:00:00.000Z", body: "Booked for Thursday" }), true)],
+        viewer: { role: "tenant", userId: "u-tina" },
+      },
     );
-    expect(threads[0]?.unread).toBe(false);
+    expect(threads[0]).toMatchObject({
+      id: "wo:1",
+      updatedAt: "2026-11-14T15:00:00.000Z",
+      preview: "Landlord Gopher: Booked for Thursday",
+      unread: true,
+    });
+    expect(threads[0]?.empty).toBeFalsy();
+    // Conversations with messages come before empty rows, whatever the dates.
+    expect(threads[1]).toMatchObject({ id: "wo:2", empty: true, unread: false });
+  });
+});
+
+describe("portalInboxThreads — tenant, landlord and technician inbox", () => {
+  const tina = { role: "tenant" as const, userId: "u-tina" };
+
+  it("always lists the user's own office thread, with no date when it is empty", () => {
+    const threads = portalInboxThreads({ viewer: tina, workOrders: [], inbox: [] });
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).toMatchObject({ id: "office:u-tina", kind: "direct", empty: true, unread: false, updatedAt: "" });
+    expect(formatMessageTime(threads[0]!.updatedAt)).toBe("");
+  });
+
+  it("names who wrote last from the reader's side, and says You for their own words", () => {
+    const threads = portalInboxThreads({
+      viewer: tina,
+      workOrders: [wo({ id: 5, title: "Radiator", tenant_id: 7, tenant_first_name: "Tina" })],
+      inbox: [
+        {
+          key: "office:u-tina",
+          kind: "office",
+          threadUserId: "u-tina",
+          last: last({ at: "2026-11-14T10:00:00.000Z", body: "Thanks!", authorRole: "tenant", authorUserId: "u-tina" }),
+          unread: false,
+        },
+        requestConversation(
+          5,
+          last({ at: "2026-11-14T12:00:00.000Z", body: "On my way", authorRole: "maintenance", authorUserId: "u-sam" }),
+          true,
+        ),
+      ],
+    });
+    expect(threads.map((t) => [t.id, t.preview, t.unread])).toEqual([
+      ["wo:5", "Technician: On my way", true],
+      ["office:u-tina", "You: Thanks!", false],
+    ]);
+  });
+
+  it("leaves closed requests nobody wrote on out, but keeps open ones to start a conversation", () => {
+    const threads = portalInboxThreads({
+      viewer: tina,
+      workOrders: [wo({ id: 1, title: "Done, silent", status: "closed" }), wo({ id: 2, title: "Open, silent" })],
+      inbox: [],
+    });
+    expect(threads.map((t) => t.id)).toEqual(["office:u-tina", "wo:2"]);
+  });
+
+  it("lists a request conversation past the loaded list so every unread one can be opened", () => {
+    const threads = portalInboxThreads({
+      viewer: { role: "maintenance", userId: "u-sam" },
+      workOrders: [],
+      inbox: [requestConversation(40, last({ at: "2026-11-14T12:00:00.000Z" }), true)],
+    });
+    expect(threads.find((t) => t.id === "wo:40")).toMatchObject({ unread: true, title: "Request 40" });
+  });
+
+  it("gives landlords their office thread only", () => {
+    const threads = portalInboxThreads({
+      viewer: { role: "landlord", userId: "u-lena" },
+      workOrders: [wo({ id: 2, title: "Boiler" })],
+      inbox: [requestConversation(2, last({ at: "2026-11-14T12:00:00.000Z" }), true)],
+    });
+    expect(threads.map((t) => t.id)).toEqual(["office:u-lena"]);
+  });
+});
+
+describe("resolvePortalMessagesLink", () => {
+  const tina = { role: "tenant" as const, userId: "u-tina" };
+  const threads = portalInboxThreads({ viewer: tina, workOrders: [wo({ id: 7, title: "Heater" })], inbox: [] });
+
+  it("opens the user's own threads", () => {
+    expect(resolvePortalMessagesLink("?thread=wo:7", threads, tina)).toEqual({ kind: "open", threadId: "wo:7", draft: null });
+    expect(resolvePortalMessagesLink("?request=7", threads, tina)).toEqual({ kind: "open", threadId: "wo:7", draft: null });
+  });
+
+  it("says a request or office thread that is not theirs is unavailable — never a stand-in thread", () => {
+    expect(resolvePortalMessagesLink("?thread=wo:2", threads, tina)).toEqual({ kind: "unavailable" });
+    expect(resolvePortalMessagesLink("?request=2", threads, tina)).toEqual({ kind: "unavailable" });
+    expect(resolvePortalMessagesLink("?thread=office:someone-else", threads, tina)).toEqual({ kind: "unavailable" });
+    expect(resolvePortalMessagesLink("?thread=nonsense", threads, tina)).toEqual({ kind: "unavailable" });
+  });
+
+  it("applies the office-message helper's draft to the user's own thread", () => {
+    expect(resolvePortalMessagesLink("?office=me&about=Maple%20Court", threads, tina)).toEqual({
+      kind: "open",
+      threadId: "office:u-tina",
+      draft: "About: Maple Court\n\n",
+    });
+  });
+
+  it("sends landlords' request links to the request page", () => {
+    const lena = { role: "landlord" as const, userId: "u-lena" };
+    const own = portalInboxThreads({ viewer: lena, workOrders: [], inbox: [] });
+    expect(resolvePortalMessagesLink("?thread=wo:9", own, lena)).toEqual({ kind: "redirect", to: "/maintenance/9" });
+    expect(resolvePortalMessagesLink("?request=9", own, lena)).toEqual({ kind: "redirect", to: "/maintenance/9" });
+    expect(resolvePortalMessagesLink("?thread=office:u-lena", own, lena)).toMatchObject({ kind: "open" });
   });
 });
 
