@@ -152,7 +152,7 @@ describe("actions panel", () => {
 
     const pooled = panel({ role: "maintenance", status: "New", dbStatus: "open" });
     expect(pooled).not.toContain("Start work");
-    expect(pooled).toContain("isn&#x27;t assigned to you yet");
+    expect(pooled).toContain("isn’t assigned to you yet");
 
     const done = panel({ role: "maintenance", status: "Completed", dbStatus: "closed" });
     expect(done).not.toContain("Start work");
