@@ -2,6 +2,19 @@ import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+/**
+ * Toolbar title for landlord screens (Figma page header on 001 Landlord Pages).
+ * Phone keeps the brand. Desktop is the breadcrumb, not a second page title.
+ */
+export function LandlordPortalTitle({ crumb }: { crumb: string }) {
+  return (
+    <>
+      <span className="lg-body font-medium md:hidden">Landlord Gopher</span>
+      <span className="lg-body hidden font-medium md:inline">{crumb}</span>
+    </>
+  );
+}
+
 type Chip = { label: string; tone: "neutral" | "warning" | "info" | "success" | "brand" };
 
 export function ToneBadge({ chip }: { chip: Chip }) {
