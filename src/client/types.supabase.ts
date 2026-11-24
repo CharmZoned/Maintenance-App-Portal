@@ -489,6 +489,20 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["MaintenanceThreadReads"]["Insert"]>;
         Relationships: [];
       };
+      NotificationReads: {
+        Row: {
+          user_id: string;
+          item_key: string;
+          read_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          item_key: string;
+          read_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["NotificationReads"]["Insert"]>;
+        Relationships: [];
+      };
       MaintenanceRequestStaffNotes: {
         Row: {
           maintenance_request_id: number;
