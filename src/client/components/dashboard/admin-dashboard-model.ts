@@ -90,7 +90,7 @@ export interface DashboardCalendarEvent {
   kind: DashboardEventKind;
   /** Local calendar day, `YYYY-MM-DD`. */
   day: string;
-  /** "Scheduled visit · 10:00–11:00 am" */
+  /** "Scheduled visit · 8–12", "Scheduled visit · 8–12 (missed)" */
   title: string;
   /** "Kitchen faucet leaking · #MR-001000" */
   record: string;
@@ -162,7 +162,7 @@ export interface RequestSummary {
   context: string;
   /** Status, always followed by the next step: "High · Assigned → Attend scheduled visit". */
   statusLine: string;
-  /** "Sam Fixit, team · Tomorrow, Tue 17 Nov 2026" */
+  /** "Sam Fixit, team · Tue 17 Nov · 10–12" */
   meta: string;
   href: string;
 }
