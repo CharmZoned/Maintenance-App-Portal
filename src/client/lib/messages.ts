@@ -1,6 +1,7 @@
-import type { OfficeMessage, OfficeThreadSummary } from "@/lib/data";
+import type { OfficeMessage, OfficeThreadSummary, StaffMember, UserAccountRow } from "@/lib/data";
+import { requestKey, type InboxConversation } from "@/lib/inbox";
 import { displayNameFromEmail, roleLabel } from "@/lib/portal-nav";
-import type { MaintenanceComment, WorkOrder } from "@/types";
+import type { Landlord, MaintenanceComment, Tenant, WorkOrder } from "@/types";
 
 /** Inbox thread — request-linked uses WO comments; direct uses OfficeMessages. */
 export type MessageThreadKind = "request" | "direct";
@@ -14,8 +15,15 @@ export type MessageThread = {
   unread: boolean;
   /** Present when kind === "request". */
   requestId?: number;
-  /** Present when kind === "direct" — auth user id for OfficeMessages.thread_user_id. */
+  /** Direct office thread: whose thread it is (OfficeMessages.thread_user_id). */
   threadUserId?: string;
+  /**
+   * Admin inbox: who the conversation is with ("Tina Renter · Unit 1A"). When
+   * set, rows lead with it and show `title` as the secondary line.
+   */
+  counterpart?: string;
+  /** Stub flag for PR notes / UI banner. */
+  stub?: boolean;
 };
 
 export type NotificationItemData = {
@@ -268,6 +276,181 @@ export function commentSenderLabel(
     label: outgoing ? `You · ${pretty}` : pretty,
     outgoing,
   };
+}
+
+// ── Admin inbox (who the office is talking to) ─────────────────────
+
+const fullName = (first?: string | null, last?: string | null) =>
+  [first?.trim(), last?.trim()].filter(Boolean).join(" ");
+
+const joinParts = (parts: (string | null | undefined)[]) =>
+  parts
+    .map((p) => p?.trim())
+    .filter(Boolean)
+    .join(" · ");
+
+function unitLabel(unit: string | null | undefined): string | null {
+  const label = unit?.trim();
+  if (!label) return null;
+  return /^unit\b/i.test(label) ? label : `Unit ${label}`;
+}
+
+/** Lookups for naming the people the office talks to. Any list may be empty. */
+export interface InboxDirectory {
+  accounts: readonly UserAccountRow[];
+  staff: readonly StaffMember[];
+  tenants: readonly Tenant[];
+  landlords: readonly Landlord[];
+}
+
+/**
+ * "Tina Renter · Unit 1A", "Sam Fixit · Team", "Lena Owner · Landlord" — the
+ * person behind a portal account, or null when they cannot be named.
+ */
+export function personLabelForUser(userId: string, people: InboxDirectory): string | null {
+  const account = people.accounts.find((a) => a.user_id === userId);
+  if (!account) return null;
+  const email = account.email?.trim() || null;
+  switch (account.role) {
+    case "tenant": {
+      const tenant = people.tenants.find((t) => t.id === account.tenant_id);
+      const name = tenant ? fullName(tenant.first_name, tenant.last_name) : "";
+      if (name) return joinParts([name, unitLabel(tenant?.active_unit_name) ?? "Tenant"]);
+      return email ? `${email} · Tenant` : null;
+    }
+    case "maintenance": {
+      const member = people.staff.find((m) => m.id === account.staff_id);
+      const name = member ? fullName(member.first_name, member.last_name) : "";
+      return `${name || email || "Team member"} · Team`;
+    }
+    case "landlord": {
+      const landlord = people.landlords.find((l) => l.id === account.landlord_id);
+      const name = landlord
+        ? fullName(landlord.first_name, landlord.last_name) || landlord.company_name?.trim() || ""
+        : "";
+      return `${name || email || "Landlord"} · Landlord`;
+    }
+    default:
+      return email;
+  }
+}
+
+/**
+ * Who the office is talking to on a request: the tenant who reported it (with
+ * their unit), else the team member on it, else the place itself.
+ */
+export function requestCounterpart(wo: WorkOrder, people: Pick<InboxDirectory, "staff">): string {
+  const unit = unitLabel(wo.unit_name);
+  const tenant = fullName(wo.tenant_first_name, wo.tenant_last_name);
+  if (tenant) return joinParts([tenant, unit]);
+  const member = people.staff.find((m) => m.id === wo.assigned_staff_id);
+  const memberName = member ? fullName(member.first_name, member.last_name) : "";
+  if (memberName) return `${memberName} · Team`;
+  return joinParts(["Office request", wo.property_name, unit]);
+}
+
+/**
+ * Who wrote a request comment, as a short name for the preview line: "Office"
+ * for any admin, else the person's first name, else their role.
+ */
+function requestAuthorShortName(
+  last: InboxConversation["last"],
+  wo: WorkOrder,
+  people: InboxDirectory,
+): string {
+  switch (last.authorRole) {
+    case "admin":
+      return "Office";
+    case "tenant": {
+      const tenant = people.tenants.find((t) => t.id === last.authorTenantId);
+      const first =
+        tenant?.first_name?.trim() || (last.authorTenantId === wo.tenant_id ? wo.tenant_first_name?.trim() : "");
+      return first || "Tenant";
+    }
+    case "maintenance": {
+      const staffId =
+        last.authorStaffId ?? people.accounts.find((a) => a.user_id === last.authorUserId)?.staff_id ?? null;
+      return people.staff.find((m) => m.id === staffId)?.first_name?.trim() || "Team";
+    }
+    case "landlord":
+      return "Landlord";
+    default:
+      return "Someone";
+  }
+}
+
+/**
+ * The admin's Messages list: every direct office thread plus every request,
+ * newest activity first. Unread comes from the shared inbox rule
+ * (lib/inbox.ts), so the header count equals the dashboard KPI and the rail
+ * badge. A request with no messages yet is listed (the office can start the
+ * conversation) but is never unread.
+ */
+export function adminInboxThreads(input: {
+  workOrders: readonly WorkOrder[];
+  inbox: readonly InboxConversation[];
+  people: InboxDirectory;
+}): MessageThread[] {
+  const byKey = new Map(input.inbox.map((c) => [c.key, c]));
+  const threads: MessageThread[] = [];
+
+  for (const conversation of input.inbox) {
+    if (conversation.kind !== "office") continue;
+    threads.push({
+      id: conversation.key,
+      kind: "direct",
+      threadUserId: conversation.threadUserId,
+      counterpart: personLabelForUser(conversation.threadUserId, input.people) ?? "Portal user",
+      title: "Direct message",
+      // Their own words need no name; an office reply says so.
+      preview:
+        conversation.last.authorRole === "admin" ? `Office: ${conversation.last.body}` : conversation.last.body,
+      updatedAt: conversation.last.at,
+      unread: conversation.unread,
+    });
+  }
+
+  for (const wo of input.workOrders) {
+    const conversation = byKey.get(requestKey(wo.id));
+    threads.push({
+      id: requestKey(wo.id),
+      kind: "request",
+      requestId: wo.id,
+      counterpart: requestCounterpart(wo, input.people),
+      title: workOrderThreadTitle(wo),
+      // Several people can write on a request, so the preview names the author.
+      preview: conversation
+        ? `${requestAuthorShortName(conversation.last, wo, input.people)}: ${conversation.last.body}`
+        : workOrderPreview(wo),
+      updatedAt: conversation ? conversation.last.at : wo.created_at,
+      unread: conversation?.unread ?? false,
+    });
+  }
+
+  // A request conversation whose request is not in the loaded list (e.g. an old
+  // request past the list's row cap) still counts as unread in the shared
+  // inbox, so it gets a row too: otherwise the header, rail badge and dashboard
+  // KPI would disagree and the admin could not open it to clear the badge.
+  const listed = new Set(input.workOrders.map((wo) => wo.id));
+  for (const conversation of input.inbox) {
+    if (conversation.kind !== "request" || listed.has(conversation.requestId)) continue;
+    const role = conversation.last.authorRole;
+    threads.push({
+      id: conversation.key,
+      kind: "request",
+      requestId: conversation.requestId,
+      counterpart: "Office request",
+      title: `Request ${conversation.requestId}`,
+      preview: role === "admin" ? `Office: ${conversation.last.body}` : conversation.last.body,
+      updatedAt: conversation.last.at,
+      unread: conversation.unread,
+    });
+  }
+
+  return threads.sort(
+    (a, b) =>
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || a.id.localeCompare(b.id),
+  );
 }
 
 export function officeMessageSenderLabel(

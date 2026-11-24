@@ -1,8 +1,8 @@
-import { Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/chrome/notification-bell";
 import { AccountMenu } from "@/components/chrome/account-menu";
 import { useShellChrome } from "@/components/chrome/shell-chrome-context";
+import { AdminPageShell } from "@/components/chrome/admin-page-shell";
 
 /**
  * Page toolbar + scroll pane (Figma Page header / PageShell).
@@ -10,12 +10,18 @@ import { useShellChrome } from "@/components/chrome/shell-chrome-context";
  * 56px band aligned with the nav brand row. Title stacks above meta; chrome
  * actions (primary CTA, bell, account) sit on the right. The band stays outside
  * the scroll container.
+ *
+ * Inside the admin workspace (the only shell that sets `onOpenNav`) the page
+ * renders in the admin frame instead — `AdminPageShell`, the same header and
+ * paper pane as the Dashboard, with the title, meta and actions as the page
+ * introduction. There `width` is ignored: admin pages run full width.
  */
 export function PageShell({
   title,
   meta,
   actions,
   width = "max-w-7xl",
+  titleIsPageHeading = true,
   children,
 }: {
   title: React.ReactNode;
@@ -24,27 +30,32 @@ export function PageShell({
   /** Page-specific actions (primary CTA belongs last / use brand variant). */
   actions?: React.ReactNode;
   width?: string;
+  /**
+   * False when the page renders its own `<h1>` (e.g. LandlordPageIntro): the
+   * band title is then plain text, so the page has exactly one h1.
+   */
+  titleIsPageHeading?: boolean;
   children: React.ReactNode;
 }) {
   const chrome = useShellChrome();
 
+  if (chrome?.onOpenNav) {
+    return (
+      <AdminPageShell title={title} meta={meta} actions={actions}>
+        <div className="min-w-0 space-y-6">{children}</div>
+      </AdminPageShell>
+    );
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border px-6 admin:bg-card">
-        {chrome?.onOpenNav ? (
-          // Admin workspace only: below `lg` the rail is a drawer, opened from here.
-          <button
-            type="button"
-            onClick={chrome.onOpenNav}
-            aria-label="Open navigation menu"
-            aria-haspopup="dialog"
-            className="-ml-2 flex size-9 shrink-0 items-center justify-center rounded-sm text-foreground hover:bg-muted lg:hidden"
-          >
-            <Menu className="size-4" strokeWidth={1.75} aria-hidden />
-          </button>
-        ) : null}
+      <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border px-6">
         <div className="min-w-0 flex-1 leading-none">
-          <h1 className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
+          {titleIsPageHeading ? (
+            <h1 className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
+          ) : (
+            <p className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</p>
+          )}
           {meta ? (
             <div className="mt-0.5 truncate text-sm leading-snug text-muted-foreground">{meta}</div>
           ) : null}

@@ -3,9 +3,11 @@ import { AdminButton } from "./dashboard-primitives";
 import { QuickAddMenu } from "./quick-add-menu";
 
 /**
- * Page introduction (Figma "Page introduction" + "Page actions"): eyebrow,
- * the greeting as the page's `<h1>`, the date line, then "New request" and
- * "Quick add". Shown in every dashboard state.
+ * Page introduction (Figma "Page introduction" + "Page actions"): the greeting
+ * as the page's `<h1>` over the date line, with "New request" and "Quick add"
+ * on the same row from `sm` up (under it on phones). Kept to one compact row
+ * so the cards below fit the first screen. The eyebrow is kept for screen
+ * readers only. Shown in every dashboard state.
  */
 export function DashboardIntro({
   intro,
@@ -24,11 +26,13 @@ export function DashboardIntro({
   defaultQuickAddOpen?: boolean;
 }) {
   return (
-    <header className="flex min-w-0 flex-col gap-2">
-      <p className="lg-label break-words uppercase text-muted-foreground">{intro.eyebrow}</p>
-      <h1 className="lg-display break-words text-foreground">{intro.greeting}</h1>
-      <p className="lg-body break-words text-muted-foreground">{intro.dateLine}</p>
-      <div className="flex flex-wrap items-center gap-3">
+    <header className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <p className="sr-only">{intro.eyebrow}</p>
+        <h1 className="lg-heading break-words text-foreground">{intro.greeting}</h1>
+        <p className="lg-caption break-words text-muted-foreground">{intro.dateLine}</p>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
         {canCreateRequest ? (
           <AdminButton variant="default" className="min-w-36" onClick={onNewRequest}>
             New request

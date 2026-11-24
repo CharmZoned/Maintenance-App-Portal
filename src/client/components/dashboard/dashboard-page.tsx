@@ -4,6 +4,7 @@ import { useShellChrome } from "@/components/chrome/shell-chrome-context";
 import { WorkOrderDialog } from "@/components/maintenance/work-order-dialog";
 import { PropertyDialog } from "@/components/properties/property-dialog";
 import { TenantDialog } from "@/components/tenants/tenant-dialog";
+import { AdminUploadDocumentDialog } from "@/components/documents/admin-upload-document-dialog";
 import { useAdminDashboard } from "@/hooks/use-admin-dashboard";
 import { formatDayShort, toDay } from "@/lib/admin-dates";
 import { AdminDashboardView } from "./admin-dashboard-view";
@@ -13,7 +14,7 @@ import type { QuickAddActionId } from "./quick-add-menu";
 /** How long the "Dashboard refreshed" strip stays up. */
 const NOTICE_MS = 8_000;
 
-type OpenDialog = "request" | "property" | "tenant" | null;
+type OpenDialog = "request" | "property" | "tenant" | "document" | null;
 
 /**
  * Admin Dashboard (Figma "001 - Admin Pages" · AH — Dashboard).
@@ -81,10 +82,7 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
           navigate("/rent");
           break;
         case "upload-document":
-          navigate("/documents");
-          break;
-        case "new-listing":
-          navigate("/listings");
+          setDialog("document");
           break;
         case "new-message":
           navigate("/messages");
@@ -119,6 +117,11 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
         open={dialog === "tenant"}
         onOpenChange={closeDialog}
         onSaved={() => void refreshAfterSave()}
+      />
+      <AdminUploadDocumentDialog
+        open={dialog === "document"}
+        onOpenChange={closeDialog}
+        onUploaded={() => void refreshAfterSave()}
       />
     </>
   );

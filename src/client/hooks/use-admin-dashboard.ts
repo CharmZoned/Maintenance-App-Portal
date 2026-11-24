@@ -15,6 +15,7 @@ import {
 } from "@/lib/admin-dashboard";
 import { greetingForHour, toDay } from "@/lib/admin-dates";
 import * as data from "@/lib/data";
+import { loadAdminInbox } from "@/lib/inbox";
 import type { Landlord, Property } from "@/types";
 
 /** A secondary read: a failure becomes `null` and only its own card degrades. */
@@ -51,7 +52,7 @@ export async function loadAdminDashboardSources(input: {
     comments,
     payments,
     documents,
-    officeThreads,
+    inbox,
   ] = await Promise.all([
     // An empty shell list may mean "none yet" or "lookups failed", so confirm
     // with a real read before the page is allowed to show the empty state.
@@ -72,7 +73,8 @@ export async function loadAdminDashboardSources(input: {
     soft(data.listRecentMaintenanceComments()),
     soft(data.listRecentPayments()),
     soft(data.listRecentDocumentUploads()),
-    soft(data.listOfficeThreads()),
+    // Same inbox and unread rule as the Messages page and the rail badge.
+    soft(loadAdminInbox()),
   ]);
 
   return {
@@ -95,7 +97,7 @@ export async function loadAdminDashboardSources(input: {
     comments,
     payments,
     documents,
-    officeThreads,
+    inbox,
   };
 }
 

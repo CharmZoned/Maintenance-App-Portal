@@ -15,11 +15,11 @@ import {
 } from "@/lib/admin-dashboard";
 import { loadAdminDashboardSources } from "@/hooks/use-admin-dashboard";
 import type {
-  OfficeThreadSummary,
   PaymentAwaitingVerification,
   RecentMaintenanceComment,
   UserAccountRow,
 } from "@/lib/data";
+import type { InboxConversation, InboxLastMessage } from "@/lib/inbox";
 import type { Application, Landlord, Lease, Property, RentCharge, Tenant, Unit, WorkOrder } from "@/types";
 import { fixtureIntro, fixtureModel, fixtureStates } from "../preview/admin-dashboard-fixture";
 import { createWorkOrder, listWorkOrders, listWorkOrdersForDashboard } from "@/lib/data";
@@ -31,6 +31,15 @@ import { PERSONAS, resetWorld, signInApp, signOutApp, sql } from "../support/har
  * the design's. "Now" is Monday 16 November 2026, 9:30 am local time.
  */
 const NOW = new Date(2026, 10, 16, 9, 30);
+
+/** The latest message of an inbox conversation. */
+function last(partial: Partial<InboxLastMessage> & Pick<InboxLastMessage, "at" | "body">): InboxLastMessage {
+  return { authorRole: null, authorUserId: null, authorTenantId: null, authorStaffId: null, ...partial };
+}
+
+function officeConversation(threadUserId: string, unread: boolean, message: InboxLastMessage): InboxConversation {
+  return { key: `office:${threadUserId}`, kind: "office", threadUserId, last: message, unread };
+}
 
 /** A local wall-clock time as the ISO string the database would return. */
 function at(year: number, month: number, day: number, hour = 0, minute = 0): string {
@@ -273,10 +282,10 @@ function sampleWorld(): AdminDashboardSources {
       email_confirmed_at: at(2026, 11, 16, 8, 5),
     }),
   ];
-  const officeThreads: OfficeThreadSummary[] = [
-    { thread_user_id: "u-lena", last_message_at: at(2026, 11, 16, 8, 40), last_message_body: "Boiler follow-up — can we confirm the part?", last_author_role: "landlord", last_author_user_id: "u-lena", unread: true },
-    { thread_user_id: "u-raj", last_message_at: at(2026, 11, 13, 18, 13), last_message_body: "Sent the rest by Zelle. Please verify.", last_author_role: "tenant", last_author_user_id: "u-raj", unread: true },
-    { thread_user_id: "u-sam", last_message_at: at(2026, 11, 16, 8, 50), last_message_body: "Tomorrow’s faucet visit is confirmed.", last_author_role: "maintenance", last_author_user_id: "u-sam", unread: true },
+  const inbox: InboxConversation[] = [
+    officeConversation("u-lena", true, last({ at: at(2026, 11, 16, 8, 40), body: "Boiler follow-up — can we confirm the part?", authorRole: "landlord", authorUserId: "u-lena" })),
+    officeConversation("u-raj", true, last({ at: at(2026, 11, 13, 18, 13), body: "Sent the rest by Zelle. Please verify.", authorRole: "tenant", authorUserId: "u-raj" })),
+    officeConversation("u-sam", true, last({ at: at(2026, 11, 16, 8, 50), body: "Tomorrow’s faucet visit is confirmed.", authorRole: "maintenance", authorUserId: "u-sam" })),
   ];
   const applications: Application[] = [
     {
@@ -323,7 +332,7 @@ function sampleWorld(): AdminDashboardSources {
     documents: [
       { id: 1, created_at: at(2026, 11, 16, 9, 5), title: "Lease renewal 2027 — 1A.pdf", file_name: "lease.pdf", property_id: 1, unit_id: 11, uploaded_by_user_id: "u-ada", uploaded_by_role: "admin", uploaded_by_tenant_id: null },
     ],
-    officeThreads,
+    inbox,
   };
 }
 
@@ -425,8 +434,15 @@ describe("KPI tiles", () => {
     expect(tile("homes-live")).toMatchObject({ value: "6", detail: "1 vacant not listed", href: "/listings" });
   });
 
+  test("homes live counts only flags that match a known unit, the same rule as the Website listings page", () => {
+    const sources = world();
+    sources.marketing = [...sources.marketing!, { unit_id: 999, marketed: true }];
+    const live = buildAdminDashboardModel(sources, NOW).kpis.find((k) => k.id === "homes-live")!;
+    expect(live.value).toBe("6");
+  });
+
   test("a failed secondary source shows a dash on its own tile only", () => {
-    const degraded = buildAdminDashboardModel(world({ charges: null, accounts: null, officeThreads: null, marketing: null }), NOW);
+    const degraded = buildAdminDashboardModel(world({ charges: null, accounts: null, inbox: null, marketing: null }), NOW);
     const value = (id: string) => degraded.kpis.find((k) => k.id === id)!.value;
     expect(["rent-collected", "approvals", "unread-messages", "homes-live"].map(value)).toEqual(["—", "—", "—", "—"]);
     expect(value("open-requests")).toBe("3");
@@ -493,8 +509,10 @@ describe("needs your attention", () => {
       title: "Birch House Unit 1 is vacant and not listed",
       context: "Lena Owner, landlord · Ready for move-in",
       href: "/properties/2",
-      actionHref: "/listings",
+      // Listings can't be published from the portal, so the action opens the property.
+      actionLabel: "Open property",
     });
+    expect(vacant.actionHref).toBeUndefined();
     expect(followUp).toMatchObject({
       title: "Boiler making noise · follow-up due Fri 20 Nov",
       context: "On hold → Follow up: Check part delivery · In 4 days, 20 Nov 2026",
@@ -872,7 +890,7 @@ describe("maintenance snapshot", () => {
     expect(snapshot.requests.map((r) => r.id)).toEqual(["2", "1"]);
     expect(snapshot.requests[0].statusLine).toBe("Emergency · Assigned → Schedule a visit");
     expect(snapshot.requests[0].meta).toBe("Sam Fixit, team · Not scheduled yet");
-    expect(snapshot.summaryLine).toBe("2 open · 1 emergency · 0 unassigned");
+    expect(snapshot.summaryLine).toBe("2 open · 1 emergency · 0 need action");
     expect(snapshot.spendLine).toBeNull();
   });
 });
@@ -886,35 +904,72 @@ describe("messages", () => {
       ["user", "Lena Owner · Landlord", "Boiler follow-up — can we confirm the part?", "Today · 16 Nov", true],
       ["user", "Raj Patel · Tenant · 1B", "Sent the rest by Zelle. Please verify.", "Fri · 13 Nov", true],
     ]);
+    // Each row opens its own conversation on the Messages page.
     expect(messages.threads.map((t) => t.href)).toEqual([
-      "/messages?thread=office:u-sam",
-      "/messages?thread=office:u-lena",
-      "/messages?thread=office:u-raj",
+      "/messages?thread=office%3Au-sam",
+      "/messages?thread=office%3Au-lena",
+      "/messages?thread=office%3Au-raj",
     ]);
   });
 
-  test("request comments appear as conversations but are never claimed unread", () => {
-    const comments: RecentMaintenanceComment[] = [
-      { id: 2, maintenance_request_id: 1000, body: "Can someone come\nTuesday?", visibility: "tenant_visible", author_role: "tenant", author_staff_id: null, author_tenant_id: 1, author_user_id: null, created_at: at(2026, 11, 16, 9, 20) },
-      { id: 1, maintenance_request_id: 1000, body: "Older comment", visibility: "tenant_visible", author_role: "tenant", author_staff_id: null, author_tenant_id: 1, author_user_id: null, created_at: at(2026, 11, 15, 9) },
-    ];
-    const { messages } = buildAdminDashboardModel(world({ comments, officeThreads: [] }), NOW);
-    expect(messages.summaryLine).toBe("0 unread · Latest conversations");
-    expect(messages.threads).toEqual([
+  test("request conversations carry the shared unread state, and the KPI counts the same inbox", () => {
+    const inbox: InboxConversation[] = [
       {
-        id: "wo-1000",
-        icon: "user",
-        name: "Tina Renter · Tenant · 1A",
-        preview: "Kitchen faucet leaking — Can someone come Tuesday?",
-        time: "Today · 16 Nov",
-        unread: false,
-        href: "/messages?thread=wo:1000",
+        key: "wo:1000",
+        kind: "request",
+        requestId: 1000,
+        last: last({ at: at(2026, 11, 16, 9, 20), body: "Can someone come\nTuesday?", authorRole: "tenant", authorTenantId: 1 }),
+        unread: true,
       },
+      officeConversation("u-sam", false, last({ at: at(2026, 11, 16, 8, 50), body: "Thanks!", authorRole: "admin" })),
+    ];
+    const model = buildAdminDashboardModel(world({ inbox }), NOW);
+    expect(model.messages.summaryLine).toBe("1 unread · Latest conversations");
+    expect(model.kpis.find((k) => k.id === "unread-messages")!.value).toBe("1");
+    expect(model.messages.threads[0]).toEqual({
+      id: "wo-1000",
+      icon: "user",
+      name: "Tina Renter · Tenant · 1A",
+      preview: "Kitchen faucet leaking — Can someone come Tuesday?",
+      time: "Today · 16 Nov",
+      unread: true,
+      href: "/messages?thread=wo:1000",
+    });
+    expect(model.messages.threads[1]).toMatchObject({ id: "office-u-sam", unread: false });
+  });
+
+  test("a request conversation is named by who it is with — like the Messages page — not by who wrote last", () => {
+    const base = sampleWorld();
+    const inbox: InboxConversation[] = [
+      {
+        key: "wo:1000",
+        kind: "request",
+        requestId: 1000,
+        // Sam (the team member on it) wrote last; the conversation is still with Tina.
+        last: last({ at: at(2026, 11, 16, 9, 20), body: "On my way.", authorRole: "maintenance", authorStaffId: 1 }),
+        unread: true,
+      },
+      {
+        key: "wo:995",
+        kind: "request",
+        requestId: 995,
+        last: last({ at: at(2026, 11, 16, 9, 10), body: "Part arrives Friday.", authorRole: "admin" }),
+        unread: false,
+      },
+    ];
+    // No tenant on the boiler job: it is with the team member assigned.
+    const workOrders = base.workOrders.map((w) =>
+      w.id === 995 ? { ...w, tenant_id: null, tenant_first_name: null, tenant_last_name: null } : w,
+    );
+    const { messages } = buildAdminDashboardModel({ ...base, workOrders, inbox }, NOW);
+    expect(messages.threads.map((t) => [t.id, t.icon, t.name])).toEqual([
+      ["wo-1000", "user", "Tina Renter · Tenant · 1A"],
+      ["wo-995", "wrench", "Lee Wrench · Team"],
     ]);
   });
 
-  test("unavailable when neither source loaded", () => {
-    expect(buildAdminDashboardModel(world({ comments: null, officeThreads: null }), NOW).messages).toEqual({
+  test("unavailable when the inbox did not load", () => {
+    expect(buildAdminDashboardModel(world({ inbox: null }), NOW).messages).toEqual({
       summaryLine: "Messages aren’t available right now.",
       threads: [],
       href: "/messages",
@@ -951,7 +1006,8 @@ describe("listings and portfolio", () => {
     // The home is still known to be vacant, just not whether it is listed.
     expect(degraded.attention.items.find((i) => i.id === "vacant-21")).toMatchObject({
       title: "Birch House Unit 1 is vacant",
-      actionLabel: "Manage listings",
+      href: "/properties/2",
+      actionLabel: "Open property",
     });
   });
 
@@ -990,7 +1046,7 @@ describe("every link is a route the portal has", () => {
       model.listings.href,
     ].filter((href): href is string => Boolean(href));
     const route =
-      /^\/(maintenance(\/\d+)?|rent(\?(period=\d{4}-\d{2}|verify=\d+))?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=(wo:\d+|office:[\w-]+))?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
+      /^\/(maintenance(\/\d+)?|rent(\?(period=\d{4}-\d{2}|verify=\d+))?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=(wo:\d+|office%3A[\w-]+))?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
     for (const href of hrefs) expect(href).toMatch(route);
   });
 });

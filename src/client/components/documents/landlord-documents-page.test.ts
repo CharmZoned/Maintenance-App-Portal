@@ -155,7 +155,8 @@ describe("landlord documents filters", () => {
     expect(body()).toContain("Lease renewal");
     expect(body()).toContain("Boiler service report");
     expect(body()).toContain("Property: All properties");
-    expect(document.querySelectorAll("h1")).toHaveLength(2);
+    // Exactly one page heading: the intro h1 (the toolbar title is a label).
+    expect(document.querySelectorAll("h1")).toHaveLength(1);
   });
 
   it("filters to documents shared with the landlord", async () => {

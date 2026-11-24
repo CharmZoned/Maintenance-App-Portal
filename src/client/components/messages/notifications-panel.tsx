@@ -278,7 +278,7 @@ export function NotificationsPanel({
 
   const stubNote = items.some((i) => i.stub) ? (
     <p className="shrink-0 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
-      Stub · live push/email notifications are not wired yet.
+      These alerts show here in the portal. Email and push alerts are coming soon.
     </p>
   ) : null;
 

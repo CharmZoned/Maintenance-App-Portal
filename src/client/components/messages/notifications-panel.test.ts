@@ -195,7 +195,7 @@ describe("landlord notifications panel chrome", () => {
     const html = markup({ items: [today] });
     expect(html).toContain("Mark all read");
     expect(html).toContain(">Close<");
-    expect(html).toContain("Stub · live push/email notifications are not wired yet.");
+    expect(html).toContain("These alerts show here in the portal. Email and push alerts are coming soon.");
     expect(html).toContain('aria-label="Dismiss notifications"');
     expect(html).not.toContain("Landlord portal");
     expect(html).not.toContain("Mark all as read");

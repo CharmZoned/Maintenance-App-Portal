@@ -165,7 +165,11 @@ export function LandlordDocumentsPage() {
   }
 
   return (
-    <PageShell title={<LandlordPortalTitle crumb="Landlord portal / Documents" />} width="max-w-6xl">
+    <PageShell
+      title={<LandlordPortalTitle crumb="Landlord portal / Documents" />}
+      width="max-w-6xl"
+      titleIsPageHeading={false}
+    >
       <div className="flex flex-col gap-9">
         <div className="flex flex-col gap-7">
           <LandlordPageIntro eyebrow={EYEBROW} title={TITLE} description={DESCRIPTION} />

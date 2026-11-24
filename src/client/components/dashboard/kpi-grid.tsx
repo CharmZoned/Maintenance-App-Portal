@@ -2,14 +2,15 @@ import { cn } from "@/lib/utils";
 import type { KpiTile } from "./admin-dashboard-model";
 import { navProps } from "./dashboard-primitives";
 
-// 24px side padding at the designed tile widths (173px and up); 16px when the
-// tile is narrower, so labels keep to one line on small phones and at `xl`.
+// Compact tile (~100px tall): the dashboard has to fit one screen, and the
+// value is what the eye is after. 16px sides; 20px from the designed 173px up.
 const TILE =
-  "flex h-full min-h-[164px] min-w-0 flex-col gap-1 rounded-lg border border-border bg-card px-4 py-5 @[172px]:px-6";
+  "flex h-full min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card px-4 py-3 @[172px]:px-5";
 
 /**
  * Portfolio KPIs (Figma "Portfolio KPIs" · LH / KPI tile): label, value and a
- * detail line. Two across on phone, three from `md`, six from `xl`. A tile
+ * detail line. The detail line keeps to one line on wide screens (the full
+ * text is in the tooltip and stays in the accessible name). Two across on phone, three from `md`, six from `xl`. A tile
  * with an `href` is one link — the whole tile is the target.
  */
 export function KpiGrid({
@@ -29,9 +30,16 @@ export function KpiGrid({
       {tiles.map((tile) => {
         const body = (
           <>
-            <span className="lg-body-medium break-words text-muted-foreground">{tile.label}</span>
-            <span className="lg-display break-words text-foreground">{tile.value}</span>
-            <span className="lg-caption break-words text-muted-foreground">{tile.detail}</span>
+            <span className="lg-caption break-words font-medium text-muted-foreground">
+              {tile.label}
+            </span>
+            <span className="lg-heading break-words text-foreground">{tile.value}</span>
+            <span
+              title={tile.detail}
+              className="lg-caption break-words text-muted-foreground xl:line-clamp-2"
+            >
+              {tile.detail}
+            </span>
           </>
         );
         return (

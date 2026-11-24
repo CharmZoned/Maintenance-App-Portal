@@ -1056,6 +1056,7 @@ function LandlordRequestShell({
     <PageShell
       title={<LandlordPortalTitle crumb={crumb} mobileLabel={requestNumber ?? "Maintenance"} />}
       width="max-w-[45rem]"
+      titleIsPageHeading={false}
     >
       <div className="flex flex-col gap-5">{children}</div>
     </PageShell>

@@ -22,7 +22,7 @@ export const fixtureIntro: DashboardIntroModel = {
 
 export const fixtureModel: AdminDashboardModel = {
   kpis: [
-    { id: "open-requests", label: "Open requests", value: "3", detail: "0 emergency · 1 unassigned", href: "/maintenance" },
+    { id: "open-requests", label: "Open requests", value: "3", detail: "0 emergency · 0 need action", href: "/maintenance" },
     { id: "rent-collected", label: "Rent collected", value: "94%", detail: "$10,575 of $11,300", href: "/rent" },
     { id: "occupancy", label: "Occupancy", value: "89%", detail: "8 of 9 units occupied", href: "/properties" },
     { id: "approvals", label: "Approvals waiting", value: "1", detail: "Riley Applicant", href: "/people" },
@@ -71,8 +71,7 @@ export const fixtureModel: AdminDashboardModel = {
         title: "Birch House Unit 1 is vacant and not listed",
         context: "Lena Owner, landlord · Ready for move-in",
         href: "/properties",
-        actionLabel: "Create listing",
-        actionHref: "/listings",
+        actionLabel: "Open property",
       },
       {
         id: "follow-up-995",
@@ -231,7 +230,7 @@ export const fixtureModel: AdminDashboardModel = {
     href: "/rent",
   },
   maintenance: {
-    summaryLine: "3 open · 0 emergency · 1 unassigned",
+    summaryLine: "3 open · 0 emergency · 0 need action",
     countLines: ["New 0 · Assigned 1 · In progress 1", "On hold 1 · Completed 1"],
     spendLine: "Spend · $180 this month · $1,240 this year",
     requests: [
