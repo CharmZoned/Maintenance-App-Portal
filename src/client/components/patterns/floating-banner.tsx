@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CircleAlert, CircleCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FLOATING_BANNER_ATTR, useOpenDialogCount } from "@/lib/open-dialogs";
 
 export type FloatingBannerTone = "success" | "error";
 
@@ -13,8 +14,10 @@ export const SUCCESS_DISMISS_MS = 4000;
  *
  * Rendered into `document.body` above dialog overlays (z-60, pointer events
  * on), so a save that fails inside a dialog or bottom sheet is never drawn
- * behind it. Mounting after the dialog opened also keeps it out of the
- * dialog's aria-hidden sweep, so screen readers announce it.
+ * behind it. While any dialog is open it sits at the top, clear of the
+ * dialog's Save / Cancel, and it is re-mounted when a dialog opens so the
+ * dialog's aria-hidden sweep never hides it. Dialogs ignore clicks on it, so
+ * Dismiss never closes the dialog underneath.
  *
  * Errors do not auto-dismiss: a message that vanishes in four seconds is easy
  * to miss on a phone in the field.
@@ -35,6 +38,7 @@ export function FloatingBanner({
   placement?: "default" | "above-bar";
 }) {
   const ms = autoDismissMs ?? (tone === "success" ? SUCCESS_DISMISS_MS : 0);
+  const overDialog = useOpenDialogCount() > 0;
 
   useEffect(() => {
     if (!ms) return;
@@ -44,15 +48,13 @@ export function FloatingBanner({
 
   if (typeof document === "undefined") return null;
 
-  // With a dialog or sheet open, its actions sit at the bottom: show the
-  // message at the top so it never covers Save / Cancel.
-  const overDialog =
-    document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]') !=
-    null;
-
   const Icon = tone === "success" ? CircleCheck : CircleAlert;
   return createPortal(
     <div
+      // A fresh node when a dialog opens: it lands after the dialog's
+      // aria-hidden sweep, so screen readers still reach it.
+      key={overDialog ? "over-dialog" : "page"}
+      {...{ [FLOATING_BANNER_ATTR]: "" }}
       role={tone === "success" ? "status" : "alert"}
       data-testid="floating-banner"
       style={{ pointerEvents: "auto" }}

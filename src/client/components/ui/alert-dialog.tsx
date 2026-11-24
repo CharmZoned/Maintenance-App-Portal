@@ -4,6 +4,13 @@ import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 import { useFocusReturn } from "@/lib/focus-return";
+import { useMarkDialogOpen } from "@/lib/open-dialogs";
+
+/** Rendered inside open dialog content only: counts it as open. */
+function OpenMarker() {
+  useMarkDialogOpen();
+  return null;
+}
 
 /**
  * The confirm surface for destructive actions.
@@ -49,7 +56,10 @@ const AlertDialogContent = React.forwardRef<
             onOpenAutoFocus={focusReturn.onOpenAutoFocus}
             onCloseAutoFocus={focusReturn.onCloseAutoFocus}
             {...props}
-          />
+          >
+            <OpenMarker />
+            {props.children}
+          </AlertDialogPrimitive.Content>
         </div>
       </AlertDialogOverlay>
     </AlertDialogPortal>

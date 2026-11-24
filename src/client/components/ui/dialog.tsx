@@ -4,6 +4,13 @@ import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useFocusReturn } from "@/lib/focus-return";
+import { startedOnFloatingBanner, useMarkDialogOpen } from "@/lib/open-dialogs";
+
+/** Rendered inside open dialog content only: counts it as open. */
+export function OpenMarker() {
+  useMarkDialogOpen();
+  return null;
+}
 
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
@@ -28,7 +35,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, onOpenAutoFocus, onCloseAutoFocus, ...props }, ref) => {
+>(({ className, children, onOpenAutoFocus, onCloseAutoFocus, onInteractOutside, ...props }, ref) => {
   const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
   return (
   <DialogPortal>
@@ -42,8 +49,14 @@ const DialogContent = React.forwardRef<
           )}
           onOpenAutoFocus={focusReturn.onOpenAutoFocus}
             onCloseAutoFocus={focusReturn.onCloseAutoFocus}
+          onInteractOutside={(event) => {
+            // Dismissing a floating message is not a click outside the dialog.
+            if (startedOnFloatingBanner(event)) event.preventDefault();
+            onInteractOutside?.(event);
+          }}
           {...props}
         >
+          <OpenMarker />
           {children}
           <DialogPrimitive.Close className="absolute right-2 top-2 flex size-11 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none">
             <X className="h-4 w-4" />
@@ -83,4 +96,5 @@ const DialogDescription = React.forwardRef<
 ));
 DialogDescription.displayName = DialogPrimitive.Description.displayName;
 
+export { OpenMarker as DialogOpenMarker };
 export { Dialog, DialogPortal, DialogOverlay, DialogClose, DialogTrigger, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription };
