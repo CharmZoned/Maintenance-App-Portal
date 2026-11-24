@@ -157,7 +157,7 @@ not on Supabase. It is fixed with a new forward migration, then step 4 is run ag
 
 | # | Who | Task |
 |---|---|---|
-| 3.1 | Owner | Import the repo into Vercel (framework: Vite, output `dist`). Vercel builds `master` once on import; with no production variables set, that build only shows the app's "missing configuration" notice and cannot reach any database. It is configured in Phase 4. |
+| 3.1 | Owner | Import the repo into Vercel (framework: Vite, output `dist`). Vercel builds `main` once on import; with no production variables set, that build only shows the app's "missing configuration" notice and cannot reach any database. It is configured in Phase 4. |
 | 3.2 | Owner + Agent | Create the `staging` custom environment tracking the `staging` branch. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_APP_ENV=staging`, `VITE_DEMO_PASSWORD` for staging and preview. Leave `VITE_DEMO_PASSWORD` unset for production. |
 | 3.3 | Owner | Turn on Vercel Authentication (Standard Protection). Create a protection-bypass token for automation and store it as a GitHub secret. |
 | 3.4 | Agent | Add the staging and preview addresses to the staging auth redirect list in `[remotes.staging.auth]`. |

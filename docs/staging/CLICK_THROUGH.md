@@ -34,6 +34,13 @@ owners or money.
    you straight in.
 4. **Switch roles** with the button on the right of the ribbon (`Viewing as Admin ▾`).
    Pick another role and you land on that role's home. You do not need to sign out.
+5. **Start from fresh data, one writer at a time.** Steps marked ✎ change data for
+   everyone. Before a pass, ask the owner to run "Reset staging data" (see [Reset](#reset)),
+   or check that the requests match the table below. Only one tester runs the ✎ steps and
+   the shared flow at a time; others do the read-only steps.
+6. **Admins assign work.** Technician self-claim is switched off on staging, so there are
+   no Job offers or Accept buttons. If you see them, stop and tell the owner: Maintenance
+   step 1 and the shared flow assume it is off.
 
 ### The demo world
 
@@ -78,12 +85,12 @@ Ribbon → **Admin**.
    Completed. Needs action lists the unassigned requests, including Front door lock
    sticking, Bathroom outlet sparks when used, Kitchen faucet dripping and Annual furnace
    service. Each row shows title, priority, status, place and tenant, assignee and age.
-   Filter by property (Birch House) and search "radiator". The tab, filter and search
-   appear in the address bar.
-4. **Request page** (#100). Open **Bedroom radiator stays cold**. You see the title with
+   Filter by property **Birch House**: only Annual furnace service is left. Clear the
+   filter, then search "radiator". The tab, filter and search appear in the address bar.
+4. **Request page** (#100). From the search results, open **Bedroom radiator stays cold**. You see the title with
    `#MR-…`, an **In progress** status and an **Emergency** chip, two photos ("N of 5"), and
    a timeline that names Riley Wrench and Tina Renter. Tap a photo to enlarge it. Then
-   press **Back**: you return to the queue with your filter still set (#103).
+   press **Back**: you return to the queue with your search still set (#103).
 5. **Internal notes** (#100). Open **Bedroom window won't latch**. The timeline shows two
    tinted "Internal" lines ("The part is on back-order…", "Thanks. Keep the tenant
    posted…"). Prices read Worker $90 · Landlord $135.
@@ -130,8 +137,8 @@ Ribbon → **Landlord**.
    press Back without sending.
 6. **Messages** (`/messages`, #98). The office thread shows the $120 exchange. There are
    no tenant or request threads to reply in.
-7. **Documents** (`/documents`, #95). Filters **All / Shared with me / I shared** and a
-   property filter. Lena sees both leases, the building rules and the insurance
+7. **Documents** (`/documents`, #95). Filters **All / Shared with me** and a property
+   filter. Lena sees both leases, the building rules and the insurance
    certificate. She must **not** see the Roof inspection report (office only).
 8. **Bell** (#97, #103). Open the bell. Rows are about her properties, written as "you".
    **Mark all read** clears the count. The panel says email and push alerts are coming
@@ -151,8 +158,8 @@ Ribbon → **Tenant**.
 3. **Request page** (#100, #103). Open **Garbage disposal jammed**: "You confirmed it's
    fixed". Open **Bedroom radiator stays cold**: Riley Wrench's update ("Bleeding the
    radiator now…") and no internal notes or prices.
-4. **✎ Reply on a request** (#100). On Kitchen faucet dripping, write "Staging test, still
-   dripping" and send. It appears in the timeline as "You".
+4. **✎ Reply on a request** (#100). On Bedroom radiator stays cold, write "Staging test,
+   still cold" and send. It appears in the timeline as "You".
 5. **Messages** (`/messages`, #98). An office thread is always there, plus her request
    threads.
 6. **Documents** (`/documents`). Lease agreement, Unit 1A and Building rules and trash
@@ -179,14 +186,14 @@ Ribbon → **Maintenance**.
 
 ---
 
-## Shared flow: report → schedule → complete → confirm (all ✎)
+## Shared flow: schedule → complete → reopen → confirm (all ✎)
 
 One request travels through every role. Use **Kitchen faucet dripping** (Tina, Unit 1A),
 which is in the seed already. About 10 minutes.
 
 | # | Role | Do this | You should see |
 |---|---|---|---|
-| F1 | Admin | Open Kitchen faucet dripping. Press **Assign and schedule**. Pick **Sam Fixit**, tomorrow's date, arrival window **Afternoon**. Save. (#103) | Status Assigned. Visit reads e.g. "Wed 25 Nov · 12–5". Picking a window that is already over warns you. |
+| F1 | Admin | Open Kitchen faucet dripping. Press **Assign and schedule**. Pick **Sam Fixit**, tomorrow's date, arrival window **Afternoon**. Press **Assign**. (#103) | Status Assigned. Visit reads e.g. "Wed 25 Nov · 12–5". Picking a window that is already over warns you. |
 | F2 | Maintenance | My jobs. (#103) | Kitchen faucet dripping is listed, tomorrow 12–5. Also in Calendar. |
 | F3 | Maintenance | Open it, press **Start work**. | Status In progress. |
 | F4 | Maintenance | Press **Mark completed**. In the dialog press **Add photo**, choose any image, write "Replaced the washer" under **What fixed it?**, then **Mark completed**. (#103) | Status Completed. The photo shows on the request. Without a photo the dialog explains why one is needed and does not close. |
@@ -210,8 +217,9 @@ photo, document and message back as described above. Tell other testers before y
 
 ## Known stubs: do not file these as bugs
 
-- **Rent payments:** card (Stripe), bank (ACH) and Zelle on the tenant's Pay rent screen.
-  The buttons are disabled and say "Not connected". No money moves.
+- **Rent payments:** on the tenant's Pay rent screen you can select Zelle, card (Stripe)
+  or bank (ACH), but each says "Not connected — no debit will be sent." and **Authorize &
+  pay · unavailable** stays disabled. No money moves.
 - **Zelle verification** on the admin Rent page is real, but tenants cannot report a Zelle
   payment yet, so "Awaiting verification" is normally empty.
 - **Email and push notifications.** Alerts show only in the bell. The panel says so.
@@ -246,6 +254,8 @@ Phone or laptop, and the browser, help too.
 ## Results
 
 Tester: ____________  Date: ____________  Build (from ribbon): ____________
+
+Put an ✗ in Pass or Fail for each step. In Notes, add the problem report's step number or a short note.
 
 ### Admin
 
