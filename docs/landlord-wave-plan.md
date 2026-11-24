@@ -19,13 +19,17 @@ The landlord has four jobs: **see their units, see their requests, put a request
 
 ---
 
-## 2. Decisions needed before kickoff (lead gets answers, ~30 min)
+## 2. Decisions (answered by the owner 2026-11-24)
+
+**Answers:** D1 yes · D2 yes · D3 tenant does **not** see a landlord-filed request; the landlord form **does** include "Permission to enter", **default No** · D4 as recommended · D5 as recommended · D6 real link (`OfficeMessages.request_id`) · D7 hide, don't delete.
+
+**Integration branch:** `claude/pensive-mayer-8ggg5v` (not `landlord-wave`; only this branch may be pushed). Stream branches are local `landlord/<id>` branches merged into it.
 
 | # | Question | Recommendation | Blocks |
 |---|---|---|---|
 | D1 | Can landlords submit requests? (SOW §1 says yes, §2 only names tenants) | **Yes.** Build it and note it in the beta release notes. | LG-A1, LG-C |
 | D2 | Can landlords file **common-area** requests (no unit)? | **Yes:** the schema already allows it. | LG-A1, LG-C |
-| D3 | Does the tenant of that unit see a landlord-filed request? | **No for beta.** RLS keeps tenants to requests they submitted. The admin coordinates entry. The form must not ask the landlord for "permission to enter" (see the Figma handoff note on Q5). | LG-A1, LG-C |
+| D3 | Does the tenant of that unit see a landlord-filed request? | **No for beta.** RLS keeps tenants to requests they submitted. The admin coordinates entry. The landlord form shows "Permission to enter" defaulting to No. | LG-A1, LG-C |
 | D4 | Status names | **Display** New / Assigned / In progress / On hold / Completed everywhere. Keep the five DB values (Wave 3 decision #11). Tell the client in writing that "On hold" is an added status. | LG-F |
 | D5 | Priority names | One set, everywhere: **Normal / High / Emergency** (DB `urgent` → "Emergency"). Never print the raw DB value. | LG-F |
 | D6 | "Regarding request #…" in chat | **A nullable `request_id` column on `OfficeMessages`.** The check ensures the author can see that request. The fallback is plain text, with no migration. | LG-A2, LG-B |
@@ -109,7 +113,7 @@ Each stream owns its files. A file listed under one stream is edited **only** by
   | Failed submit | `35:26437` | `35:26974` |
   | Success | `35:26589` | `35:27058` |
 
-- Fields: property, unit (or "Common area"), title, category, description, up to 5 photos, priority (Normal / High / Emergency per D5), and an emergency banner. No "permission to enter" field (D3).
+- Fields: property, unit (or "Common area"), title, category, description, up to 5 photos, priority (Normal / High / Emergency per D5), an emergency banner, and "Permission to enter" (**default No**, D3).
 - Prop `presetUnitId?` / `presetPropertyId?`, so the unit page and property page open it pre-filled.
 - Data function `createLandlordRequest()` in a new `src/client/lib/landlord-requests.ts`. Upload photos after the row exists, as the tenant flow does.
 - Patch to the lead for `use-app-state.ts`: add `canSubmitRequest: isAdmin || isTenant || isLandlord`, leaving `canCreateWorkOrders` unchanged.
@@ -292,7 +296,7 @@ Each agent gets this preamble first:
 |---|---|
 | LG-A | "You are LG-A. Write migrations A1 and A2 exactly as §3 describes, in the reserved slots. Add the R4/R7 tests listed. Regenerate `types.supabase.ts`. Prove a landlord can file on their own unit and a common area and is refused everywhere else." |
 | LG-B | "You are LG-B. Build landlord ↔ office chat on the existing `OfficeMessages` tables: `lib/office-messages.ts`, the shared `office-thread.tsx`, the pinned office conversation for landlords, and Messages → Landlords / Workers for admin, with unread and realtime. Implement the route and hook contracts in §4. Remove the 'Direct messages are stubbed' paths." |
-| LG-C | "You are LG-C. Build `LandlordSubmitDialog` from the Figma U10 landlord frames (node IDs in §3), with `createLandlordRequest()` and the 'New request' button on the landlord Maintenance list. No permission-to-enter field. Export the dialog with the §4 props." |
+| LG-C | "You are LG-C. Build `LandlordSubmitDialog` from the Figma U10 landlord frames (node IDs in §3), with `createLandlordRequest()` and the 'New request' button on the landlord Maintenance list. Permission to enter defaults to No. Export the dialog with the §4 props." |
 | LG-D | "You are LG-D. Rework landlord Home per §3: two top buttons, hide rent and lease for landlords, 'Needs your input', open requests by unit, office message card via `useOfficeThreadPreview()`, no photo placeholder. Stub B/C/F contracts until they merge. Update `landlord-home-page.test.ts`." |
 | LG-E | "You are LG-E. Add the unit page route and screen, make unit cards clickable, rename Work orders → Requests on the property page with LG-F labels, add 'New request' there, and send a one-property landlord straight to their property." |
 | LG-F | "You are LG-F. Make `lib/request-status.ts` the single source for status and priority labels and add `landlordNextStep()`. Fix the Emergency / Urgent mismatch on the landlord request page. Add the next-step hint to landlord list rows and the request page. Unit-test every status × hold case. Merge first." |
