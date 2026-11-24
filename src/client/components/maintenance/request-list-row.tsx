@@ -572,13 +572,15 @@ const STARTED_MAX = 30;
 
 /**
  * When each In progress row last moved to In progress (spec §1: "Started today"),
- * from the existing per-request status history. Only In progress rows are
- * fetched (a handful at a time), after the rows render; a failure just leaves
- * the words out. Cached for the page's lifetime.
+ * from the status history. Only In progress rows are asked for, in ONE batched
+ * query (listInProgressSince) after the rows render, not one read per row; a
+ * failure just leaves the words out. Keyed by the set of ids (sorted), so
+ * re-sorting the list neither re-runs nor refetches; cached for the table's
+ * lifetime.
  */
 export function useInProgressSince(orders: readonly WorkOrder[]): ReadonlyMap<number, string | null> {
   // Optional context: the table also renders outside the app (tests, gallery).
-  const listMaintenanceStatusHistory = useContext(AppContext)?.listMaintenanceStatusHistory;
+  const listInProgressSince = useContext(AppContext)?.listInProgressSince;
   const cacheRef = useRef(new Map<number, string | null>());
   const inflightRef = useRef(new Set<number>());
   const mountedRef = useRef(true);
@@ -587,6 +589,7 @@ export function useInProgressSince(orders: readonly WorkOrder[]): ReadonlyMap<nu
     .filter((o) => o.status === "in_progress")
     .slice(0, STARTED_MAX)
     .map((o) => o.id)
+    .sort((a, b) => a - b)
     .join(",");
 
   useEffect(() => {
@@ -597,7 +600,7 @@ export function useInProgressSince(orders: readonly WorkOrder[]): ReadonlyMap<nu
   }, []);
 
   useEffect(() => {
-    if (!listMaintenanceStatusHistory) return;
+    if (!listInProgressSince) return;
     const queue = key
       .split(",")
       .filter(Boolean)
@@ -605,20 +608,18 @@ export function useInProgressSince(orders: readonly WorkOrder[]): ReadonlyMap<nu
       .filter((id) => !cacheRef.current.has(id) && !inflightRef.current.has(id));
     if (queue.length === 0) return;
     for (const id of queue) inflightRef.current.add(id);
-    void Promise.all(
-      queue.map(async (id) => {
-        try {
-          cacheRef.current.set(id, inProgressSince(await listMaintenanceStatusHistory(id)));
-        } catch {
-          cacheRef.current.set(id, null);
-        } finally {
-          inflightRef.current.delete(id);
-        }
-      }),
-    ).then(() => {
+    void (async () => {
+      try {
+        const since = await listInProgressSince(queue);
+        for (const id of queue) cacheRef.current.set(id, since.get(id) ?? null);
+      } catch {
+        for (const id of queue) cacheRef.current.set(id, null);
+      } finally {
+        for (const id of queue) inflightRef.current.delete(id);
+      }
       if (mountedRef.current) setSnapshot(new Map(cacheRef.current));
-    });
-  }, [key, listMaintenanceStatusHistory]);
+    })();
+  }, [key, listInProgressSince]);
 
   return snapshot;
 }
