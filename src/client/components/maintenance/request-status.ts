@@ -1,22 +1,10 @@
 import type { WorkOrder, WorkOrderStatus } from "@/types";
 import type { RequestStatus } from "@/components/patterns/status-chip";
+import { priorityLabel, statusLabel } from "@/lib/request-status";
 
-/** Map DB work-order status → Figma Q2 StatusChip labels. */
+/** Map DB work-order status → Figma Q2 StatusChip labels (via lib/request-status). */
 export function toRequestStatus(order: WorkOrder): RequestStatus {
-  switch (order.status) {
-    case "open":
-      return order.assigned_staff_id ? "Assigned" : "New";
-    case "scheduled":
-      return "Assigned";
-    case "in_progress":
-      return "In progress";
-    case "on_hold":
-      return "On hold";
-    case "closed":
-      return "Completed";
-    default:
-      return "New";
-  }
+  return statusLabel(order, "staff");
 }
 
 export function staffQueueTab(status: WorkOrderStatus, assigned: boolean): "needs" | "active" | "completed" {
@@ -100,7 +88,7 @@ export function workOrderContextLine(
     const tenant = [w.tenant_first_name, w.tenant_last_name].filter(Boolean).join(" ");
     if (tenant) parts.push(tenant);
   }
-  if (w.priority === "urgent") parts.push("Emergency");
+  if (priorityLabel(w.priority) === "Emergency") parts.push("Emergency");
   if (opts?.assigneeLabel) parts.push(opts.assigneeLabel);
   else if (w.status === "in_progress") parts.push("In progress");
   else if (w.status === "on_hold" && w.hold_reason) parts.push(w.hold_reason);
