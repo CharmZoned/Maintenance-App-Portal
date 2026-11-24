@@ -33,6 +33,7 @@ import {
 } from "@/lib/landlord-documents";
 import { formatMessageTime } from "@/lib/messages";
 import { officeThreadKey } from "@/lib/office-messages";
+import { unitPagePath } from "@/components/properties/property-requests";
 import { useOfficeThreadPreview, type OfficeThreadPreview } from "@/hooks/use-office-thread-preview";
 import {
   isOpenRequest,
@@ -149,6 +150,8 @@ export type MaintenanceRowModel = {
 export type UnitGroupModel = {
   id: string;
   label: string;
+  /** Unit page (`/properties/:id/units/:unitId`); null for common areas. */
+  href: string | null;
   rows: MaintenanceRowModel[];
 };
 
@@ -1056,7 +1059,16 @@ function MaintenanceCard({
             <div className="mt-4 flex flex-col gap-4">
               {maintenance.groups.map((group) => (
                 <div key={group.id}>
-                  <LandlordScopeHeading label={group.label} />
+                  {group.href ? (
+                    <a
+                      {...go(navigate, group.href)}
+                      className="lg-label uppercase text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      {group.label}
+                    </a>
+                  ) : (
+                    <LandlordScopeHeading label={group.label} />
+                  )}
                   <ul className="mt-1 divide-y divide-border rounded-md border border-border">
                     {group.rows.map((row) => (
                       <li key={row.id}>
@@ -1637,7 +1649,7 @@ function maintenanceCard(
     if (room <= 0) break;
     const rows = group.orders.slice(0, room).map((order) => openRequestRow(order, now));
     room -= rows.length;
-    shownGroups.push({ id: group.id, label: group.label, rows });
+    shownGroups.push({ id: group.id, label: group.label, href: group.href, rows });
   }
   const shown = shownGroups.reduce((sum, group) => sum + group.rows.length, 0);
 
@@ -1660,10 +1672,10 @@ function maintenanceCard(
 function groupByUnit(
   orders: WorkOrder[],
   multiProperty: boolean,
-): { id: string; label: string; orders: WorkOrder[] }[] {
+): { id: string; label: string; href: string | null; orders: WorkOrder[] }[] {
   const groups = new Map<
     string,
-    { id: string; label: string; property: string; unit: string | null; orders: WorkOrder[] }
+    { id: string; label: string; href: string | null; property: string; unit: string | null; orders: WorkOrder[] }
   >();
   for (const order of orders) {
     const property = order.property_name?.trim() || "Property";
@@ -1671,7 +1683,9 @@ function groupByUnit(
     const id = order.unit_id != null ? `unit-${order.unit_id}` : `common-${order.property_id ?? "none"}`;
     const place = unit ? unitLabel(unit) : "Common area";
     const label = multiProperty ? `${property} · ${place}` : place;
-    const group = groups.get(id) ?? { id, label, property, unit, orders: [] };
+    const href =
+      order.unit_id != null && order.property_id != null ? unitPagePath(order.property_id, order.unit_id) : null;
+    const group = groups.get(id) ?? { id, label, href, property, unit, orders: [] };
     group.orders.push(order);
     groups.set(id, group);
   }
@@ -1685,6 +1699,7 @@ function groupByUnit(
     .map((group) => ({
       id: group.id,
       label: group.label,
+      href: group.href,
       orders: group.orders.slice().sort((a, b) => b.created_at.localeCompare(a.created_at)),
     }));
 }

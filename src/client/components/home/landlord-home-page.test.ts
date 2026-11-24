@@ -615,6 +615,11 @@ describe("landlord home (LG-D)", () => {
     });
     expect(model.maintenance.groups.map((group) => group.label)).toEqual(["Unit 2", "Unit 10", "Common area"]);
     expect(model.maintenance.groups[0]?.rows.map((row) => row.id)).toEqual([4, 3]);
+    expect(model.maintenance.groups.map((group) => group.href)).toEqual([
+      "/properties/1/units/1",
+      "/properties/1/units/2",
+      null,
+    ]);
     expect(model.maintenance.total).toBe(4);
     expect(model.maintenance.shown).toBe(4);
     expect(model.maintenance.groups[0]?.rows[0]?.nextStep).toContain("Nothing needed from you.");

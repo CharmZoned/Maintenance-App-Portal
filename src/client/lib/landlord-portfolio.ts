@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { listUserAccounts, type UserAccountRow } from "./data";
 import { portalStatusFromAccounts } from "./people-portal-status";
+import { officeThreadKey } from "./office-messages";
 import type { PortalStatusKind } from "@/components/people/portal-status";
 
 /**
@@ -142,5 +143,5 @@ export async function listLandlordsWithPortfolio(): Promise<LandlordPortfolio[]>
 
 /** Route for the admin's view of one landlord's office thread (plan §4). */
 export function officeThreadHref(userId: string): string {
-  return `/messages?thread=office:${userId}`;
+  return `/messages?thread=${officeThreadKey(userId)}`;
 }

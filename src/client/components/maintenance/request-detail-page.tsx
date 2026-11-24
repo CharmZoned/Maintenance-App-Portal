@@ -22,6 +22,7 @@ import {
   type RequestStatus,
 } from "@/components/patterns";
 import { formatDocumentDate } from "@/lib/landlord-documents";
+import { officeThreadKey } from "@/lib/office-messages";
 import { workOrderStatusFromDb } from "@/lib/mappers";
 import {
   formatActivityStamp,
@@ -889,7 +890,7 @@ export function LandlordRequestDetail({
             <Button
               variant="secondary"
               className="h-11 w-full sm:w-auto"
-              onClick={() => navigate("/messages")}
+              onClick={() => navigate(`/messages?thread=${officeThreadKey()}`)}
             >
               Message Landlord Gopher
             </Button>
