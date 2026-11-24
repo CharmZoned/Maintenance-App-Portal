@@ -2839,8 +2839,9 @@ export async function listRecentDocumentUploads(limit = 20): Promise<RecentDocum
 
 /**
  * One direct thread between a portal user and the office (OfficeMessages),
- * summarised by its latest message. `unread` compares the thread user's latest
- * message with the signed-in admin's own OfficeThreadReads row.
+ * summarised by its latest message. `unread` is true when any message from
+ * someone other than the signed-in user is newer than that viewer's
+ * OfficeThreadReads row for the thread.
  */
 export interface OfficeThreadSummary {
   thread_user_id: string;
@@ -2851,12 +2852,27 @@ export interface OfficeThreadSummary {
   unread: boolean;
 }
 
+export interface OfficeMessage {
+  id: number;
+  created_at: string;
+  thread_user_id: string;
+  author_user_id: string | null;
+  author_role: AppRole;
+  body: string;
+}
+
 /**
  * Latest office threads, newest first. Reads the most recent `messageLimit`
  * messages, so a thread whose last message is older than that window is not
- * listed (and not counted as unread).
+ * listed (and not counted as unread). Empty threads (no messages yet) are not
+ * returned — callers that need a blank own-thread inject one locally.
  */
 export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThreadSummary[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const myId = user?.id ?? null;
+
   const [messages, reads] = await Promise.all([
     supabase
       .from("OfficeMessages")
@@ -2885,10 +2901,91 @@ export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThrea
       };
       threads.set(m.thread_user_id, thread);
     }
-    if (m.author_role !== "admin") {
+    const fromOther = myId != null && m.author_user_id != null && m.author_user_id !== myId;
+    if (fromOther) {
       const readAt = lastRead.get(m.thread_user_id);
       if (readAt == null || Date.parse(m.created_at) > readAt) thread.unread = true;
     }
   }
   return [...threads.values()];
+}
+
+/** Messages in one office thread, oldest first. */
+export async function listOfficeMessages(threadUserId: string): Promise<OfficeMessage[]> {
+  const { data, error } = await supabase
+    .from("OfficeMessages")
+    .select("id, created_at, thread_user_id, author_user_id, author_role, body")
+    .eq("thread_user_id", threadUserId)
+    .order("created_at", { ascending: true });
+  if (error) throwSb(error);
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    created_at: row.created_at,
+    thread_user_id: row.thread_user_id,
+    author_user_id: row.author_user_id,
+    author_role: row.author_role,
+    body: row.body,
+  }));
+}
+
+/**
+ * Send a direct office message. Non-admins may only write to their own thread
+ * (`thread_user_id` must be their user id). Admins may write to any office
+ * thread user (RLS enforces `is_office_thread_user`).
+ */
+export async function sendOfficeMessage(threadUserId: string, body: string): Promise<OfficeMessage> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error("Message cannot be empty.");
+  if (trimmed.length > 5000) throw new Error("Message is too long (max 5000 characters).");
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: roleRow, error: roleErr } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (roleErr) throwSb(roleErr);
+  if (!roleRow?.role) throw new Error("No portal role for this account.");
+
+  const { data, error } = await supabase
+    .from("OfficeMessages")
+    .insert({
+      thread_user_id: threadUserId,
+      author_user_id: user.id,
+      author_role: roleRow.role,
+      body: trimmed,
+    })
+    .select("id, created_at, thread_user_id, author_user_id, author_role, body")
+    .single();
+  if (error) throwSb(error);
+  return {
+    id: data!.id,
+    created_at: data!.created_at,
+    thread_user_id: data!.thread_user_id,
+    author_user_id: data!.author_user_id,
+    author_role: data!.author_role,
+    body: data!.body,
+  };
+}
+
+/** Upsert the caller's last-read marker for an office thread. */
+export async function markOfficeThreadRead(threadUserId: string): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { error } = await supabase.from("OfficeThreadReads").upsert(
+    {
+      user_id: user.id,
+      thread_user_id: threadUserId,
+      last_read_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,thread_user_id" },
+  );
+  if (error) throwSb(error);
 }
