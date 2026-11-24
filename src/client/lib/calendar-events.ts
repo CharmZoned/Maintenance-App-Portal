@@ -1,4 +1,5 @@
 import { toIsoDate } from "@/lib/utils";
+import { hasScheduledVisit, visitInfo } from "@/lib/request-status";
 import type { Application, Lease, RentCharge, WorkOrder } from "@/types";
 
 /** Source kinds for the thin read-only month calendar (WS-O). */
@@ -17,12 +18,19 @@ export interface CalendarEvent {
   date: string;
   title: string;
   subtitle?: string;
+  /** Visits: the arrival window or time ("8–12", "2 pm"); null for a date-only visit. */
+  time?: string | null;
+  /** Visits: the window is over and work has not started. */
+  missed?: boolean;
+  /** Visits with a time: start instant, for ordering within the day. */
+  startMs?: number;
   href: string;
 }
 
+/** Plain words: a "visit" is someone coming to fix it; never "WO". */
 export const CALENDAR_KIND_LABEL: Record<CalendarEventKind, string> = {
-  wo_scheduled: "WO scheduled",
-  wo_follow_up: "WO follow-up",
+  wo_scheduled: "Visit",
+  wo_follow_up: "Follow-up",
   lease_start: "Lease start",
   lease_end: "Lease end",
   rent_due: "Rent due",
@@ -60,18 +68,22 @@ function placeLabel(property?: string | null, unit?: string | null): string {
   return [property, unit].filter(Boolean).join(" · ");
 }
 
-export function eventsFromWorkOrders(orders: WorkOrder[]): CalendarEvent[] {
+export function eventsFromWorkOrders(orders: WorkOrder[], now: Date = new Date()): CalendarEvent[] {
   const out: CalendarEvent[] = [];
   for (const w of orders) {
     const place = placeLabel(w.property_name, w.unit_name);
-    const scheduled = toCalendarDay(w.scheduled_at);
-    if (scheduled) {
+    // Only a real visit: an unassigned request (or a pool offer) has no one coming.
+    const visit = hasScheduledVisit(w) ? visitInfo(w, now) : null;
+    if (visit) {
       out.push({
         id: `wo-sched-${w.id}`,
         kind: "wo_scheduled",
-        date: scheduled,
-        title: w.title || `Work order #${w.id}`,
+        date: visit.dayKey,
+        title: w.title || `Request #${w.id}`,
         subtitle: place || undefined,
+        time: visit.time,
+        missed: visit.missed,
+        startMs: visit.time ? visit.start.getTime() : undefined,
         href: `/maintenance/${w.id}`,
       });
     }
@@ -81,8 +93,8 @@ export function eventsFromWorkOrders(orders: WorkOrder[]): CalendarEvent[] {
         id: `wo-fu-${w.id}`,
         kind: "wo_follow_up",
         date: followUp,
-        title: w.title || `Work order #${w.id}`,
-        subtitle: place ? `Follow-up · ${place}` : "Follow-up",
+        title: w.title || `Request #${w.id}`,
+        subtitle: place || undefined,
         href: `/maintenance/${w.id}`,
       });
     }
@@ -167,13 +179,20 @@ export function buildCalendarEvents(input: {
   leases: Lease[];
   charges: RentCharge[];
   applications?: Application[];
+  now?: Date;
 }): CalendarEvent[] {
   return [
-    ...eventsFromWorkOrders(input.workOrders),
+    ...eventsFromWorkOrders(input.workOrders, input.now),
     ...eventsFromLeases(input.leases),
     ...eventsFromCharges(input.charges),
     ...eventsFromApplications(input.applications ?? []),
-  ].sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+  ].sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      // Within a day, timed visits first, in time order.
+      (a.startMs ?? Number.MAX_SAFE_INTEGER) - (b.startMs ?? Number.MAX_SAFE_INTEGER) ||
+      a.title.localeCompare(b.title),
+  );
 }
 
 /** Sunday-start month grid: leading/trailing nulls for empty cells. */

@@ -20,6 +20,7 @@ import {
   RequestSortMenu,
   scheduledDayFor,
   useRequestThumbnails,
+  visitMissed,
   type RequestListItem,
 } from "./request-list-row";
 import {
@@ -240,7 +241,11 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
   const thumbnails = useRequestThumbnails(useMemo(() => shown.map((o) => o.id), [shown]));
 
   const openCount = orders.filter((o) => o.status !== "closed").length;
-  const todayCount = sections.find((s) => s.label === "Today")?.items.length ?? 0;
+  const todayItems = sections.find((s) => s.label === "Today")?.items ?? [];
+  const todayCount = todayItems.length;
+  // Earlier-day and earlier-today visits nobody started sit under Today, so
+  // the count says how many of them are missed (each row says "(missed)").
+  const missedCount = todayItems.filter((o) => visitMissed(o, now)).length;
   const mineOpen = orders.filter((o) => o.status !== "closed" && jobSectionFor(o, now) !== "Job offers").length;
   const meta =
     loading || listError
@@ -248,7 +253,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
       : openCount === 0
         ? "No open jobs"
         : todayCount > 0
-          ? `${todayCount} today`
+          ? [`${todayCount} today`, missedCount > 0 ? `${missedCount} missed` : null].filter(Boolean).join(" · ")
           : mineOpen > 0
             ? `${mineOpen} open`
             : `${openCount} on offer`;

@@ -5,9 +5,11 @@ import type { StaffMember } from "@/lib/data";
 import type { WorkOrder } from "@/types";
 import {
   formatActivityStamp,
+  hasScheduledVisit,
   priorityLevel,
   requestNextStep,
   toRequestStatus,
+  visitInfo,
 } from "@/lib/request-status";
 import { initialsFromName } from "@/lib/portal-nav";
 import { cn } from "@/lib/utils";
@@ -117,10 +119,19 @@ function lowerFirst(s: string): string {
   return /^(Today|Yesterday)\b/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s;
 }
 
-/** A New request (open, nobody assigned) is never "scheduled", whatever scheduled_at holds. */
-export function scheduledDayFor(o: WorkOrder): string {
-  if (!o.scheduled_at || toRequestStatus(o) === "New") return "";
-  return formatActivityStamp(o.scheduled_at);
+/**
+ * The visit for the Scheduled column ("Wed 25 Nov · 8–12", "Today · 8–12
+ * (missed)"), via the shared formatVisit. A New request (open, nobody
+ * assigned) is never "scheduled", whatever scheduled_at holds.
+ */
+export function scheduledDayFor(o: WorkOrder, now: Date = new Date()): string {
+  if (!hasScheduledVisit(o)) return "";
+  return visitInfo(o, now)?.label ?? "";
+}
+
+/** The row's visit is over and nobody has started the work. */
+export function visitMissed(o: WorkOrder, now: Date = new Date()): boolean {
+  return hasScheduledVisit(o) && Boolean(visitInfo(o, now)?.missed);
 }
 
 function dateValue(o: WorkOrder, col: RequestDateColumn): string {
@@ -288,6 +299,10 @@ export interface RequestListTableProps {
 const GRID_WITH_ASSIGNEE =
   "md:grid-cols-[40px_minmax(0,1fr)_minmax(200px,0.9fr)_112px_16px] lg:grid-cols-[40px_minmax(0,1.2fr)_180px_minmax(220px,1fr)_120px_16px]";
 const GRID_NO_ASSIGNEE = "md:grid-cols-[40px_minmax(0,1.2fr)_minmax(220px,1fr)_120px_16px]";
+// A visit ("Mon 23 Nov · 8–12 (missed)") needs a wider date column than a day.
+const GRID_WITH_ASSIGNEE_VISIT =
+  "md:grid-cols-[40px_minmax(0,1fr)_minmax(200px,0.9fr)_180px_16px] lg:grid-cols-[40px_minmax(0,1.2fr)_180px_minmax(220px,1fr)_184px_16px]";
+const GRID_NO_ASSIGNEE_VISIT = "md:grid-cols-[40px_minmax(0,1.2fr)_minmax(200px,1fr)_184px_16px]";
 
 export function RequestListTable({
   items,
@@ -301,7 +316,14 @@ export function RequestListTable({
   ariaLabel,
   className,
 }: RequestListTableProps) {
-  const grid = showAssignee ? GRID_WITH_ASSIGNEE : GRID_NO_ASSIGNEE;
+  const visitColumn = dateColumn === "scheduled";
+  const grid = showAssignee
+    ? visitColumn
+      ? GRID_WITH_ASSIGNEE_VISIT
+      : GRID_WITH_ASSIGNEE
+    : visitColumn
+      ? GRID_NO_ASSIGNEE_VISIT
+      : GRID_NO_ASSIGNEE;
   const dateField: RequestSortField = dateColumn === "scheduled" ? "scheduled" : "created";
   const startedAt = useInProgressSince(items.map((i) => i.order));
   return (
@@ -377,6 +399,8 @@ function RequestListRow({
   const stepWithName = listNextStep(o, item.assigneeName, true, startedAt);
   const stepNoName = listNextStep(o, item.assigneeName, false, startedAt);
   const when = dateValue(o, dateColumn);
+  // A missed visit reads in the warning colour wherever its date shows.
+  const missed = dateColumn === "scheduled" && visitMissed(o);
   const ariaLabel = [
     o.title,
     item.context,
@@ -416,7 +440,7 @@ function RequestListRow({
               ) : null}
             </div>
             {priorityChip}
-            <span className="text-xs leading-4 text-muted-foreground">
+            <span className={cn("text-xs leading-4", missed ? "font-medium text-warning" : "text-muted-foreground")}>
               {DATE_HEADER[dateColumn]} {lowerFirst(when)}
             </span>
           </>
@@ -468,7 +492,15 @@ function RequestListRow({
             <span className="truncate text-sm leading-5 text-muted-foreground">{stepNoName}</span>
           ) : null}
         </div>
-        <div className="truncate text-right text-sm leading-5 text-muted-foreground">{when}</div>
+        <div
+          className={cn(
+            "truncate text-right text-sm leading-5",
+            missed ? "font-medium text-warning" : "text-muted-foreground",
+          )}
+          title={when}
+        >
+          {when}
+        </div>
         <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
       </a>
     </>
