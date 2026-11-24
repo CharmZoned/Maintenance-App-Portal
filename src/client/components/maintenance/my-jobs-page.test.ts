@@ -15,6 +15,7 @@ import {
   type RequestActionsPanelProps,
 } from "@/components/maintenance/request/request-actions-panel";
 import { sectionsForRole } from "@/components/maintenance/request/role-visibility";
+import { defaultDirFor, nextSort, sortRequests } from "@/components/maintenance/request-list-sort";
 import type { WorkOrder } from "@/types";
 
 function job(partial: Partial<WorkOrder> = {}): WorkOrder {
@@ -71,6 +72,17 @@ describe("My jobs routes to the one request page", () => {
     expect(sortJobs([a, b, c], { key: "scheduled", dir: "desc" }).map((o) => o.id)).toEqual([1, 2, 3]);
     const urgent = job({ id: 4, priority: "urgent" });
     expect(sortJobs([a, urgent], { key: "priority", dir: "asc" })[0].id).toBe(4);
+  });
+
+  it("first click on a new column uses the shared default direction (Priority: highest first)", () => {
+    // My jobs sorts through the shared table header (nextSort), not a forced "asc".
+    expect(defaultDirFor("priority")).toBe("desc");
+    expect(nextSort(null, "priority")).toEqual({ field: "priority", dir: "desc" });
+    expect(nextSort({ field: "scheduled", dir: "asc" }, "priority")).toEqual({ field: "priority", dir: "desc" });
+    const normal = job({ id: 1, priority: "normal" });
+    const urgent = job({ id: 2, priority: "urgent" });
+    const high = job({ id: 3, priority: "high" });
+    expect(sortRequests([normal, urgent, high], nextSort(null, "priority")).map((o) => o.id)).toEqual([2, 3, 1]);
   });
 
   it("groups into sections in display order", () => {

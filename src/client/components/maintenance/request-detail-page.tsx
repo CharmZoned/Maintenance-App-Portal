@@ -1118,7 +1118,9 @@ export function RequestDetailPage({
     try {
       await app.acceptMaintenanceRequest(current.id);
       success("Job accepted.");
-      refresh();
+      // Keep `busy` until the reload lands: otherwise Accept job is clickable
+      // again on the stale (still pooled) row and a second accept fails.
+      await load({ silent: true });
     } catch (err) {
       const raw = (err as Error)?.message ?? "";
       failure(/taken/i.test(raw) ? "Someone else has already taken this job." : "Couldn't accept the job. Try again.");

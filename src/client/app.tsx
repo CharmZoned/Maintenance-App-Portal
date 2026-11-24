@@ -595,7 +595,8 @@ export function App() {
           navigate(to);
         }}
       />
-      {isStaffShell ? null : (
+      {/* Phone request page (Header / Phone, Type = Back): no tab bar; its sticky action bar sits at the bottom. */}
+      {isStaffShell || route.name === "request" ? null : (
         <MobileTabBar
           items={navItems}
           active={activeFor(route)}

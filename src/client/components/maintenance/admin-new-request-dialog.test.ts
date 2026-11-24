@@ -116,6 +116,10 @@ describe("copy helpers", () => {
   it("created notice", () => {
     expect(createdNotice(false)).toBe("Request created.");
     expect(createdNotice(true)).toMatch(/photos couldn't be added/);
+    expect(createdNotice(0, 3)).toBe("Request created.");
+    expect(createdNotice(1, 3)).toBe("Request created, but 1 of 3 photos couldn't be added. Add it from the request.");
+    expect(createdNotice(2, 3)).toBe("Request created, but 2 of 3 photos couldn't be added. Add them from the request.");
+    expect(createdNotice(3, 3)).toBe("Request created, but the photos couldn't be added. Add them from the request.");
   });
 });
 

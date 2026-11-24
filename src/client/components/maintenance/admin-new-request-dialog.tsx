@@ -119,10 +119,20 @@ export function tenantOptionLabel(
   return t.active_unit_name ? `${name} · Unit ${t.active_unit_name}` : name;
 }
 
-/** Success banner copy after the form closes. */
-export function createdNotice(photoFailed: boolean): string {
-  if (photoFailed) return "Request created, but the photos couldn't be added. Add them from the request.";
-  return "Request created.";
+/**
+ * Success banner copy after the form closes. `failed` is how many photos could
+ * not be added (or a plain yes / no); with `total`, a partial failure says how
+ * many of them, so one notice covers every photo.
+ */
+export function createdNotice(failed: number | boolean, total?: number): string {
+  const count = failed === true ? (total ?? 1) : failed === false ? 0 : failed;
+  if (count <= 0) return "Request created.";
+  if (total != null && count < total) {
+    const noun = count === 1 ? "photo" : "photos";
+    const them = count === 1 ? "it" : "them";
+    return `Request created, but ${count} of ${total} ${noun} couldn't be added. Add ${them} from the request.`;
+  }
+  return "Request created, but the photos couldn't be added. Add them from the request.";
 }
 
 // ── View (props-driven so it renders without the app context) ───────
@@ -601,17 +611,18 @@ export function AdminNewRequestDialog({
     setSubmitError(false);
     try {
       const created = await createWorkOrder(newRequestPayload(values));
-      let photoFailed = false;
-      // One at a time: parallel inserts race the per-request photo cap.
-      for (const file of files.slice(0, MAX_MAINTENANCE_PHOTOS)) {
+      // One at a time: parallel inserts race the per-request photo cap. A failed
+      // photo does not stop the rest; one notice reports them all at the end.
+      const toUpload = files.slice(0, MAX_MAINTENANCE_PHOTOS);
+      let photosFailed = 0;
+      for (const file of toUpload) {
         try {
           await uploadMaintenancePhoto(created.id, file);
         } catch {
-          photoFailed = true;
-          break;
+          photosFailed += 1;
         }
       }
-      setNotice(createdNotice(photoFailed));
+      setNotice(createdNotice(photosFailed, toUpload.length));
       onCreated?.(created);
       onSaved?.();
       onOpenChange(false);
