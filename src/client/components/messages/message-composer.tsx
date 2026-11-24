@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -37,15 +37,29 @@ export function MessageComposer({
 }) {
   const [value, setValue] = useState(initialValue);
   const [busy, setBusy] = useState(false);
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setValue(initialValue);
     setBusy(false);
+    // A prefilled draft ("About: Maple Court") is an invitation to write:
+    // put the cursor after it.
+    if (!initialValue) return;
+    const frame = requestAnimationFrame(() => {
+      const field = fieldRef.current;
+      if (!field || field.disabled) return;
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [resetKey, initialValue]);
 
+  const body = value.trim();
+  // Only the prefill (e.g. just the "About:" line) is nothing to send yet.
+  const nothingToSend = !body || (initialValue.trim() !== "" && body === initialValue.trim());
+
   async function submit() {
-    const body = value.trim();
-    if (!body || disabled || busy || !onSend) return;
+    if (nothingToSend || disabled || busy || !onSend) return;
     setBusy(true);
     try {
       await onSend(body, showVisibility ? visibility : "tenant_visible");
@@ -66,6 +80,7 @@ export function MessageComposer({
     >
       <div className="flex items-center gap-2">
         <textarea
+          ref={fieldRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={placeholder}
@@ -84,7 +99,7 @@ export function MessageComposer({
           type="button"
           size="lg"
           className="min-h-11 min-w-16 rounded-md px-3.5"
-          disabled={disabled || busy || !value.trim()}
+          disabled={disabled || busy || nothingToSend}
           onClick={() => void submit()}
         >
           Send
