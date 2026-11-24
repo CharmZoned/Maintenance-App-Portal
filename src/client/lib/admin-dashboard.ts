@@ -53,7 +53,6 @@ import {
 } from "@/lib/admin-dates";
 import { toCalendarDay } from "@/lib/calendar-events";
 import type {
-  OfficeThreadSummary,
   PaymentAwaitingVerification,
   RecentDocumentUpload,
   RecentMaintenanceComment,
@@ -63,6 +62,8 @@ import type {
   UnitMarketingFlag,
   UserAccountRow,
 } from "@/lib/data";
+import { staffQueueTab } from "@/components/maintenance/request-status";
+import { countUnreadConversations, officeKey, type InboxConversation } from "@/lib/inbox";
 import { displayNameFromEmail } from "@/lib/portal-nav";
 import { isOpenRequest, toRequestStatus } from "@/lib/request-status";
 import { formatMoney } from "@/lib/utils";
@@ -115,7 +116,8 @@ export interface AdminDashboardSources {
   comments: RecentMaintenanceComment[] | null;
   payments: RecentPayment[] | null;
   documents: RecentDocumentUpload[] | null;
-  officeThreads: OfficeThreadSummary[] | null;
+  /** Every conversation the admin can open in Messages, with real unread state. */
+  inbox: InboxConversation[] | null;
 }
 
 // ── Tunables ───────────────────────────────────────────────────────
@@ -145,6 +147,8 @@ const ROUTES = {
   messages: "/messages",
   /** The Messages page opens a request thread from `?thread=wo:<id>`. */
   requestThread: (id: number) => `/messages?thread=wo:${id}`,
+  /** …and a direct office thread from `?thread=office:<user id>`. */
+  officeThread: (userId: string) => `/messages?thread=${encodeURIComponent(officeKey(userId))}`,
   listings: "/listings",
   /** The Leases page resolves `?lease=` to the tenant record or the lease editor. */
   lease: (id: number) => `/leases?lease=${id}`,
@@ -499,6 +503,14 @@ function isUnassigned(wo: WorkOrder): boolean {
   return wo.assigned_staff_id == null && wo.vendor_id == null;
 }
 
+/**
+ * Waiting on the office: the Maintenance page's "Needs action" tab, and the
+ * number on the Maintenance rail badge (see use-admin-nav-counts.ts).
+ */
+function needsOfficeAction(wo: WorkOrder): boolean {
+  return staffQueueTab(wo.status, Boolean(wo.assigned_staff_id)) === "needs";
+}
+
 function placeOfUnit(ctx: Ctx, propertyId: number | null | undefined, unitName: string | null | undefined) {
   const property = propertyId != null ? ctx.propertyById.get(propertyId) : undefined;
   return { propertyName: property?.name ?? null, unitName: unitName?.trim() || null, property: property ?? null };
@@ -679,7 +691,7 @@ function accountName(ctx: Ctx, account: UserAccountRow): string {
 function buildKpis(ctx: Ctx): KpiTile[] {
   const { sources, open, rent } = ctx;
   const emergencies = open.filter(isEmergency).length;
-  const unassigned = open.filter(isUnassigned).length;
+  const needsAction = open.filter(needsOfficeAction).length;
 
   const rentTile: KpiTile =
     rent == null
@@ -713,7 +725,8 @@ function buildKpis(ctx: Ctx): KpiTile[] {
           ? accountName(ctx, pending[0])
           : `${pending.length} people waiting`;
 
-  const unread = sources.officeThreads ? sources.officeThreads.filter((t) => t.unread).length : null;
+  // Same count as the Messages page header and the Messages rail badge.
+  const unread = sources.inbox ? countUnreadConversations(sources.inbox) : null;
 
   const live = ctx.marketedUnitIds ? ctx.marketedUnitIds.size : null;
   const notListed = ctx.vacantUnlisted.length;
@@ -723,7 +736,7 @@ function buildKpis(ctx: Ctx): KpiTile[] {
       id: "open-requests",
       label: "Open requests",
       value: String(open.length),
-      detail: `${emergencies} emergency · ${unassigned} unassigned`,
+      detail: `${emergencies} emergency · ${needsAction} need action`,
       href: ROUTES.maintenance,
     },
     rentTile,
@@ -1494,7 +1507,10 @@ function activityDayLabel(day: string, today: string): string {
   return `${weekdayLong(day)} · ${formatDayNoWeekday(day)} · ${diff} days ago`;
 }
 
-function commentAuthor(ctx: Ctx, comment: RecentMaintenanceComment): Person | null {
+function commentAuthor(
+  ctx: Ctx,
+  comment: Pick<RecentMaintenanceComment, "author_tenant_id" | "author_user_id" | "author_staff_id">,
+): Person | null {
   const tenant = ctx.people.tenant(comment.author_tenant_id);
   if (tenant) return tenant;
   // An account knows whether a staff-linked author is an admin or a team member.
@@ -1636,7 +1652,7 @@ function buildMaintenance(ctx: Ctx): MaintenanceSnapshotModel {
     });
 
   return {
-    summaryLine: `${open.length} open · ${open.filter(isEmergency).length} emergency · ${open.filter(isUnassigned).length} unassigned`,
+    summaryLine: `${open.length} open · ${open.filter(isEmergency).length} emergency · ${open.filter(needsOfficeAction).length} need action`,
     countLines: [
       `New ${counts.New} · Assigned ${counts.Assigned} · In progress ${counts["In progress"]}`,
       // "Completed" is this month's, so the number stays meaningful as history grows.
@@ -1699,61 +1715,57 @@ function threadIcon(person: Person | null, role: RoleWord | null): AdminIconName
 
 function buildMessages(ctx: Ctx): MessagesModel {
   const { sources, today, people } = ctx;
-  if (!sources.officeThreads && !sources.comments) {
+  if (!sources.inbox) {
     return { summaryLine: "Messages aren’t available right now.", threads: [], href: ROUTES.messages };
   }
 
   const rows: (ThreadSummary & { ms: number })[] = [];
-
-  // Direct threads between one person and the office (OfficeMessages).
-  for (const thread of sources.officeThreads ?? []) {
-    const moment = momentOf(thread.last_message_at);
-    if (!moment) continue;
-    const person = people.user(thread.thread_user_id);
-    rows.push({
-      id: `office-${thread.thread_user_id}`,
-      icon: threadIcon(person, null),
-      name: person ? personHeading(person) : "Portal user",
-      preview: oneLine(thread.last_message_body, 140),
-      time: threadTime(moment, today),
-      unread: thread.unread,
-      href: ROUTES.messages,
-      ms: moment.ms,
-    });
-  }
-
-  // Request conversations: the latest comment on each request.
-  // TODO(data-gap): the portal does not record when an admin reads a request
-  // thread (MaintenanceThreadReads is never written), so these are never
-  // claimed as unread.
-  const seen = new Set<number>();
   const requests = new Map(sources.workOrders.map((wo) => [wo.id, wo]));
-  const comments = (sources.comments ?? []).slice().sort((a, b) => b.created_at.localeCompare(a.created_at));
-  for (const comment of comments) {
-    if (seen.has(comment.maintenance_request_id)) continue;
-    seen.add(comment.maintenance_request_id);
-    const wo = requests.get(comment.maintenance_request_id);
-    const moment = momentOf(comment.created_at);
-    if (!wo || !moment) continue;
-    const author = commentAuthor(ctx, comment);
-    const role = roleWord(comment.author_role);
+
+  for (const conversation of sources.inbox) {
+    const moment = momentOf(conversation.last.at);
+    if (!moment) continue;
+    if (conversation.kind === "office") {
+      // Direct thread between one person and the office.
+      const person = people.user(conversation.threadUserId);
+      rows.push({
+        id: `office-${conversation.threadUserId}`,
+        icon: threadIcon(person, null),
+        name: person ? personHeading(person) : "Portal user",
+        preview: oneLine(conversation.last.body, 140),
+        time: threadTime(moment, today),
+        unread: conversation.unread,
+        href: ROUTES.officeThread(conversation.threadUserId),
+        ms: moment.ms,
+      });
+      continue;
+    }
+    // Request conversation, headed by whoever wrote last.
+    const wo = requests.get(conversation.requestId);
+    if (!wo) continue;
+    const author = commentAuthor(ctx, {
+      author_tenant_id: conversation.last.authorTenantId,
+      author_user_id: conversation.last.authorUserId,
+      author_staff_id: conversation.last.authorStaffId,
+    });
+    const role = roleWord(conversation.last.authorRole);
     rows.push({
       id: `wo-${wo.id}`,
       icon: threadIcon(author, role),
       name: author ? personHeading(author) : role ? ROLE_TITLE[role] : "Request comment",
-      preview: oneLine(`${wo.title} — ${comment.body}`, 140),
+      preview: oneLine(`${wo.title} — ${conversation.last.body}`, 140),
       time: threadTime(moment, today),
-      unread: false,
+      unread: conversation.unread,
       href: ROUTES.requestThread(wo.id),
       ms: moment.ms,
     });
   }
 
   rows.sort((a, b) => Number(b.unread) - Number(a.unread) || b.ms - a.ms || a.id.localeCompare(b.id));
-  const unread = sources.officeThreads ? sources.officeThreads.filter((t) => t.unread).length : null;
+  const unread = countUnreadConversations(sources.inbox);
 
   return {
-    summaryLine: unread == null ? "Latest conversations" : `${unread} unread · Latest conversations`,
+    summaryLine: `${unread} unread · Latest conversations`,
     threads: rows.slice(0, MESSAGE_THREADS).map(({ ms: _ms, ...thread }) => thread),
     href: ROUTES.messages,
   };

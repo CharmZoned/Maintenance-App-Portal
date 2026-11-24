@@ -8,6 +8,7 @@ import { MessageThreadRow } from "./message-thread-row";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
 import { TenantMessagesPage } from "./tenant-messages-page";
+import { AdminMessagesPage } from "./admin-messages-page";
 import {
   commentSenderLabel,
   formatMessageTime,
@@ -21,7 +22,8 @@ type LoadState = "loading" | "ready" | "error";
 /**
  * Messages route entry.
  * Tenants: fully mocked Figma inbox/conversation (no messages tables).
- * Staff/landlord: request threads via MaintenanceRequestComments.
+ * Admins: the office inbox (admin-messages-page.tsx).
+ * Workers/landlords: request threads via MaintenanceRequestComments.
  */
 export function MessagesPage({
   search = "",
@@ -32,11 +34,16 @@ export function MessagesPage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const { isTenant } = useApp();
+  const { isTenant, isAdmin } = useApp();
 
   // TODO(data-gap): messages backend not available — tenant path is mock-only
   if (isTenant) {
     return <TenantMessagesPage search={search} navigate={navigate} replace={replace} />;
+  }
+
+  // The office inbox: direct threads + request threads with real read state.
+  if (isAdmin) {
+    return <AdminMessagesPage search={search} navigate={navigate} replace={replace} />;
   }
 
   return (

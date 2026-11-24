@@ -126,6 +126,8 @@ function AdminNavLink({
         <>
           <span
             aria-hidden
+            // Hover tooltip: what the number counts ("4 need action").
+            title={item.countLabel ? `${item.count} ${item.countLabel}` : undefined}
             className={cn(
               "lg-label data min-w-6 shrink-0 rounded-sm px-1 py-1 text-center",
               // On the active row the row itself is the accent colour.
