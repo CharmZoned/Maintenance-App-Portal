@@ -10,7 +10,7 @@ import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
 import { TenantDialog } from "@/components/tenants/tenant-dialog";
 import { LandlordDialog } from "@/components/landlords/landlord-dialog";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
-import type { Landlord } from "@/types";
+import type { Landlord, Vendor } from "@/types";
 import { portalStatusFromAccounts } from "@/lib/people-portal-status";
 import { PeopleTabBar, isPeopleTab, type PeopleTabId } from "./people-tab-bar";
 import { ApprovalCard } from "./approval-card";
@@ -25,6 +25,8 @@ import { useResource, type Resource } from "./use-resource";
 const EMPTY_ACCOUNTS: UserAccountRow[] = [];
 const EMPTY_STAFF: StaffMember[] = [];
 const EMPTY_JOBS = new Map<number, number>();
+const EMPTY_LANDLORDS: Landlord[] = [];
+const EMPTY_VENDORS: Vendor[] = [];
 
 function Skeletons() {
   return (
@@ -83,11 +85,8 @@ export function PeoplePage({
     listTenants,
     setError,
     setNotice,
-    landlords,
-    vendors,
     canMutatePortfolio,
     refreshLookups,
-    loading: appLoading,
   } = useApp();
 
   const accounts = useResource(data.listUserAccounts, EMPTY_ACCOUNTS, isAdmin);
@@ -95,6 +94,10 @@ export function PeoplePage({
   const tenants = useResource(fetchTenants, [], true);
   const staff = useResource(data.listStaff, EMPTY_STAFF, isAdmin);
   const openJobs = useResource(data.countOpenJobsByStaff, EMPTY_JOBS, isAdmin);
+  // Landlords and vendors load here too, so a failure shows as an error with
+  // Retry instead of "No landlords yet" (which invites a duplicate record).
+  const landlordList = useResource(data.listLandlords, EMPTY_LANDLORDS, true);
+  const vendorList = useResource(data.listVendors, EMPTY_VENDORS, true);
 
   const [tab, setTab] = useState<PeopleTabId>("tenants");
   const [tenantDialog, setTenantDialog] = useState(false);
@@ -166,12 +169,16 @@ export function PeoplePage({
       if (tenants.state !== "ready") return tenants.state === "error" ? "Couldn't load tenants" : "Loading…";
       return plural(tenants.data.length, "tenant", "tenants");
     }
-    if (id === "landlords") return appLoading && !landlords.length ? "Loading…" : plural(landlords.length, "landlord", "landlords");
+    if (id === "landlords") {
+      if (landlordList.state !== "ready") return landlordList.state === "error" ? "Couldn't load landlords" : "Loading…";
+      return plural(landlordList.data.length, "landlord", "landlords");
+    }
     if (id === "team") {
       if (staff.state !== "ready") return staff.state === "error" ? "Couldn't load the team" : "Loading…";
       return plural(staff.data.length, "team member", "team members");
     }
-    return appLoading && !vendors.length ? "Loading…" : plural(vendors.length, "vendor", "vendors");
+    if (vendorList.state !== "ready") return vendorList.state === "error" ? "Couldn't load vendors" : "Loading…";
+    return plural(vendorList.data.length, "vendor", "vendors");
   };
 
   const primaryAction =
@@ -272,9 +279,8 @@ export function PeoplePage({
           <p className="text-[13px] text-muted-foreground">
             Name, contact, and portal status for each landlord.
           </p>
-          {appLoading && landlords.length === 0 ? (
-            <Skeletons />
-          ) : landlords.length === 0 ? (
+          <ResourceGate resource={landlordList} what="landlords">
+            {landlordList.data.length === 0 ? (
             <EmptyState
               message="No landlords yet. Create a landlord before adding properties."
               actionLabel={canMutatePortfolio ? "Add landlord" : undefined}
@@ -289,7 +295,7 @@ export function PeoplePage({
             />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
-              {landlords.map((l) => {
+              {landlordList.data.map((l) => {
                 const name = l.company_name?.trim() || `${l.first_name} ${l.last_name}`.trim();
                 const meta = [l.email, l.phone].filter(Boolean).join(" · ") || "—";
                 return (
@@ -311,6 +317,7 @@ export function PeoplePage({
               })}
             </div>
           )}
+          </ResourceGate>
         </TabsContent>
 
         <TabsContent value="team" className="mt-4 space-y-3 focus-visible:ring-offset-0">
@@ -372,13 +379,12 @@ export function PeoplePage({
           <p className="text-[13px] text-muted-foreground">
             Vendors directory with category and contact details.
           </p>
-          {appLoading && vendors.length === 0 ? (
-            <Skeletons />
-          ) : vendors.length === 0 ? (
+          <ResourceGate resource={vendorList} what="vendors">
+          {vendorList.data.length === 0 ? (
             <EmptyState message="No vendors yet." />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
-              {vendors.map((v) => (
+              {vendorList.data.map((v) => (
                 <VendorRow
                   key={v.id}
                   name={v.name}
@@ -387,6 +393,7 @@ export function PeoplePage({
               ))}
             </div>
           )}
+          </ResourceGate>
         </TabsContent>
       </Tabs>
 
@@ -399,6 +406,7 @@ export function PeoplePage({
         open={landlordDialog}
         onOpenChange={setLandlordDialog}
         landlord={editingLandlord}
+        onSaved={() => void landlordList.reload({ quiet: true })}
       />
       <TeamMemberDialog
         open={teamDialog != null}
@@ -424,13 +432,14 @@ export function PeoplePage({
         mode="approve"
         accounts={accounts.data}
         tenants={tenantsForDialog}
-        landlords={landlords}
+        landlords={landlordList.data}
         staff={staffForDialog}
         onDone={(_row, message) => {
           setNotice(message);
           void accounts.reload({ quiet: true });
           void tenants.reload({ quiet: true });
           void staff.reload({ quiet: true });
+          void landlordList.reload({ quiet: true });
           void refreshLookups();
         }}
       />
