@@ -445,18 +445,26 @@ export async function markNotificationRead(
 }
 
 /**
- * "Mark all read": every unread conversation in the panel is read through its
- * latest message (so Messages agrees), and the '*' point moves up to the
- * newest event shown — a server time, so an event that lands meanwhile stays
- * unread. Per-row marks at or before that point are dropped to keep the table
- * small; newer ones stay.
+ * Conversations "Mark all read" marks: every unread one in the inbox, not only
+ * the newest few the bell shows (it caps message rows), so the Messages badge
+ * and inbox clear along with the bell.
+ */
+export function conversationsToMarkRead(snapshot: Pick<NotificationsSnapshot, "inbox">) {
+  return snapshot.inbox.filter((c) => c.unread);
+}
+
+/**
+ * "Mark all read": every unread conversation is read through its latest
+ * message (so Messages agrees), and the '*' point moves up to the newest
+ * event shown — a server time, so an event that lands meanwhile stays unread.
+ * Per-row marks at or before that point are dropped to keep the table small;
+ * newer ones stay.
  */
 export async function markAllNotificationsRead(
   snapshot: NotificationsSnapshot,
   viewer: InboxViewer,
 ): Promise<void> {
-  const shown = new Set(snapshot.items.filter((i) => i.unread).map((i) => i.id));
-  const conversations = snapshot.inbox.filter((c) => c.unread && shown.has(`msg:${c.key}`));
+  const conversations = conversationsToMarkRead(snapshot);
   const newest = snapshot.items
     .filter((i) => !i.id.startsWith("msg:"))
     .reduce<string | null>((best, i) => (i.at && ms(i.at) > ms(best) ? i.at : best), null);

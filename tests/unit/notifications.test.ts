@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { InboxConversation } from "../../src/client/lib/inbox";
 import {
   buildNotifications,
+  conversationsToMarkRead,
   READ_ALL_KEY,
   type NotificationRequestRow,
   type NotificationViewer,
@@ -183,5 +184,23 @@ describe("buildNotifications — the bell, from real events", () => {
   it("shows one row per request and kind of change: the latest", () => {
     const items = build(tina, { statusEvents: [event(1, 5, "Closed", 30), event(2, 5, "Closed", 5)] });
     expect(items.map((i) => i.id)).toEqual(["status:2"]);
+  });
+});
+
+describe("conversationsToMarkRead — Mark all read clears the inbox too", () => {
+  it("marks every unread conversation, including ones past the bell's message cap", () => {
+    const inbox: InboxConversation[] = Array.from({ length: 25 }, (_, i) => ({
+      key: `wo:${100 + i}`,
+      kind: "request" as const,
+      requestId: 100 + i,
+      unread: i !== 3,
+      last: { at: H(i + 1), body: `Update ${i}`, authorRole: "admin", authorUserId: "u-admin", authorTenantId: null, authorStaffId: null },
+    }));
+    const shownMessageRows = build(tina, { inbox }).filter((item) => item.id.startsWith("msg:"));
+    expect(shownMessageRows.length).toBeLessThan(24);
+
+    const marked = conversationsToMarkRead({ inbox });
+    expect(marked).toHaveLength(24);
+    expect(marked.every((c) => c.unread)).toBe(true);
   });
 });
