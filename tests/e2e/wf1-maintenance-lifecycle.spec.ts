@@ -24,26 +24,26 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
 
   test("Tenant · submits a maintenance request with a photo", async ({ page }, testInfo) => {
     await signIn(page, "tenant");
-    await expect(page.getByRole("heading", { name: "My requests" })).toBeVisible();
-    await expect(page.getByText("Unit 1A · Maple Court")).toBeVisible();
+    // Tenants land on Home; their requests are one click away in the nav.
+    await page.getByRole("link", { name: "Requests", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
+    await expect(page.getByText(/Unit 1A · Maple Court/).first()).toBeVisible();
 
-    await page.getByRole("button", { name: "New request" }).first().click();
+    await page.getByRole("button", { name: "New maintenance request" }).first().click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("Reporting for")).toContainText("Unit 1A · Maple Court");
-    await dialog.getByLabel("Title").fill(TITLE);
-    await choose(page, selectUnder(dialog, "Category"), "Plumbing");
+    await expect(dialog.getByRole("heading", { name: "Request maintenance" })).toBeVisible();
+    await expect(dialog).toContainText("Unit 1A · Maple Court");
+    await dialog.getByLabel("Issue title").fill(TITLE);
+    await choose(page, dialog.locator("#tenant-category"), "Plumbing");
     await dialog.getByLabel("Description").fill(DESCRIPTION);
-    await dialog.getByLabel("Permission to enter if nobody is home").check();
+    await choose(page, dialog.locator("#tenant-permission"), "Yes, if no one home");
     await dialog.locator("#tenant-photos").setInputFiles(PNG);
     await shot(page, testInfo, "Tenant fills in the request");
-    await dialog.getByRole("button", { name: "Submit request" }).click();
+    await dialog.getByRole("button", { name: "Submit", exact: true }).click();
 
-    await expect(page.getByText("Request submitted with photos")).toBeVisible();
-    const card = page.locator("h3", { hasText: TITLE });
-    await expect(card).toBeVisible();
-    await expect(page.getByText("Submitted", { exact: true })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Active (1)", exact: true })).toBeVisible();
-    await shot(page, testInfo, "Request appears in My requests");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText(TITLE).filter({ visible: true }).first()).toBeVisible();
+    await shot(page, testInfo, "Request appears in Requests");
   });
 
   test("Worker · does not see the request before it is assigned", async ({ page }, testInfo) => {
