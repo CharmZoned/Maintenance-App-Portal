@@ -6,7 +6,8 @@
  * Supported (everything the app uses today):
  *   select=cols | filters eq neq gt gte lt lte like ilike is in (+ not.) |
  *   order | limit | offset | insert | upsert | update | delete | rpc |
- *   Prefer: return=representation, resolution=merge-duplicates | single-object Accept
+ *   Prefer: return=representation, resolution=merge-duplicates, count=exact (Content-Range) |
+ *   HEAD (headers only) | single-object Accept
  *
  * Anything outside that fails loudly with code EMU001 rather than guessing.
  */
@@ -328,7 +329,24 @@ export class RestApi {
           (offset != null ? ` offset ${offset}` : "") +
           `) _r`;
         const res = await run((tx) => tx.query<{ body: string }>(sql, values));
-        return this.finish(res.rows[0].body, { single, returnRows: true, successStatus: 200 });
+        const out = this.finish(res.rows[0].body, { single, returnRows: true, successStatus: 200 });
+        // `Prefer: count=exact` (supabase-js `{ count: "exact" }`): PostgREST reports the
+        // total of the filtered rows, ignoring limit/offset, in Content-Range.
+        if (/count=(exact|planned|estimated)/.test(prefer) && out.status < 300) {
+          const counted = await run((tx) =>
+            tx.query<{ n: number }>(`select count(*)::int as n from ${target}${where}`, values),
+          );
+          const total = counted.rows[0].n;
+          const shown = (JSON.parse(res.rows[0].body) as unknown[]).length;
+          const from = offset ?? 0;
+          out.headers = {
+            ...out.headers,
+            "content-range": shown > 0 ? `${from}-${from + shown - 1}/${total}` : `*/${total}`,
+          };
+        }
+        // A HEAD answer carries the headers only (`{ head: true }` reads just the count).
+        if (req.method === "HEAD") out.body = null;
+        return out;
       }
 
       case "POST": {

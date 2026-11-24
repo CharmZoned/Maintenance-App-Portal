@@ -52,7 +52,7 @@ describe("portal-nav", () => {
     });
     const byId = Object.fromEntries(items.map((i) => [i.id, i]));
     expect(byId.maintenance.count).toBe(3);
-    expect(byId.maintenance.countLabel).toBe("open");
+    expect(byId.maintenance.countLabel).toBe("need action");
     expect(byId.people.count).toBeUndefined();
     expect(byId.messages.count).toBeUndefined();
     expect(byId.documents.count).toBeUndefined();

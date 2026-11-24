@@ -74,7 +74,7 @@ export function navItemsForAudience(
           label: "Maintenance",
           href: "/maintenance",
           icon: "wrench",
-          countLabel: "open",
+          countLabel: "need action",
         },
         { id: "properties", label: "Properties", href: "/properties", icon: "building" },
         { id: "rent", label: "Rent", href: "/rent", icon: "dollar" },
