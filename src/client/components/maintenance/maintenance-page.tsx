@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import {
@@ -36,6 +36,13 @@ import {
   toRequestStatus,
   workOrderContextLine,
 } from "./request-status";
+import {
+  requestAge,
+  requestAssignee,
+  sortForQueueTab,
+  staffDisplayName,
+} from "./maintenance-list";
+import { AssignMenu, MaintenanceRequestRow } from "./maintenance-request-row";
 
 type StaffTab = "needs" | "active" | "completed" | "all";
 type AudienceFilter = "active" | "closed";
@@ -94,6 +101,12 @@ function StaffLandlordMaintenancePage({
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
+  /** Request whose inline Assign is saving. */
+  const [assigningId, setAssigningId] = useState<number | null>(null);
+  /** Position in the list of the row last assigned inline; focus goes back there after the reload. */
+  const refocusAssignAt = useRef<number | null>(null);
+  const listRef = useRef<HTMLOListElement | null>(null);
+  const staffTabsRef = useRef<HTMLDivElement | null>(null);
 
   const listWorkOrders = app.listWorkOrders;
   const setError = app.setError;
@@ -255,7 +268,7 @@ function StaffLandlordMaintenancePage({
         return hay.includes(q);
       });
     }
-    return list;
+    return useAudienceTabs ? list : sortForQueueTab(list, staffTab);
   }, [
     orders,
     staffTab,
@@ -266,6 +279,21 @@ function StaffLandlordMaintenancePage({
     useAudienceTabs,
     focusFilter,
   ]);
+
+  // After an inline Assign the row leaves Needs action and its trigger unmounts.
+  // Keep keyboard users in place: focus the Assign button now in that slot (the
+  // next request), else the list, else the selected tab.
+  useEffect(() => {
+    const at = refocusAssignAt.current;
+    if (at == null || assigningId != null) return;
+    refocusAssignAt.current = null;
+    const triggers = listRef.current?.querySelectorAll<HTMLElement>("[data-assign-trigger]");
+    const target =
+      (triggers && triggers.length > 0 ? triggers[Math.min(at, triggers.length - 1)] : null) ??
+      listRef.current ??
+      staffTabsRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    target?.focus();
+  }, [filtered, assigningId]);
 
   const activeCount = orders.filter((o) => o.status !== "closed").length;
   const meta = useAudienceTabs
@@ -281,6 +309,35 @@ function StaffLandlordMaintenancePage({
     }
     setEditing(w);
     setDialogOpen(true);
+  }
+
+  /**
+   * Inline Assign (Needs action): put a team member on the request and leave
+   * it Open — the same write the request's edit dialog makes when an admin
+   * picks a staff member without a date. Scheduling stays on the request page.
+   */
+  async function assignOrder(w: WorkOrder, member: StaffMember) {
+    if (assigningId != null) return;
+    setAssigningId(w.id);
+    refocusAssignAt.current = Math.max(0, filtered.findIndex((o) => o.id === w.id));
+    try {
+      await app.updateWorkOrder(
+        w.id,
+        { assigned_staff_id: member.id },
+        { previousStatus: w.status },
+      );
+      app.setNotice(`Assigned “${w.title}” to ${staffDisplayName(member)}.`);
+      // Quiet refresh (no skeleton): the row moves from Needs action to Active.
+      try {
+        setOrders(await flight.load());
+      } catch {
+        /* flight already surfaced the list error */
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setAssigningId(null);
+    }
   }
 
   function clearFilters() {
@@ -322,7 +379,7 @@ function StaffLandlordMaintenancePage({
           />
         </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div ref={staffTabsRef} className="flex flex-wrap gap-2">
           <QueueTab
             label={`Needs action (${counts.needs})`}
             active={staffTab === "needs"}
@@ -433,6 +490,44 @@ function StaffLandlordMaintenancePage({
             }
           />
         </div>
+      ) : !useAudienceTabs ? (
+        <ol
+          ref={listRef}
+          tabIndex={-1}
+          aria-label="Maintenance requests"
+          className="@container outline-none overflow-hidden rounded-md border border-border bg-card divide-y divide-border"
+        >
+          {filtered.map((w) => {
+            const canAssign =
+              app.isAdmin &&
+              staffTab === "needs" &&
+              w.status === "open" &&
+              w.assigned_staff_id == null;
+            return (
+              <MaintenanceRequestRow
+                key={w.id}
+                order={w}
+                status={toRequestStatus(w)}
+                assignee={requestAssignee(w, staffById)}
+                age={requestAge(w)}
+                href={navigate ? `/maintenance/${w.id}` : null}
+                onOpen={() => openOrder(w)}
+                action={
+                  canAssign ? (
+                    <AssignMenu
+                      title={w.title}
+                      staff={staff}
+                      busy={assigningId === w.id}
+                      disabled={assigningId != null}
+                      onAssign={(member) => void assignOrder(w, member)}
+                      onAssignAndSchedule={() => openOrder(w)}
+                    />
+                  ) : null
+                }
+              />
+            );
+          })}
+        </ol>
       ) : (
         <div className="overflow-hidden rounded-md border border-border bg-card">
           {filtered.map((w) => {
