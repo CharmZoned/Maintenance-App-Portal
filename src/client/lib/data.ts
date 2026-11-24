@@ -1811,6 +1811,39 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
   }));
 }
 
+/**
+ * First photo (oldest) per request, for list thumbnails: ONE batched query on
+ * MaintenanceRequestPhotos plus one batch sign of only those first paths.
+ * Requests without a readable photo map to null. RLS trims rows per role.
+ */
+export async function listFirstMaintenancePhotos(
+  requestIds: readonly number[],
+): Promise<Map<number, string | null>> {
+  const ids = Array.from(new Set(requestIds));
+  const out = new Map<number, string | null>(ids.map((id) => [id, null]));
+  if (ids.length === 0) return out;
+  const { data, error } = await supabase
+    .from("MaintenanceRequestPhotos")
+    .select("maintenance_request_id, storage_path, created_at, id")
+    .in("maintenance_request_id", ids)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throwSb(error);
+  const firstPath = new Map<number, string>();
+  for (const row of data ?? []) {
+    if (!firstPath.has(row.maintenance_request_id)) firstPath.set(row.maintenance_request_id, row.storage_path);
+  }
+  if (firstPath.size === 0) return out;
+  const paths = Array.from(firstPath.values());
+  const { data: signedList } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, 3600);
+  const urlByPath = new Map<string, string>();
+  for (const entry of signedList ?? []) {
+    if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
+  }
+  for (const [requestId, path] of firstPath) out.set(requestId, urlByPath.get(path) ?? null);
+  return out;
+}
+
 export async function uploadMaintenancePhoto(
   requestId: number,
   file: File,
@@ -1981,6 +2014,7 @@ export async function listMaintenanceStatusHistory(
     from_status: row.from_status,
     to_status: row.to_status,
     changed_by_role: row.changed_by_role,
+    changed_by_user_id: row.changed_by_user_id ?? null,
     note: row.note,
     created_at: row.created_at,
   }));

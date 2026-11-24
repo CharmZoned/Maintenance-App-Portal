@@ -398,6 +398,7 @@ export function useAppState(
     getDashboardSummary: data.getDashboardSummary,
     listPayments: data.listPayments,
     listMaintenancePhotos: data.listMaintenancePhotos,
+    listFirstMaintenancePhotos: data.listFirstMaintenancePhotos,
     uploadMaintenancePhoto: async (
       requestId: number,
       file: File,

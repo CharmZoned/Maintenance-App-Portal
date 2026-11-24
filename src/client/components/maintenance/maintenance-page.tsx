@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { WorkOrderDialog } from "./work-order-dialog";
+import { AdminNewRequestDialog } from "./admin-new-request-dialog";
 import { TenantRequestsPage } from "./tenant-requests-page";
 import type { WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
@@ -101,9 +101,8 @@ function StaffLandlordMaintenancePage({
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const sortKey = `maintenance-list-sort:${isLandlord ? "landlord" : "admin"}`;
   const [sort, setSortState] = useState<RequestSort | null>(() => readStoredSort(sortKey));
-  // New request dialog (owned by the form work; keep `openNewRequest` as the single entry).
+  // Admin "New request" form (Figma 28:58861); `openNewRequest` is the single entry.
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
 
   function setSort(next: RequestSort | null) {
     setSortState(next);
@@ -160,15 +159,13 @@ function StaffLandlordMaintenancePage({
     items: orders,
     loadList: () => flight.load(),
     onList: setOrders,
+    // Old `?wo=` links open the request page. Replace (not push) so Back does
+    // not land on `/maintenance?wo=…` and bounce forward again.
     onFound: (found) => {
-      if (navigate) {
-        navigate(`/maintenance/${found.id}`);
-        return;
-      }
-      setEditing(found);
-      setDialogOpen(true);
-      setStaffTab("all");
-      replace?.("/maintenance");
+      const to = `/maintenance/${found.id}`;
+      if (replace) replace(to);
+      else if (navigate) navigate(to);
+      else window.location.replace(to);
     },
     onMiss: () => replace?.("/maintenance"),
   });
@@ -343,7 +340,6 @@ function StaffLandlordMaintenancePage({
   }
 
   function openNewRequest() {
-    setEditing(undefined);
     setDialogOpen(true);
   }
 
@@ -566,14 +562,15 @@ function StaffLandlordMaintenancePage({
         </div>
       ) : null}
 
-      <WorkOrderDialog
-        open={dialogOpen}
-        onOpenChange={(o) => {
-          setDialogOpen(o);
-          if (!o) void load();
-        }}
-        workOrder={editing}
-      />
+      {canCreate ? (
+        <AdminNewRequestDialog
+          open={dialogOpen}
+          onOpenChange={(o) => {
+            setDialogOpen(o);
+            if (!o) void load();
+          }}
+        />
+      ) : null}
     </PageShell>
   );
 }

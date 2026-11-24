@@ -83,37 +83,77 @@ export function isOpenRequest(wo: Pick<WorkOrder, "status">): boolean {
   return wo.status !== "closed";
 }
 
-/** Compact next-step / context line under a status chip (brief §2.3). */
-export function requestNextStep(
-  wo: WorkOrder,
-  opts?: { assigneeName?: string | null },
-): string | undefined {
+/** "Today" / "Yesterday" / "Tue 17 Nov" (date-only values keep their calendar day). */
+export function requestDayWord(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE_SENTINEL.test(iso);
+  const key = dateOnly ? iso.slice(0, 10) : null;
+  const d = key ? new Date(`${key}T00:00:00`) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startThat = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((startToday - startThat) / 86_400_000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return formatDate(key ?? iso, { weekday: "short", day: "numeric", month: "short" });
+}
+
+function capitaliseFirst(text: string): string {
+  return text ? text[0].toUpperCase() + text.slice(1) : text;
+}
+
+export interface RequestNextStepOptions {
+  assigneeName?: string | null;
+  /** Desktop list rows have their own Assigned to column: leave the name out. */
+  omitAssignee?: boolean;
+  /** When the request last moved to In progress (latest history event), for "Started today". */
+  startedAt?: string | null;
+  now?: Date;
+}
+
+/**
+ * Words beside the status chip (spec §1), e.g. "Not assigned yet",
+ * "Tue 17 Nov · Sam Fixit", "Started today · Sam Fixit",
+ * "Waiting for part · follow-up Fri 20 Nov", "Today · Replaced the cartridge".
+ * Returns undefined when there is nothing useful to add to the chip.
+ */
+export function requestNextStep(wo: WorkOrder, opts: RequestNextStepOptions = {}): string | undefined {
   const status = toRequestStatus(wo);
-  const assignee = opts?.assigneeName?.trim();
+  const assignee = opts.omitAssignee ? undefined : opts.assigneeName?.trim() || undefined;
+  const now = opts.now ?? new Date();
+  const join = (...parts: (string | null | undefined)[]) => parts.filter(Boolean).join(" · ") || undefined;
   switch (status) {
     case "New":
-      return "Needs assignment";
-    case "Assigned": {
-      const when = wo.scheduled_at
-        ? formatDate(wo.scheduled_at, { weekday: "short", day: "numeric", month: "short" })
-        : null;
-      return [when, assignee].filter(Boolean).join(" · ") || "Assigned";
+      return "Not assigned yet";
+    case "Assigned":
+      return join(requestDayWord(wo.scheduled_at, now), assignee) ?? "Not scheduled yet";
+    case "In progress": {
+      // Never surface draft resolution_notes until Completed.
+      const day = requestDayWord(opts.startedAt, now);
+      return join(day ? `Started ${day === "Today" || day === "Yesterday" ? day.toLowerCase() : day}` : null, assignee);
     }
-    case "In progress":
-      // Do not surface draft resolution_notes until Closed.
-      return "Work in progress";
     case "On hold": {
       const reason = wo.hold_reason?.trim();
-      const follow = wo.next_follow_up_date
-        ? `follow-up ${formatDate(wo.next_follow_up_date, { weekday: "short", day: "numeric", month: "short" })}`
-        : null;
-      return [reason, follow].filter(Boolean).join(" · ") || "On hold";
+      const follow = wo.next_follow_up_date ? `follow-up ${requestDayWord(wo.next_follow_up_date, now)}` : null;
+      return join(reason ? capitaliseFirst(reason) : null, follow);
     }
     case "Completed":
-      return wo.resolution_notes?.trim() || "Completed";
+      return join(requestDayWord(wo.completed_at, now), wo.resolution_notes?.trim());
     default:
       return undefined;
   }
+}
+
+/** Created-at of the latest history row that moved the request to In progress. */
+export function inProgressSince(
+  history: readonly { to_status: string; created_at: string }[],
+): string | null {
+  let latest: string | null = null;
+  for (const ev of history) {
+    if (requestStatusFromDb(ev.to_status) !== "In progress") continue;
+    if (latest == null || Date.parse(ev.created_at) >= Date.parse(latest)) latest = ev.created_at;
+  }
+  return latest;
 }
 
 // ── Staff queue / worker "My jobs" bucketing ───────────────────────

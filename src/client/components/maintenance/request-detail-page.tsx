@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
@@ -15,12 +15,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -28,13 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDelete } from "@/components/ui/alert-dialog";
+import * as data from "@/lib/data";
 import type { StaffMember } from "@/lib/data";
 import {
   formatActivityStamp,
   PRIORITY_OPTIONS,
   priorityLevel,
   requestNextStep,
-  statusOptions,
   toRequestStatus,
   type RequestStatus,
 } from "@/lib/request-status";
@@ -50,7 +44,13 @@ import {
   type WorkOrderPriority,
   type WorkOrderStatus,
 } from "@/types";
-import { RequestActionsPanel, workerPrimaryAction } from "./request/request-actions-panel";
+import {
+  RequestActionsPanel,
+  RequestStatusMenu,
+  WORKER_ACTION_LABEL,
+  WORKER_ACTION_TARGET,
+  workerPrimaryAction,
+} from "./request/request-actions-panel";
 import { RequestHeader } from "./request/request-header";
 import { RequestPhotosCard } from "./request/request-photos-card";
 import {
@@ -211,9 +211,14 @@ export interface RequestDetailViewProps {
   staff: StaffMember[];
   viewerStaffId?: number | null;
   viewerTenantId?: number | null;
+  /** Auth user id → display name, for status changes (history `changed_by_user_id`). */
+  nameForUserId?: (userId: string) => string | null | undefined;
   busy?: boolean;
   uploading?: boolean;
   posting?: boolean;
+  /** Photos are fetched on their own: a failure shows in the Photos card only. */
+  photosError?: string | null;
+  onRetryPhotos?: () => void;
   onBack: () => void;
   onAssign?: () => void;
   onChangeStatus?: (next: WorkOrderStatus) => void;
@@ -223,6 +228,8 @@ export interface RequestDetailViewProps {
   onDelete?: () => void;
   onAddPhotos?: (files: FileList) => void;
   onSend?: (body: string, internal: boolean) => void | Promise<void>;
+  /** Admin: Reopen on the completed strip. */
+  onReopen?: () => void;
   /** Extra nodes (dialogs, banners) rendered inside the page. */
   children?: ReactNode;
 }
@@ -240,9 +247,12 @@ export function RequestDetailView({
   staff,
   viewerStaffId = null,
   viewerTenantId = null,
+  nameForUserId,
   busy = false,
   uploading = false,
   posting = false,
+  photosError = null,
+  onRetryPhotos,
   onBack,
   onAssign,
   onChangeStatus,
@@ -252,6 +262,7 @@ export function RequestDetailView({
   onDelete,
   onAddPhotos,
   onSend,
+  onReopen,
   children,
 }: RequestDetailViewProps) {
   const visibility = sectionsForRole(role);
@@ -281,10 +292,11 @@ export function RequestDetailView({
           tenantName: reporter || undefined,
           viewerStaffId,
           viewerTenantId,
+          nameForUserId,
         },
         role,
       ),
-    [order, history, comments, staffMap, reporter, viewerStaffId, viewerTenantId, role],
+    [order, history, comments, staffMap, reporter, viewerStaffId, viewerTenantId, nameForUserId, role],
   );
 
   const composer: RequestTimelineComposer | null =
@@ -359,6 +371,8 @@ export function RequestDetailView({
               uploading={uploading}
               onAdd={visibility.addPhotos ? onAddPhotos : undefined}
               uploaderName={(photo) => photoAuthor(photo, { tenant: reporter, assignee })}
+              loadError={photosError}
+              onRetry={onRetryPhotos}
             />
             <RequestTimeline
               entries={entries}
@@ -367,6 +381,8 @@ export function RequestDetailView({
               readOnlyNote={
                 visibility.composer && completed ? "This request is completed. Messages are closed." : undefined
               }
+              onReopen={completed ? onReopen : undefined}
+              reopenBusy={busy}
             />
           </div>
           {actions ? <div className="md:hidden">{actions}</div> : null}
@@ -441,49 +457,6 @@ function RequestDetailsCard({
   );
 }
 
-const STATUS_MENU_ORDER: WorkOrderStatus[] = ["open", "scheduled", "in_progress", "on_hold", "closed"];
-
-/** Admin "Change status ▾" menu: New, Assigned, In progress, On hold…, Completed… */
-function StatusMenu({
-  current,
-  disabled,
-  onChangeStatus,
-  children,
-}: {
-  current: RequestStatus;
-  disabled?: boolean;
-  onChangeStatus?: (next: WorkOrderStatus) => void;
-  children: ReactNode;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
-        {children}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[12rem]">
-        {statusOptions(STATUS_MENU_ORDER).map((option) => {
-          const isCurrent = option.label === current;
-          const needsInput = option.value === "on_hold" || option.value === "closed";
-          return (
-            <DropdownMenuItem
-              key={option.value}
-              disabled={isCurrent}
-              onSelect={() => onChangeStatus?.(option.value)}
-              className="min-h-11 md:min-h-8"
-            >
-              <span className="flex size-4 items-center justify-center" aria-hidden>
-                {isCurrent ? <Check /> : null}
-              </span>
-              {option.label}
-              {needsInput ? "…" : ""}
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 /** Phone sticky action bar: one full-width primary (spec §4). Admin and worker only. */
 function PhoneActionBar({
   role,
@@ -508,21 +481,24 @@ function PhoneActionBar({
           Assign and schedule
         </Button>
       ) : (
-        <StatusMenu current={status} disabled={busy} onChangeStatus={onChangeStatus}>
+        <RequestStatusMenu current={status} disabled={busy} onChangeStatus={onChangeStatus}>
           <Button size="touch" className="w-full" disabled={busy}>
             Change status
             <ChevronDown aria-hidden />
           </Button>
-        </StatusMenu>
+        </RequestStatusMenu>
       );
   } else if (visibility.workerStatusActions && role === "maintenance") {
     const primary = workerPrimaryAction(status);
     if (primary) {
-      const label = primary === "start" ? "Start work" : primary === "complete" ? "Mark completed" : "Resume work";
-      const target: WorkOrderStatus = primary === "complete" ? "closed" : "in_progress";
       control = (
-        <Button size="touch" className="w-full" disabled={busy} onClick={() => onChangeStatus?.(target)}>
-          {label}
+        <Button
+          size="touch"
+          className="w-full"
+          disabled={busy}
+          onClick={() => onChangeStatus?.(WORKER_ACTION_TARGET[primary])}
+        >
+          {WORKER_ACTION_LABEL[primary]}
         </Button>
       );
     }
@@ -618,6 +594,7 @@ export function RequestDetailPage({
   navigate,
   viewerStaffId = null,
   viewerTenantId = null,
+  viewerUserId = null,
 }: {
   id: number;
   navigate: (to: string) => void;
@@ -625,10 +602,13 @@ export function RequestDetailPage({
   viewerStaffId?: number | null;
   /** Viewer's own Tenant id: their entries read "You". */
   viewerTenantId?: number | null;
+  /** Viewer's own auth user id: their status changes read "You". */
+  viewerUserId?: string | null;
 }) {
   const app = useApp();
   const role = viewerRoleFrom(app);
   const isWorker = role === "maintenance";
+  const isAdmin = role === "admin";
   const back = backLinkFor(role);
 
   const [order, setOrder] = useState<WorkOrder | null>(null);
@@ -636,6 +616,9 @@ export function RequestDetailPage({
   const [comments, setComments] = useState<MaintenanceComment[]>([]);
   const [history, setHistory] = useState<MaintenanceStatusEvent[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [photosError, setPhotosError] = useState<string | null>(null);
+  /** Admin only: auth user id → Staff / Tenant id (who changed a status). */
+  const [accounts, setAccounts] = useState<data.UserAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -689,19 +672,26 @@ export function RequestDetailPage({
           setHistory([]);
           return;
         }
-        const [p, c, h, s] = await Promise.all([
-          listPhotos(id),
+        const [p, c, h, s, a] = await Promise.all([
+          // Photos fail on their own (the Photos card shows Retry).
+          listPhotos(id).then(
+            (rows) => ({ ok: true as const, rows }),
+            () => ({ ok: false as const, rows: [] as MaintenancePhoto[] }),
+          ),
           listComments(id),
           listHistory(id),
           // Names are a nicety: never fail the page over them.
           listStaff().catch(() => [] as StaffMember[]),
+          isAdmin ? data.listUserAccounts().catch(() => [] as data.UserAccountRow[]) : Promise.resolve([]),
         ]);
         if (loadSeq.current !== mine) return;
         setOrder(found);
-        setPhotos(p);
+        setPhotos(p.rows);
+        setPhotosError(p.ok ? null : "We couldn't load the photos.");
         setComments(c);
         setHistory(h);
         setStaff(s);
+        setAccounts(a);
       } catch {
         if (loadSeq.current !== mine) return;
         if (opts.silent) setBanner({ tone: "error", message: "We couldn't refresh this request. Try again." });
@@ -710,8 +700,18 @@ export function RequestDetailPage({
         if (loadSeq.current === mine && !opts.silent) setLoading(false);
       }
     },
-    [id, listWorkOrders, listPhotos, listComments, listHistory, listStaff],
+    [id, isAdmin, listWorkOrders, listPhotos, listComments, listHistory, listStaff],
   );
+
+  const retryPhotos = useCallback(async () => {
+    try {
+      const rows = await listPhotos(id);
+      setPhotos(rows);
+      setPhotosError(null);
+    } catch {
+      setPhotosError("We couldn't load the photos.");
+    }
+  }, [id, listPhotos]);
 
   useEffect(() => {
     void load();
@@ -727,6 +727,22 @@ export function RequestDetailPage({
 
   const staffMap = useMemo(() => staffById(staff), [staff]);
   const goBack = () => navigate(back.to);
+
+  // Status changes carry the auth user id: "You" for the viewer; admins also
+  // resolve other staff (and the reporting tenant) through the accounts list.
+  const tenantIdOfOrder = order?.tenant_id ?? null;
+  const tenantNameOfOrder = order ? personName(order.tenant_first_name, order.tenant_last_name) : "";
+  const nameForUserId = useMemo(() => {
+    const byUser = new Map(accounts.map((a) => [a.user_id, a]));
+    return (userId: string): string | null => {
+      if (viewerUserId && userId === viewerUserId) return "You";
+      const account = byUser.get(userId);
+      if (!account) return null;
+      if (account.staff_id != null) return assigneeName({ assigned_staff_id: account.staff_id }, staffMap);
+      if (account.tenant_id != null && account.tenant_id === tenantIdOfOrder) return tenantNameOfOrder || null;
+      return null;
+    };
+  }, [accounts, viewerUserId, staffMap, tenantIdOfOrder, tenantNameOfOrder]);
 
   if (loading) {
     return (
@@ -971,6 +987,11 @@ export function RequestDetailPage({
     }
   }
 
+  function reopen() {
+    if (busy) return;
+    void applyStatus(current.assigned_staff_id != null ? "scheduled" : "open", {}, "Request reopened.");
+  }
+
   async function confirmDelete() {
     setBusy(true);
     try {
@@ -1011,6 +1032,10 @@ export function RequestDetailPage({
       onDelete={visibility.editAndDelete ? () => setDeleteOpen(true) : undefined}
       onAddPhotos={visibility.addPhotos ? (files) => void addPhotos(files) : undefined}
       onSend={visibility.composer ? send : undefined}
+      onReopen={visibility.changeStatus ? reopen : undefined}
+      nameForUserId={nameForUserId}
+      photosError={photosError}
+      onRetryPhotos={() => void retryPhotos()}
     >
 
       <ShortDialog

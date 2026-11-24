@@ -66,9 +66,8 @@ export interface TimelineEntry {
 }
 
 /**
- * A status history row. `changed_by_user_id` exists on the DB row but is not
- * mapped by data.ts yet; when it is, pass `people.nameForUserId` to name the
- * real person instead of the role fallback.
+ * A status history row. data.ts maps `changed_by_user_id`; pass
+ * `people.nameForUserId` to name the real person instead of the role fallback.
  */
 export type TimelineStatusEvent = MaintenanceStatusEvent & { changed_by_user_id?: string | null };
 

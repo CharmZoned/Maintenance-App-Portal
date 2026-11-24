@@ -492,17 +492,17 @@ export function RequestListSkeleton({ rows = 4, className }: { rows?: number; cl
 
 // ── Thumbnails ──────────────────────────────────────────────────────
 
-const THUMB_CONCURRENCY = 4;
+const THUMB_BATCH = 40;
 const THUMB_MAX = 80;
 
 /**
- * First photo per request, loaded after the rows render. Uses the existing
- * `listMaintenancePhotos` (no new tables). Failures fall back to the
- * placeholder silently, never an error. Results are cached for the page's
- * lifetime (signed URLs last an hour).
+ * First photo per request, loaded after the rows render with the batched
+ * `listFirstMaintenancePhotos` (one photo-row query + one sign per batch; no
+ * new tables). Failures fall back to the placeholder silently, never an error.
+ * Results are cached for the page's lifetime (signed URLs last an hour).
  */
 export function useRequestThumbnails(ids: readonly number[]): ReadonlyMap<number, string | null> {
-  const { listMaintenancePhotos } = useApp();
+  const { listFirstMaintenancePhotos } = useApp();
   const cacheRef = useRef(new Map<number, string | null>());
   const inflightRef = useRef(new Set<number>());
   const mountedRef = useRef(true);
@@ -530,25 +530,21 @@ export function useRequestThumbnails(ids: readonly number[]): ReadonlyMap<number
       if (mountedRef.current) setSnapshot(new Map(cacheRef.current));
     };
 
-    async function worker() {
-      for (;;) {
-        const id = queue.shift();
-        if (id == null) return;
+    for (let i = 0; i < queue.length; i += THUMB_BATCH) {
+      const batch = queue.slice(i, i + THUMB_BATCH);
+      void (async () => {
         try {
-          const photos = await listMaintenancePhotos(id);
-          cacheRef.current.set(id, photos.find((p) => p.url)?.url ?? null);
+          const urls = await listFirstMaintenancePhotos(batch);
+          for (const id of batch) cacheRef.current.set(id, urls.get(id) ?? null);
         } catch {
-          cacheRef.current.set(id, null);
+          for (const id of batch) cacheRef.current.set(id, null);
         } finally {
-          inflightRef.current.delete(id);
+          for (const id of batch) inflightRef.current.delete(id);
         }
         publish();
-      }
+      })();
     }
-    void Promise.all(
-      Array.from({ length: Math.min(THUMB_CONCURRENCY, queue.length) }, () => worker()),
-    );
-  }, [key, listMaintenancePhotos]);
+  }, [key, listFirstMaintenancePhotos]);
 
   return snapshot;
 }

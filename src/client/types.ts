@@ -353,6 +353,8 @@ export interface MaintenanceStatusEvent {
   from_status: string | null;
   to_status: string;
   changed_by_role: string | null;
+  /** Auth user who made the change (null for system / deleted users). */
+  changed_by_user_id?: string | null;
   note: string | null;
   created_at: string;
 }

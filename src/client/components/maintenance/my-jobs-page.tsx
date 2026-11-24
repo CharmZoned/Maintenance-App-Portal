@@ -23,6 +23,7 @@ import {
 } from "@/lib/request-status";
 import { cn } from "@/lib/utils";
 import type { WorkOrder } from "@/types";
+import { useRequestThumbnails } from "./request-list-row";
 
 /**
  * Maintenance worker home: Figma Worker / U7 My jobs (spec §6, worker column).
@@ -163,47 +164,10 @@ export function groupJobs(
 
 // ── Thumbnails ─────────────────────────────────────────────────────
 
-/** Most rows the page fetches thumbnails for. */
-const THUMBNAIL_LIMIT = 20;
-
-/**
- * First photo of each listed job, loaded after the rows render. There is no
- * batched "first photo per request" read in data.ts yet, so this asks per job
- * (capped). Any failure leaves the placeholder; it never shows an error.
- */
-function useJobThumbnails(orders: readonly WorkOrder[]): ReadonlyMap<number, string> {
-  const app = useApp();
-  const listPhotos = app.listMaintenancePhotos;
-  const [urls, setUrls] = useState<ReadonlyMap<number, string>>(() => new Map());
-  const ids = useMemo(() => orders.slice(0, THUMBNAIL_LIMIT).map((o) => o.id), [orders]);
-  const key = ids.join(",");
-
-  useEffect(() => {
-    if (ids.length === 0) return;
-    let cancelled = false;
-    void Promise.all(
-      ids.map(async (id) => {
-        try {
-          const photos = await listPhotos(id);
-          const url = photos.find((p) => p.url)?.url;
-          return url ? ([id, url] as const) : null;
-        } catch {
-          return null;
-        }
-      }),
-    ).then((pairs) => {
-      if (cancelled) return;
-      const next = new Map<number, string>();
-      for (const pair of pairs) if (pair) next.set(pair[0], pair[1]);
-      setUrls(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // `key` stands for `ids` (a new array each render).
-  }, [key, listPhotos]);
-
-  return urls;
+/** First photo of each listed job: the shared batched hook (one query per batch). */
+function useJobThumbnails(orders: readonly WorkOrder[]): ReadonlyMap<number, string | null> {
+  const ids = useMemo(() => orders.map((o) => o.id), [orders]);
+  return useRequestThumbnails(ids);
 }
 
 function JobThumbnail({ url, className }: { url?: string; className?: string }) {
@@ -322,7 +286,7 @@ function JobsCard({
 }: {
   label: JobSection;
   items: WorkOrder[];
-  thumbnails: ReadonlyMap<number, string>;
+  thumbnails: ReadonlyMap<number, string | null>;
   sort: JobSort;
   onSort: (key: JobSortKey) => void;
   onOpen: (order: WorkOrder) => void;
@@ -349,7 +313,7 @@ function JobsCard({
         </div>
         <ul>
           {items.map((o) => (
-            <JobRow key={o.id} order={o} thumbnailUrl={thumbnails.get(o.id)} onOpen={() => onOpen(o)} />
+            <JobRow key={o.id} order={o} thumbnailUrl={thumbnails.get(o.id) ?? undefined} onOpen={() => onOpen(o)} />
           ))}
         </ul>
       </div>

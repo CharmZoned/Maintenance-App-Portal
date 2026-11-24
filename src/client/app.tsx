@@ -110,6 +110,15 @@ export function App() {
     auth.gate.role.role === "maintenance" &&
     auth.gate.role.staff_id != null;
   const state = useAppState(ready, { isAdmin, isTenant, isLandlord, isMaintenance });
+  // The viewer's own ids, so their own request-timeline entries read "You".
+  const viewerIds =
+    auth.gate.state === "ready"
+      ? {
+          userId: auth.gate.user.id as string | null,
+          staffId: auth.gate.role.staff_id ?? null,
+          tenantId: auth.gate.role.tenant_id ?? null,
+        }
+      : { userId: null, staffId: null, tenantId: null };
   const { path, search, route, navigate, replace } = useRouter();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifUnread, setNotifUnread] = useState(false);
@@ -387,7 +396,12 @@ export function App() {
               <MaintenancePage search={search} replace={replace} navigate={navigate} />
             )}
             {route.name === "request" && (
-              <RequestDetailPage id={route.id} navigate={navigate} />
+              <RequestDetailPage
+                id={route.id}
+                navigate={navigate}
+                viewerTenantId={viewerIds.tenantId}
+                viewerUserId={viewerIds.userId}
+              />
             )}
             {route.name === "messages" && (
               <MessagesPage search={search} navigate={navigate} replace={replace} />
@@ -430,7 +444,7 @@ export function App() {
               <MaintenancePage search={search} replace={replace} navigate={navigate} />
             )}
             {route.name === "request" && (
-              <RequestDetailPage id={route.id} navigate={navigate} />
+              <RequestDetailPage id={route.id} navigate={navigate} viewerUserId={viewerIds.userId} />
             )}
             {route.name === "messages" && (
               <MessagesPage search={search} navigate={navigate} replace={replace} />
@@ -460,7 +474,8 @@ export function App() {
               <RequestDetailPage
                 id={route.id}
                 navigate={navigate}
-                viewerStaffId={auth.gate.state === "ready" ? auth.gate.role.staff_id : null}
+                viewerStaffId={viewerIds.staffId}
+                viewerUserId={viewerIds.userId}
               />
             )}
             {route.name === "messages" && (
@@ -528,7 +543,12 @@ export function App() {
               <MaintenancePage search={search} replace={replace} navigate={navigate} />
             )}
             {route.name === "request" && (
-              <RequestDetailPage id={route.id} navigate={navigate} />
+              <RequestDetailPage
+                id={route.id}
+                navigate={navigate}
+                viewerStaffId={viewerIds.staffId}
+                viewerUserId={viewerIds.userId}
+              />
             )}
             {route.name === "calendar" && <CalendarPage navigate={navigate} />}
             {route.name === "applications" &&
