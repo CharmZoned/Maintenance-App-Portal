@@ -797,6 +797,10 @@ export interface Database {
         Args: { p_request_id: number; p_fixed: boolean; p_note?: string | null };
         Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
       };
+      list_request_reporter_names: {
+        Args: { p_request_ids: number[] };
+        Returns: { request_id: number; landlord_name: string | null }[];
+      };
       list_available_job_locations: {
         Args: Record<string, never>;
         Returns: {

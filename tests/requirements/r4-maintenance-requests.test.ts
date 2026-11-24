@@ -5,6 +5,7 @@
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
+import { listRequestReporterNames } from "@/lib/request-reporters";
 import { MAINTENANCE_CATEGORIES } from "@/types";
 import {
   clientFor,
@@ -415,6 +416,31 @@ describe("[R4] Maintenance requests", () => {
         ]),
       ).toHaveLength(1);
       expect(await sql(`select 1 from public."MaintenanceRequestPhotos" where id = $1`, [workPhoto.id])).toHaveLength(1);
+    });
+
+    test("the unit's tenant sees it in their list with the landlord's name, view only (D3)", async () => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ title: "Landlord-filed — tenant view", unit_id: world.units.a.id }))
+          .select("id")
+          .single(),
+      ) as Row;
+      await signInApp("landlord");
+      await data.uploadMaintenancePhoto(row.id, pngFile("landlord-view.png"));
+
+      await signInApp("tenant");
+      const mine = await data.listWorkOrders();
+      expect(mine.find((w) => w.id === row.id)).toMatchObject({ title: "Landlord-filed — tenant view", tenant_id: null });
+      expect(await data.listMaintenancePhotos(row.id)).toHaveLength(1);
+      expect((await data.listMaintenanceStatusHistory(row.id)).map((e) => e.to_status)).toContain("Open");
+      expect((await listRequestReporterNames([row.id])).get(row.id)).toBe("Owner Holdings LLC");
+      await expect(data.addMaintenanceComment(row.id, "Thanks!", "tenant_visible")).rejects.toThrow();
+      await expect(data.uploadMaintenancePhoto(row.id, pngFile("tenant-adds.png"))).rejects.toThrow();
+
+      await signInApp("tenant2");
+      expect((await data.listWorkOrders()).map((w) => w.id)).not.toContain(row.id);
     });
   });
 
