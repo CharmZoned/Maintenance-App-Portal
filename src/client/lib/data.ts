@@ -1580,7 +1580,14 @@ export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {
   );
 }
 
-/** Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment. */
+/**
+ * Tenant self-submit: RLS requires Open, own tenant_id, own unit_id, no schedule/assignment.
+ *
+ * `client_submission_id` (a UUID the form makes once per draft) makes the save
+ * idempotent: sending the same draft again (a retry, a double tap, a response
+ * lost on a bad connection) returns the request already created instead of a
+ * duplicate (unique index maintenance_requests_client_submission_id_key).
+ */
 export async function submitTenantMaintenanceRequest(
   input: {
     title: string;
@@ -1588,6 +1595,7 @@ export async function submitTenantMaintenanceRequest(
     category: MaintenanceCategory | string;
     permission_to_enter: boolean;
     priority?: WorkOrderPriority;
+    client_submission_id?: string;
   },
   opts?: { signal?: AbortSignal },
 ): Promise<WorkOrder> {
@@ -1647,11 +1655,24 @@ export async function submitTenantMaintenanceRequest(
       next_follow_up_date: null,
       resolution_notes: null,
       is_test_data: false,
+      client_submission_id: input.client_submission_id ?? null,
     })
     .select("*");
   if (signal) insertQuery = insertQuery.abortSignal(signal);
   const { data, error } = await insertQuery.single();
-  if (error) throwSb(error);
+  if (error) {
+    // Same draft sent twice: hand back the request the first send created.
+    if (error.code === "23505" && input.client_submission_id) {
+      const { data: existing, error: existingErr } = await supabase
+        .from("MaintenanceRequests")
+        .select("*")
+        .eq("client_submission_id", input.client_submission_id)
+        .maybeSingle();
+      if (existingErr) throwSb(existingErr);
+      if (existing) return mapWorkOrder(existing);
+    }
+    throwSb(error);
+  }
   signal?.throwIfAborted();
   return mapWorkOrder(data!);
 }

@@ -68,6 +68,25 @@ describe("[R4] Maintenance requests", () => {
       expect(wo.request_number).toMatch(/^MR-\d{6}$/);
     });
 
+    test("sending the same draft twice creates one request", async () => {
+      await signInApp("tenant");
+      const draft = {
+        title: "Hall light flickers",
+        description: "Flickers every few seconds.",
+        category: "Electrical",
+        permission_to_enter: true,
+        client_submission_id: crypto.randomUUID(),
+      };
+      const first = await data.submitTenantMaintenanceRequest(draft);
+      const again = await data.submitTenantMaintenanceRequest(draft);
+      expect(again.id).toBe(first.id);
+      const rows = await sql<{ n: number }>(
+        `select count(*)::int as n from public."MaintenanceRequests" where client_submission_id = $1`,
+        [draft.client_submission_id],
+      );
+      expect(rows[0].n).toBe(1);
+    });
+
     test("marking it an emergency sets urgent priority", async () => {
       await signInApp("tenant");
       const wo = await data.submitTenantMaintenanceRequest({
