@@ -10,6 +10,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { resetDatabase, type Queryable } from "../../scripts/staging/database";
+import { checkLandlordDemo } from "../../scripts/staging/seed";
 import { emptyStorageBuckets, samplePng, type StorageAdmin } from "../../scripts/staging/supabase";
 import { EmulatorDb } from "../emulator/db";
 import { seedWorld, type SeedAuth, type World } from "../emulator/seed";
@@ -70,6 +71,17 @@ describe("staging reset: storage is emptied before the logins are deleted", () =
     expect(photos.some((p) => p.request === "closed" && p.uploaded_by_role === "maintenance")).toBe(true);
     for (const photo of photos) expect(photo.storage_path).toMatch(/^[0-9]+\/[^/]+\.png$/);
     expect(await count(`select count(*)::int as n from public."MaintenanceRequestPhotos"`)).toBe(photos.length);
+  });
+
+  test("the demo world carries the landlord demo the staging script checks for", async () => {
+    // Runs on the world the test above seeded.
+    const checks = await checkLandlordDemo(client);
+    expect(checks.map((c) => [c.check, c.ok])).toEqual([
+      ["landlord office thread", true],
+      ["landlord-filed common-area request", true],
+      ["on-hold request with a reason", true],
+    ]);
+    expect(checks[0].detail).toBe("4 message(s), 1 about a request");
   });
 
   test("the wipe refuses while files are stored, and changes nothing", async () => {

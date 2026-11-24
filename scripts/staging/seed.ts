@@ -22,7 +22,7 @@
  */
 import { pathToFileURL } from "node:url";
 import { seedWorld } from "../../tests/emulator/seed";
-import { countRows, openDatabase, resetDatabase, seedDbOver } from "./database";
+import { countRows, openDatabase, resetDatabase, seedDbOver, type Queryable } from "./database";
 import { checkStagingTarget, createRedactor, describeDbTarget, PRODUCTION_PROJECT_REF, STAGING_PROJECT_REF, type StagingEnv } from "./guard";
 import {
   assertAdminAccess,
@@ -37,6 +37,52 @@ import {
 function table(rows: string[][]): string {
   const widths = rows[0].map((_, column) => Math.max(...rows.map((row) => row[column].length)));
   return rows.map((row) => "  " + row.map((cell, column) => cell.padEnd(widths[column])).join("  ").trimEnd()).join("\n");
+}
+
+export interface LandlordDemoCheck {
+  check: string;
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * The landlord wave's demo pieces (docs/landlord-wave-plan.md, LG-Q), read back
+ * from the seeded database: the landlord's office thread with a message about a
+ * request, a common-area request the landlord filed, and an on-hold request
+ * that says what it is waiting on. The acceptance demo script walks these.
+ */
+export async function checkLandlordDemo(client: Queryable): Promise<LandlordDemoCheck[]> {
+  const first = async (sql: string): Promise<Record<string, unknown>> => {
+    const result = await client.query(sql);
+    return ((result.rows ?? [])[0] ?? {}) as Record<string, unknown>;
+  };
+  const landlordThread = await first(
+    `select count(m.*)::int as messages, count(m.request_id)::int as linked
+       from public."OfficeMessages" m
+       join public.user_roles r on r.user_id = m.thread_user_id and r.role = 'landlord'`,
+  );
+  const commonArea = await first(
+    `select count(*)::int as n from public."MaintenanceRequests"
+      where submitted_by_landlord_id is not null and unit_id is null and property_id is not null`,
+  );
+  const onHold = await first(
+    `select count(*)::int as n from public."MaintenanceRequests"
+      where status = 'On Hold' and coalesce(btrim(hold_reason), '') <> ''`,
+  );
+  const n = (v: unknown) => Number(v ?? 0);
+  return [
+    {
+      check: "landlord office thread",
+      ok: n(landlordThread.messages) >= 3 && n(landlordThread.linked) >= 1,
+      detail: `${n(landlordThread.messages)} message(s), ${n(landlordThread.linked)} about a request`,
+    },
+    {
+      check: "landlord-filed common-area request",
+      ok: n(commonArea.n) >= 1,
+      detail: `${n(commonArea.n)} request(s)`,
+    },
+    { check: "on-hold request with a reason", ok: n(onHold.n) >= 1, detail: `${n(onHold.n)} request(s)` },
+  ];
 }
 
 function messageOf(error: unknown): string {
@@ -133,6 +179,12 @@ export async function main(env: StagingEnv): Promise<number> {
     const counts = await countRows(db);
     say("\nRow counts:");
     say(table([["table", "rows"], ...counts.map((c) => [c.table, String(c.rows)])]));
+
+    stage = "check the landlord demo";
+    say("\nLandlord demo:");
+    const landlordDemo = await checkLandlordDemo(db);
+    say(table([["check", "result"], ...landlordDemo.map((c) => [c.check, `${c.ok ? "ok" : "MISSING"} - ${c.detail}`])]));
+    if (landlordDemo.some((c) => !c.ok)) failed = true;
 
     stage = "verify the demo sign-ins";
     say("\nSign-in check:");

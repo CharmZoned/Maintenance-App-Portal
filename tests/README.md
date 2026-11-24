@@ -36,7 +36,7 @@ entries show as "planned": written down, feature not built yet.
 
 ```
 tests/
-  requirements.json     the list the dashboard shows (R1–R8, WF1–WF2)
+  requirements.json     the list the dashboard shows (R1–R8, WF1–WF4)
   requirements/         one file per requirement — data layer + database rules
   workflows/            multi-person workflows, step by step, data layer
   e2e/                  the same workflows and key screens in a real browser

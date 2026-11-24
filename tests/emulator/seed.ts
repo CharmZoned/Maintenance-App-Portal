@@ -68,7 +68,13 @@ export type DemoRequestKey =
   /** Open, just reported, not yet looked at by the office. Unit 2B. */
   | "new"
   /** Open, raised by the admin on the other landlord's property. */
-  | "otherProperty";
+  | "otherProperty"
+  /**
+   * Open, filed by the landlord (Lena) from the portal on a common area of
+   * Maple Court: no unit, submitted_by_landlord_id set. Her office thread links
+   * to it (OfficeMessages.request_id).
+   */
+  | "landlordCommonArea";
 
 /** What `{ demo: true }` adds, for callers that need the ids (tests, the staging file upload). */
 export interface DemoWorld {
@@ -99,7 +105,7 @@ export interface DemoWorld {
     storage_path: string;
     content_type: "image/png";
     caption: string;
-    uploaded_by_role: "tenant" | "maintenance";
+    uploaded_by_role: "tenant" | "maintenance" | "landlord";
   }>;
 }
 
@@ -639,6 +645,26 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
     location: "Bathroom",
     at: "-6 hours",
   });
+  // Lena files this one herself from the portal (landlord wave LG-A1): a common
+  // area, so no unit and no tenant. Tenants of the building do not see it (D3).
+  const landlordCommonArea = id(
+    await one(
+      db,
+      `insert into public."MaintenanceRequests"
+         (unit_id, property_id, submitted_by_landlord_id, title, description, category, priority, location,
+          permission_to_enter, created_at, is_test_data)
+       values (null, $1, $2, $3, $4, 'Electrical', 'Normal', 'Front hallway', false, now() + $5::interval, true)
+       returning id`,
+      [
+        world.property.id,
+        world.landlord.id,
+        "Hallway light out by the front door",
+        "The ceiling light in the front hallway at Maple Court has stopped working. The entrance is dark after sunset.",
+        "-5 hours -30 minutes",
+      ],
+    ),
+  );
+  await stamp(landlordCommonArea, "-5 hours -30 minutes", lena);
   const fresh = await report({
     unit: units.b.id,
     by: tom,
@@ -695,7 +721,7 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   const photos: DemoWorld["photos"] = [];
   const photo = async (request: DemoRequestKey, requestId: number, by: Person, at: Offset, file: string, caption: string) => {
     const storagePath = `${requestId}/${file}`;
-    const role = by.role === "maintenance" ? "maintenance" : "tenant";
+    const role = by.role === "maintenance" || by.role === "landlord" ? by.role : "tenant";
     const row = await one<{ id: string | number }>(
       db,
       `insert into public."MaintenanceRequestPhotos"
@@ -711,6 +737,14 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   await photo("closed", closed, sam, "-20 days -23 hours", "demo-disposal-fixed.png", "Running again after the fix.");
   await photo("onHold", onHold, tom, "-9 days", "demo-window-latch.png", "The cracked latch on the left window.");
   await photo("pooled", pooled, tina, "-20 hours", "demo-faucet-drip.png", "Drips even when fully closed.");
+  await photo(
+    "landlordCommonArea",
+    landlordCommonArea,
+    lena,
+    "-5 hours -30 minutes",
+    "demo-hallway-light.png",
+    "The hallway light by the front door.",
+  );
 
   // ── Property documents ──────────────────────────────────────────────
   // Rows only (see DemoWorld.documents). Paths follow `{property_id}/{file}`.
@@ -782,17 +816,24 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
 
   // ── Direct chat with the office ─────────────────────────────────────
   // One thread per non-admin user; `thread` is whose thread it is.
-  const officeMessage = (thread: Person, by: Person, at: Offset, body: string) =>
+  // `requestId` links a message to a request ("Regarding #MR-…", LG-A2).
+  const officeMessage = (thread: Person, by: Person, at: Offset, body: string, requestId: number | null = null) =>
     db.admin(
-      `insert into public."OfficeMessages" (thread_user_id, author_user_id, author_role, body, created_at)
-       values ($1, $2, $3::text::public.app_role, $4, now() + $5::interval)`,
-      [thread.userId, by.userId, by.role, body, at],
+      `insert into public."OfficeMessages" (thread_user_id, author_user_id, author_role, body, created_at, request_id)
+       values ($1, $2, $3::text::public.app_role, $4, now() + $5::interval, $6)`,
+      [thread.userId, by.userId, by.role, body, at, requestId],
     );
   await officeMessage(sam, sam, "-20 hours", "For the dishwasher at Maple Court 2B tomorrow: is there a lockbox, or will someone be home?");
   await officeMessage(sam, admin, "-19 hours", "Tom will be home to let you in. No lockbox needed.");
   await officeMessage(lena, lena, "-2 days", "What did the garbage disposal repair in 1A come to?");
   await officeMessage(lena, admin, "-1 days -22 hours", "It was $120. It will be on this month's statement.");
-  await officeMessage(lena, lena, "-5 hours", "Thanks. Could someone also look at the hallway light by the front door at Maple Court?");
+  await officeMessage(
+    lena,
+    lena,
+    "-5 hours",
+    "Thanks. I've also filed a request for the hallway light by the front door at Maple Court. Could someone look at it?",
+    landlordCommonArea,
+  );
   // Last word is the office's, so Lena opens the portal to one unread message.
   await officeMessage(lena, admin, "-3 hours", "Yes. We'll add it to Sam's next visit and confirm the time here.");
 
@@ -807,6 +848,7 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
       closed: { id: closed },
       new: { id: fresh },
       otherProperty: { id: otherProperty },
+      landlordCommonArea: { id: landlordCommonArea },
     },
     documents,
     photos,

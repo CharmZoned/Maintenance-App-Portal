@@ -24,6 +24,11 @@
       "id": "WF3",
       "title": "Worker job pool",
       "summary": "An admin sets the date, time and price and pushes a job; a worker accepts it (first accept wins), can release it back, completes it with a photo, and the tenant confirms the fix. Includes the direct chat with the office."
+    },
+    {
+      "id": "WF4",
+      "title": "Landlord journey",
+      "summary": "A landlord sees their units, opens a unit and its requests, files a common-area request with photos, and messages the office about it; the admin sees it in the queue and replies from Messages → Landlords, and the landlord sees the reply with the unread cleared."
     }
   ]
 }

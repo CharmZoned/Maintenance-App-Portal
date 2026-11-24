@@ -172,6 +172,25 @@ describe("[R7] Demo world: each role sees its own slice", () => {
     ]);
     const lena = await clientFor("landlord");
     expect((await officeMessages(lena)).map((m) => m.author_role)).toEqual(["landlord", "admin", "landlord", "admin"]);
+
+    // Landlord wave: the common-area request Lena filed herself, the message
+    // about it, and the on-hold job that says what it is waiting on.
+    const filed = requests.find((r) => r.id === demo.requests.landlordCommonArea.id);
+    expect(filed, "Lena's own common-area request").toMatchObject({ status: "open", unit_id: null, property_id: world.property.id });
+    const [filedRow] = await sql<{ submitted_by_landlord_id: number | null; submitted_by_tenant_id: number | null }>(
+      `select submitted_by_landlord_id, submitted_by_tenant_id from public."MaintenanceRequests" where id = $1`,
+      [demo.requests.landlordCommonArea.id],
+    );
+    expect(filedRow).toEqual({ submitted_by_landlord_id: world.landlord.id, submitted_by_tenant_id: null });
+    expect(await data.listMaintenancePhotos(demo.requests.landlordCommonArea.id), "her photo of it").toHaveLength(1);
+    const linked = ((await lena.from("OfficeMessages").select("request_id").not("request_id", "is", null)).data ?? []).map(
+      (m) => Number(m.request_id),
+    );
+    expect(linked, "one office message is about that request").toEqual([demo.requests.landlordCommonArea.id]);
+    expect(requests.find((r) => r.id === demo.requests.onHold.id)).toMatchObject({
+      status: "on_hold",
+      hold_reason: expect.stringMatching(/replacement latch/),
+    });
   });
 
   test("Admin · sees everything: every status, both prices, the ledger and the approval queue", async () => {
@@ -197,7 +216,7 @@ describe("[R7] Demo world: each role sees its own slice", () => {
       units: 3,
       active_leases: 2,
       upcoming_move_outs: 1,
-      open_work_orders: 7,
+      open_work_orders: 8,
       urgent_work_orders: 1,
     });
 
