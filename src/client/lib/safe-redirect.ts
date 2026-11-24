@@ -65,6 +65,7 @@ export function isLandlordAllowedRoute(route: Route): boolean {
     route.name === "home" ||
     route.name === "properties" ||
     route.name === "property" ||
+    route.name === "unit" ||
     route.name === "maintenance" ||
     route.name === "request" ||
     route.name === "messages" ||

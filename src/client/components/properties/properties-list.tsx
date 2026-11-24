@@ -1,17 +1,73 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Building2, MapPin, Plus } from "lucide-react";
 import { useApp } from "@/context";
 import { cn, colorClasses } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
-import { PROPERTY_TYPE_LABELS, type Property } from "@/types";
+import { PROPERTY_TYPE_LABELS, type Property, type Unit, type WorkOrder } from "@/types";
+import { unitDisplayName } from "../maintenance/landlord-submit-dialog";
+import { openRequestCountByProperty, singlePropertyRedirect } from "./property-requests";
 import { PageShell } from "@/components/page-shell";
 
-export function PropertiesList({ navigate }: { navigate: (to: string) => void }) {
-  const { properties, canMutatePortfolio } = useApp();
+export function PropertiesList({
+  navigate,
+}: {
+  navigate: (to: string, opts?: { replace?: boolean }) => void;
+}) {
+  const { properties, canMutatePortfolio, isLandlord, loading, listUnits, listWorkOrders } = useApp();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Property | undefined>(undefined);
+  const [landlordUnits, setLandlordUnits] = useState<Unit[]>([]);
+  const [openOrders, setOpenOrders] = useState<WorkOrder[]>([]);
+
+  // A landlord with exactly one property goes straight to it. `replace`, so
+  // Back from the property page doesn't land here and bounce again.
+  const redirectTo = singlePropertyRedirect({ isLandlord, loading, properties });
+  useEffect(() => {
+    if (redirectTo) navigate(redirectTo, { replace: true });
+  }, [redirectTo, navigate]);
+
+  // Landlords with several properties: unit names and open-request counts per card.
+  const showLandlordDetail = isLandlord && !loading && properties.length > 1;
+  useEffect(() => {
+    if (!showLandlordDetail) return;
+    let cancelled = false;
+    void Promise.all([
+      listUnits(),
+      listWorkOrders({ open_only: true, skip_staff_notes: true }),
+    ])
+      .then(([units, orders]) => {
+        if (cancelled) return;
+        setLandlordUnits(units);
+        setOpenOrders(orders);
+      })
+      .catch(() => {
+        // Counts are extra detail; the cards still work without them.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showLandlordDetail, listUnits, listWorkOrders]);
+
+  const openByProperty = useMemo(() => openRequestCountByProperty(openOrders), [openOrders]);
+  const unitsByProperty = useMemo(() => {
+    const map = new Map<number, Unit[]>();
+    for (const u of landlordUnits) {
+      const list = map.get(u.property_id) ?? [];
+      list.push(u);
+      map.set(u.property_id, list);
+    }
+    return map;
+  }, [landlordUnits]);
+
+  if (redirectTo) {
+    return (
+      <PageShell title="Properties">
+        <p className="text-sm text-muted-foreground">Opening your property…</p>
+      </PageShell>
+    );
+  }
 
   const totalUnits = properties.reduce((sum, p) => sum + (p.unit_count ?? 0), 0);
   const occupied = properties.reduce((sum, p) => sum + (p.occupied_count ?? 0), 0);
@@ -77,8 +133,20 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
                   <div className="mt-4 grid grid-cols-3 gap-3 border-t pt-4 text-sm">
                     <Stat label="Units" value={p.unit_count ?? 0} />
                     <Stat label="Occupied" value={`${p.occupied_count ?? 0}/${p.unit_count ?? 0}`} />
-                    <Stat label="Occupancy" value={`${occRate}%`} />
+                    {isLandlord ? (
+                      <Stat label="Open requests" value={openByProperty.get(p.id) ?? 0} />
+                    ) : (
+                      <Stat label="Occupancy" value={`${occRate}%`} />
+                    )}
                   </div>
+                  {isLandlord && (unitsByProperty.get(p.id)?.length ?? 0) > 0 ? (
+                    <p className="mt-3 truncate text-xs text-muted-foreground">
+                      {unitsByProperty
+                        .get(p.id)!
+                        .map((u) => unitDisplayName(u.name))
+                        .join(" · ")}
+                    </p>
+                  ) : null}
                   <div className="mt-3 flex items-center justify-between">
                     {canMutatePortfolio ? (
                       <button

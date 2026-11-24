@@ -169,6 +169,14 @@ describe("clampPathForAudience / resolveReadyLanding", () => {
     expect(clampPathForAudience("/calendar", "maintenance")).toBe("/calendar");
   });
 
+  test("the unit page is open to landlords and staff, not tenants or workers", () => {
+    expect(safeInternalPath("/properties/3/units/7", ORIGIN)).toBe("/properties/3/units/7");
+    expect(clampPathForAudience("/properties/3/units/7", "landlord")).toBe("/properties/3/units/7");
+    expect(clampPathForAudience("/properties/3/units/7", "staff")).toBe("/properties/3/units/7");
+    expect(clampPathForAudience("/properties/3/units/7", "tenant")).toBe(ROLE_HOME.tenant);
+    expect(clampPathForAudience("/properties/3/units/7", "maintenance")).toBe(ROLE_HOME.maintenance);
+  });
+
   test("website listings is a staff-only destination", () => {
     expect(safeInternalPath("/listings", ORIGIN)).toBe("/listings");
     expect(clampPathForAudience("/listings", "staff")).toBe("/listings");

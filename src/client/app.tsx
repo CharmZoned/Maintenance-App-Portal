@@ -10,6 +10,7 @@ import { PortalErrorBoundary } from "./components/portal-error-boundary";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { PropertiesList } from "./components/properties/properties-list";
 import { PropertyPage } from "./components/properties/property-page";
+import { UnitPage } from "./components/units/unit-page";
 import { TenantsList } from "./components/tenants/tenants-list";
 import { TenantPage } from "./components/tenants/tenant-page";
 import { LeasesPage } from "./components/leases/leases-page";
@@ -66,7 +67,7 @@ import {
 } from "./lib/safe-redirect";
 
 function activeFor(route: Route): string {
-  if (route.name === "property") return "properties";
+  if (route.name === "property" || route.name === "unit") return "properties";
   if (route.name === "request") return "maintenance";
   if (
     route.name === "tenant" ||
@@ -426,6 +427,9 @@ export function App() {
             {route.name === "home" && <LandlordHomePage navigate={navigate} />}
             {route.name === "properties" && <PropertiesList navigate={navigate} />}
             {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+            {route.name === "unit" && (
+              <UnitPage propertyId={route.propertyId} unitId={route.unitId} navigate={navigate} />
+            )}
             {route.name === "maintenance" && (
               <MaintenancePage search={search} replace={replace} navigate={navigate} />
             )}
@@ -484,6 +488,9 @@ export function App() {
             {route.name === "dashboard" && <DashboardPage navigate={navigate} />}
             {route.name === "properties" && <PropertiesList navigate={navigate} />}
             {route.name === "property" && <PropertyPage id={route.id} navigate={navigate} />}
+            {route.name === "unit" && (
+              <UnitPage propertyId={route.propertyId} unitId={route.unitId} navigate={navigate} />
+            )}
             {route.name === "people" && (
               <PeoplePage search={search} navigate={navigate} replace={replace} />
             )}
