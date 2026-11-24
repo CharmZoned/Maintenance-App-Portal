@@ -9,7 +9,7 @@ export type AdminNavCounts = {
   maintenance?: number;
   /** Accounts waiting for approval — admins only. */
   people?: number;
-  /** Office threads with something the office has not read — admins only. */
+  /** Unread OfficeMessages threads for the signed-in viewer. */
   messages?: number;
 };
 
@@ -30,9 +30,8 @@ async function countPendingAccounts(): Promise<number | undefined> {
 }
 
 async function countUnreadOfficeThreads(): Promise<number | undefined> {
-  // Same source as the dashboard's "Unread messages" tile.
-  const threads = await data.listOfficeThreads();
-  return threads.filter((thread) => thread.unread).length;
+  // Slim scan (no message bodies) — see data.countUnreadOfficeThreads.
+  return data.countUnreadOfficeThreads();
 }
 
 /**
@@ -42,8 +41,6 @@ async function countUnreadOfficeThreads(): Promise<number | undefined> {
  *
  * Each count is independent and fails silently: a count that cannot be loaded
  * is dropped, so the rail shows no badge rather than a stale or invented one.
- * Messages counts unread office threads; request threads have no read
- * tracking yet, so they never add to it.
  */
 export function useAdminNavCounts({
   enabled,
@@ -72,16 +69,9 @@ export function useAdminNavCounts({
         });
     };
     load("maintenance", countOpenRequests);
-    if (isAdmin) {
-      load("people", countPendingAccounts);
-      load("messages", countUnreadOfficeThreads);
-    } else {
-      setCounts((prev) =>
-        prev.people === undefined && prev.messages === undefined
-          ? prev
-          : { ...prev, people: undefined, messages: undefined },
-      );
-    }
+    load("messages", countUnreadOfficeThreads);
+    if (isAdmin) load("people", countPendingAccounts);
+    else setCounts((prev) => (prev.people === undefined ? prev : { ...prev, people: undefined }));
     return () => {
       cancelled = true;
     };

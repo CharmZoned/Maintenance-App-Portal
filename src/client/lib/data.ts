@@ -89,6 +89,9 @@ function throwSb(error: { message: string } | null): never {
 /** PostgREST default max-rows is 1000 — page so list/KPI paths are not silently truncated. */
 const REST_PAGE_SIZE = 1000;
 
+/** Chunk size for PostgREST `.in()` filters (URL length / practical batching). */
+const IN_FILTER_CHUNK = 200;
+
 async function selectAllPages<T>(
   fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
@@ -470,23 +473,67 @@ export async function deleteTenant(id: number): Promise<void> {
 
 // ── Leases ────────────────────────────────────────────────────────
 
-export async function listLeases(params?: {
+type LeaseListParams = {
   tenant_id?: number;
   unit_id?: number;
+  unit_ids?: number[];
   status?: string;
-  /** When set, only these lease ids are loaded (avoids full-table enrich for charge lists). */
   ids?: number[];
-}): Promise<Lease[]> {
+};
+
+async function listLeaseRows(params?: LeaseListParams): Promise<Tables<"Leases">[]> {
   let q = supabase.from("Leases").select("*").order("start_date", { ascending: false });
   if (params?.unit_id) q = q.eq("unit_id", params.unit_id);
   if (params?.status) q = q.eq("status", params.status);
   if (params?.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
-  if (params?.ids !== undefined) {
-    if (params.ids.length === 0) return [];
-    q = q.in("id", params.ids);
-  }
-  const { data: leases, error } = await q;
+  if (params?.ids?.length) q = q.in("id", params.ids);
+  const { data, error } = await q;
   if (error) throwSb(error);
+  return data ?? [];
+}
+
+/** Page each unit-id chunk. One `.in()` can both exceed the URL limit and the 1000-row cap. */
+async function listLeasesForUnitChunks(
+  unitIds: number[],
+  params: LeaseListParams,
+): Promise<Tables<"Leases">[]> {
+  const unique = [...new Set(unitIds)];
+  const rows: Tables<"Leases">[] = [];
+  for (let i = 0; i < unique.length; i += IN_FILTER_CHUNK) {
+    const chunk = unique.slice(i, i + IN_FILTER_CHUNK);
+    const page = await selectAllPages<Tables<"Leases">>((from, to) => {
+      let q = supabase
+        .from("Leases")
+        .select("*")
+        .order("start_date", { ascending: false })
+        .order("id", { ascending: true })
+        .in("unit_id", chunk)
+        .range(from, to);
+      if (params.status) q = q.eq("status", params.status);
+      if (params.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
+      if (params.unit_id) q = q.eq("unit_id", params.unit_id);
+      if (params.ids?.length) q = q.in("id", params.ids);
+      return q;
+    });
+    rows.push(...page);
+  }
+  return rows;
+}
+
+export async function listLeases(params?: {
+  tenant_id?: number;
+  unit_id?: number;
+  /** One query for several units. Leases has no property_id column. */
+  unit_ids?: number[];
+  status?: string;
+  /** When set, only these lease ids are loaded (avoids full-table enrich for charge lists). */
+  ids?: number[];
+}): Promise<Lease[]> {
+  if (params?.unit_ids !== undefined && params.unit_ids.length === 0) return [];
+  if (params?.ids !== undefined && params.ids.length === 0) return [];
+  const leases = params?.unit_ids?.length
+    ? await listLeasesForUnitChunks(params.unit_ids, params)
+    : await listLeaseRows(params);
 
   const unitIds = [...new Set((leases ?? []).map((l) => l.unit_id))];
   const tenantIds = [
@@ -1005,9 +1052,6 @@ async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   });
 }
 
-/** Chunk size for PostgREST `.in()` filters (URL length / practical batching). */
-const IN_FILTER_CHUNK = 200;
-
 /** Slim lease→unit→property→tenant enrich for charges (no full listLeases graph). */
 async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Partial<RentCharge>>> {
   const extras = new Map<number, Partial<RentCharge>>();
@@ -1112,12 +1156,36 @@ async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Pa
   return extras;
 }
 
-export async function listCharges(period?: string): Promise<RentCharge[]> {
-  const charges = await selectAllPages<Tables<"RentCharges">>((from, to) => {
+async function listChargePage(period?: string, leaseIds?: number[]): Promise<Tables<"RentCharges">[]> {
+  return selectAllPages<Tables<"RentCharges">>((from, to) => {
     let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false }).range(from, to);
     if (period) q = q.eq("period", period);
+    if (leaseIds?.length) q = q.in("lease_id", leaseIds);
     return q;
   });
+}
+
+async function listChargesForLeaseChunks(
+  period: string | undefined,
+  leaseIds: number[],
+): Promise<Tables<"RentCharges">[]> {
+  const unique = [...new Set(leaseIds)];
+  const rows: Tables<"RentCharges">[] = [];
+  for (let i = 0; i < unique.length; i += IN_FILTER_CHUNK) {
+    rows.push(...(await listChargePage(period, unique.slice(i, i + IN_FILTER_CHUNK))));
+  }
+  return rows;
+}
+
+export async function listCharges(
+  period?: string,
+  params?: { lease_ids?: number[] },
+): Promise<RentCharge[]> {
+  // RentCharges has lease_id and period, not property_id.
+  if (params?.lease_ids !== undefined && params.lease_ids.length === 0) return [];
+  const charges = params?.lease_ids?.length
+    ? await listChargesForLeaseChunks(period, params.lease_ids)
+    : await listChargePage(period);
 
   const leaseIds = [...new Set(charges.map((c) => c.lease_id))];
   const leaseExtras = await loadChargeLeaseExtras(leaseIds);
@@ -2873,8 +2941,9 @@ export async function listRecentDocumentUploads(limit = 20): Promise<RecentDocum
 
 /**
  * One direct thread between a portal user and the office (OfficeMessages),
- * summarised by its latest message. `unread` compares the thread user's latest
- * message with the signed-in admin's own OfficeThreadReads row.
+ * summarised by its latest message. `unread` is true when any message from
+ * someone other than the signed-in user is newer than that viewer's
+ * OfficeThreadReads row for the thread.
  */
 export interface OfficeThreadSummary {
   thread_user_id: string;
@@ -2885,12 +2954,31 @@ export interface OfficeThreadSummary {
   unread: boolean;
 }
 
+export interface OfficeMessage {
+  id: number;
+  created_at: string;
+  thread_user_id: string;
+  author_user_id: string | null;
+  author_role: AppRole;
+  body: string;
+}
+
+const OFFICE_THREAD_SCAN_LIMIT = 300;
+/** Cap per-conversation history so opening a thread cannot pull unbounded rows. */
+export const OFFICE_MESSAGE_PAGE_LIMIT = 200;
+
 /**
  * Latest office threads, newest first. Reads the most recent `messageLimit`
  * messages, so a thread whose last message is older than that window is not
- * listed (and not counted as unread).
+ * listed (and not counted as unread). Empty threads (no messages yet) are not
+ * returned — callers that need a blank own-thread inject one locally.
  */
-export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThreadSummary[]> {
+export async function listOfficeThreads(messageLimit = OFFICE_THREAD_SCAN_LIMIT): Promise<OfficeThreadSummary[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const myId = user?.id ?? null;
+
   const [messages, reads] = await Promise.all([
     supabase
       .from("OfficeMessages")
@@ -2903,9 +2991,54 @@ export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThrea
   if (messages.error) throwSb(messages.error);
   if (reads.error) throwSb(reads.error);
 
-  const lastRead = new Map((reads.data ?? []).map((r) => [r.thread_user_id, Date.parse(r.last_read_at)]));
+  return summarizeOfficeThreads(messages.data ?? [], reads.data ?? [], myId);
+}
+
+/**
+ * Unread office-thread count without loading message bodies — for nav badges.
+ * Scans the same recent window as `listOfficeThreads` (id + authorship only).
+ */
+export async function countUnreadOfficeThreads(
+  messageLimit = OFFICE_THREAD_SCAN_LIMIT,
+): Promise<number> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const myId = user?.id ?? null;
+
+  const [messages, reads] = await Promise.all([
+    supabase
+      .from("OfficeMessages")
+      .select("created_at, thread_user_id, author_user_id, author_role")
+      .order("created_at", { ascending: false })
+      .limit(messageLimit),
+    supabase.from("OfficeThreadReads").select("thread_user_id, last_read_at"),
+  ]);
+  if (messages.error) throwSb(messages.error);
+  if (reads.error) throwSb(reads.error);
+
+  const summaries = summarizeOfficeThreads(
+    (messages.data ?? []).map((m) => ({ ...m, body: "", id: 0 })),
+    reads.data ?? [],
+    myId,
+  );
+  return summaries.filter((t) => t.unread).length;
+}
+
+function summarizeOfficeThreads(
+  messages: Array<{
+    created_at: string;
+    thread_user_id: string;
+    author_user_id: string | null;
+    author_role: AppRole;
+    body: string;
+  }>,
+  reads: Array<{ thread_user_id: string; last_read_at: string }>,
+  myId: string | null,
+): OfficeThreadSummary[] {
+  const lastRead = new Map(reads.map((r) => [r.thread_user_id, Date.parse(r.last_read_at)]));
   const threads = new Map<string, OfficeThreadSummary>();
-  for (const m of messages.data ?? []) {
+  for (const m of messages) {
     let thread = threads.get(m.thread_user_id);
     if (!thread) {
       // Rows arrive newest first, so the first row seen is the thread's latest message.
@@ -2919,10 +3052,99 @@ export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThrea
       };
       threads.set(m.thread_user_id, thread);
     }
-    if (m.author_role !== "admin") {
+    const fromOther = myId != null && m.author_user_id != null && m.author_user_id !== myId;
+    if (fromOther) {
       const readAt = lastRead.get(m.thread_user_id);
       if (readAt == null || Date.parse(m.created_at) > readAt) thread.unread = true;
     }
   }
   return [...threads.values()];
+}
+
+/**
+ * Messages in one office thread, oldest first.
+ * Returns at most `OFFICE_MESSAGE_PAGE_LIMIT` most recent rows (then reversed).
+ */
+export async function listOfficeMessages(
+  threadUserId: string,
+  limit = OFFICE_MESSAGE_PAGE_LIMIT,
+): Promise<OfficeMessage[]> {
+  const { data, error } = await supabase
+    .from("OfficeMessages")
+    .select("id, created_at, thread_user_id, author_user_id, author_role, body")
+    .eq("thread_user_id", threadUserId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throwSb(error);
+  const rows = (data ?? []).slice().reverse();
+  return rows.map((row) => ({
+    id: row.id,
+    created_at: row.created_at,
+    thread_user_id: row.thread_user_id,
+    author_user_id: row.author_user_id,
+    author_role: row.author_role,
+    body: row.body,
+  }));
+}
+
+/**
+ * Send a direct office message. Non-admins may only write to their own thread
+ * (`thread_user_id` must be their user id). Admins may write to any office
+ * thread user (RLS enforces `is_office_thread_user`).
+ */
+export async function sendOfficeMessage(threadUserId: string, body: string): Promise<OfficeMessage> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error("Message cannot be empty.");
+  if (trimmed.length > 5000) throw new Error("Message is too long (max 5000 characters).");
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { data: roleRow, error: roleErr } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (roleErr) throwSb(roleErr);
+  if (!roleRow?.role) throw new Error("No portal role for this account.");
+
+  const { data, error } = await supabase
+    .from("OfficeMessages")
+    .insert({
+      thread_user_id: threadUserId,
+      author_user_id: user.id,
+      author_role: roleRow.role,
+      body: trimmed,
+    })
+    .select("id, created_at, thread_user_id, author_user_id, author_role, body")
+    .single();
+  if (error) throwSb(error);
+  return {
+    id: data!.id,
+    created_at: data!.created_at,
+    thread_user_id: data!.thread_user_id,
+    author_user_id: data!.author_user_id,
+    author_role: data!.author_role,
+    body: data!.body,
+  };
+}
+
+/** Upsert the caller's last-read marker for an office thread. */
+export async function markOfficeThreadRead(threadUserId: string): Promise<void> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in.");
+
+  const { error } = await supabase.from("OfficeThreadReads").upsert(
+    {
+      user_id: user.id,
+      thread_user_id: threadUserId,
+      last_read_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,thread_user_id" },
+  );
+  if (error) throwSb(error);
 }

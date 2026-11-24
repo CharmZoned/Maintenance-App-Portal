@@ -1,12 +1,8 @@
-import { MessageSquare, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMessageTime, type MessageThread } from "@/lib/messages";
 
-/**
- * Figma `Message thread row` — unread dot, kind icon, title + preview + time.
- * Unread is carried three ways: the dot, a heavier title, and ", unread" in
- * the row's accessible name.
- */
+/** Figma `Message thread row` — unread dot, optional wrench, title + preview + time. */
 export function MessageThreadRow({
   thread,
   selected,
@@ -19,13 +15,9 @@ export function MessageThreadRow({
   now?: Date;
 }) {
   const time = formatMessageTime(thread.updatedAt, now);
-  const accessibleName = [
-    thread.unread ? `${thread.title}, unread.` : `${thread.title}.`,
-    /[.!?…]$/.test(thread.preview) ? thread.preview : `${thread.preview}.`,
-    time,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const accessibleName = thread.unread
+    ? `${thread.title}, unread. ${thread.preview}. ${time}`
+    : `${thread.title}. ${thread.preview}. ${time}`;
 
   return (
     <button
@@ -50,20 +42,10 @@ export function MessageThreadRow({
           <div className="flex min-w-0 items-center gap-1.5">
             {thread.kind === "request" ? (
               <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            ) : thread.kind === "office" ? (
-              <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             ) : null}
-            <span
-              className={cn(
-                "truncate text-sm text-foreground",
-                // Unread reads heavier than read, on top of the dot.
-                thread.unread ? "font-semibold" : "font-medium",
-              )}
-            >
-              {thread.title}
-            </span>
+            <span className="truncate text-sm font-semibold text-foreground">{thread.title}</span>
           </div>
-          {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
+          <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
         </div>
         <p className="mt-1 truncate text-[13px] text-muted-foreground">{thread.preview}</p>
       </div>

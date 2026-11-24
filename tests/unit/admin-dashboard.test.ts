@@ -886,7 +886,6 @@ describe("messages", () => {
       ["user", "Lena Owner · Landlord", "Boiler follow-up — can we confirm the part?", "Today · 16 Nov", true],
       ["user", "Raj Patel · Tenant · 1B", "Sent the rest by Zelle. Please verify.", "Fri · 13 Nov", true],
     ]);
-    // Each row opens that person's thread with the office.
     expect(messages.threads.map((t) => t.href)).toEqual([
       "/messages?thread=office:u-sam",
       "/messages?thread=office:u-lena",

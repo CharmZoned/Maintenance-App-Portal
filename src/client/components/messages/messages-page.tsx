@@ -1,117 +1,42 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
-import { MessageSquare, Wrench } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
-import { cn } from "@/lib/utils";
 import { MessageThreadRow } from "./message-thread-row";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
 import { TenantMessagesPage } from "./tenant-messages-page";
-import { OfficeConversation, useVisibleRefresh } from "./office-conversation";
 import {
   commentSenderLabel,
-  emptyOfficeThread,
   formatMessageTime,
-  officeUserIdFromThreadId,
-  ownOfficeThread,
-  sortThreads,
+  mergeMessageThreads,
+  officeMessageSenderLabel,
+  officeThreadId,
+  officeThreadTitleFromAccount,
+  parseOfficeThreadId,
+  resolveStaffMessagesDeepLink,
   threadsFromOfficeSummaries,
   threadsFromWorkOrders,
   type MessageThread,
-  type OfficePerson,
 } from "@/lib/messages";
-import { listOfficeThreads, type OfficeThreadSummary } from "@/lib/data";
-import {
-  getOfficeViewer,
-  getOwnOfficeThread,
-  listOfficePeople,
-  type OfficeMessage,
-  type OfficeViewer,
-} from "@/lib/office-messages";
+import type { OfficeMessage, UserAccountRow } from "@/lib/data";
+import { supabase } from "@/lib/supabase";
 import type { CommentVisibility, MaintenanceComment, WorkOrder } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 /**
- * Office threads as the signed-in person sees them.
- * Admin: every person's thread, plus who is behind each account.
- * Anyone else: their own single thread (no summary until someone writes).
- */
-type OfficeInbox = {
-  viewer: OfficeViewer;
-  summaries: OfficeThreadSummary[];
-  people: Map<string, OfficePerson>;
-};
-
-async function loadOfficeSummaries(viewer: OfficeViewer): Promise<OfficeThreadSummary[]> {
-  if (viewer.role === "admin") return listOfficeThreads();
-  const own = await getOwnOfficeThread(viewer.userId);
-  return own ? [own] : [];
-}
-
-async function loadOfficeInbox(): Promise<OfficeInbox> {
-  const viewer = await getOfficeViewer();
-  const [summaries, people] = await Promise.all([
-    loadOfficeSummaries(viewer),
-    // Names are best effort: without them a thread is still listed, as "Portal user".
-    viewer.role === "admin"
-      ? listOfficePeople().catch(() => new Map<string, OfficePerson>())
-      : Promise.resolve(new Map<string, OfficePerson>()),
-  ]);
-  return { viewer, summaries, people };
-}
-
-/**
- * Height left for the inbox inside the page's scroll area, measured from where
- * the inbox starts. The open thread is given exactly this height, so it fills
- * the screen and scrolls inside itself whatever sits around it (a top banner,
- * the phone tab bar). Null until measured; the CSS fallback applies meanwhile.
- */
-function useAvailableHeight(ref: RefObject<HTMLElement | null>, mounted: boolean): number | null {
-  const [height, setHeight] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!mounted || !el || typeof ResizeObserver === "undefined") {
-      setHeight(null);
-      return;
-    }
-    let scroller = el.parentElement;
-    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
-      scroller = scroller.parentElement;
-    }
-    if (!scroller) return;
-    const scrollArea = scroller;
-    const measure = () => {
-      const offset =
-        el.getBoundingClientRect().top - scrollArea.getBoundingClientRect().top + scrollArea.scrollTop;
-      const next = Math.floor(scrollArea.clientHeight - offset);
-      setHeight(next > 0 ? next : null);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(scrollArea);
-    return () => observer.disconnect();
-  }, [ref, mounted]);
-
-  return height;
-}
-
-/**
  * Messages route entry.
- * Tenants: fully mocked Figma inbox/conversation (no messages tables).
- * Admin, worker, landlord: request threads via MaintenanceRequestComments,
- * plus office threads (OfficeMessages).
+ * Tenants: office DMs + request comment threads.
+ * Staff/landlord/worker: same sources (landlord cannot post on request threads).
  */
 export function MessagesPage({
   search = "",
@@ -124,7 +49,6 @@ export function MessagesPage({
 }) {
   const { isTenant } = useApp();
 
-  // TODO(data-gap): messages backend not available — tenant path is mock-only
   if (isTenant) {
     return <TenantMessagesPage search={search} navigate={navigate} replace={replace} />;
   }
@@ -135,11 +59,8 @@ export function MessagesPage({
 }
 
 /**
- * Figma 05 Messages — staff/landlord list + thread.
- * Request threads use MaintenanceRequestComments. Office threads use
- * OfficeMessages: an admin sees one per person who has written (or been
- * written to); a worker or landlord sees their own single "Office" thread.
- * Deep links: `?thread=wo:<requestId>` and `?thread=office:<userId>`.
+ * Figma 05 Messages — staff/landlord/worker list + thread.
+ * Request threads → MaintenanceRequestComments; direct → OfficeMessages.
  */
 function StaffMessagesPage({
   search = "",
@@ -155,6 +76,11 @@ function StaffMessagesPage({
     listWorkOrders,
     listMaintenanceComments,
     addMaintenanceComment,
+    listOfficeThreads,
+    listOfficeMessages,
+    sendOfficeMessage,
+    markOfficeThreadRead,
+    listUserAccounts,
     setError,
     setNotice,
     isAdmin,
@@ -163,219 +89,261 @@ function StaffMessagesPage({
   } = app;
 
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [office, setOffice] = useState<OfficeInbox | null>(null);
+  const [officeSummaries, setOfficeSummaries] = useState<
+    Awaited<ReturnType<typeof listOfficeThreads>>
+  >([]);
+  const [accountTitles, setAccountTitles] = useState<Map<string, string>>(() => new Map());
+  const [accounts, setAccounts] = useState<UserAccountRow[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setLocalError] = useState<string | null>(null);
-  /** One of the two sources failed while the other loaded: shown above the list. */
-  const [partialError, setPartialError] = useState<string | null>(null);
   const [openedIds, setOpenedIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [extraDirectThreads, setExtraDirectThreads] = useState<MessageThread[]>([]);
   const [comments, setComments] = useState<MaintenanceComment[]>([]);
+  const [officeMessages, setOfficeMessages] = useState<OfficeMessage[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [mobileThread, setMobileThread] = useState(false);
   const [commentVisibility, setCommentVisibility] = useState<CommentVisibility>("internal");
   const [threadReloadKey, setThreadReloadKey] = useState(0);
-
-  /** Bumped whenever office state changes locally, so an older in-flight refresh is dropped. */
-  const officeSeqRef = useRef(0);
+  const [newMessageOpen, setNewMessageOpen] = useState(false);
 
   const load = useCallback(async () => {
     setState("loading");
     setLocalError(null);
-    setPartialError(null);
-    // A full load is authoritative: any quiet refresh still in flight is dropped.
-    officeSeqRef.current += 1;
-    const [requests, inbox] = await Promise.allSettled([listWorkOrders(), loadOfficeInbox()]);
-    if (requests.status === "fulfilled") setWorkOrders(requests.value);
-    if (inbox.status === "fulfilled") {
-      officeSeqRef.current += 1;
-      setOffice(inbox.value);
-    }
+    try {
+      const [{ data: auth }, list, office] = await Promise.all([
+        supabase.auth.getUser(),
+        listWorkOrders(),
+        listOfficeThreads(),
+      ]);
+      setCurrentUserId(auth.user?.id ?? null);
+      setWorkOrders(list);
+      setOfficeSummaries(office);
 
-    if (requests.status === "rejected" && inbox.status === "rejected") {
-      const message = (requests.reason as Error).message;
-      setLocalError(message);
+      if (isAdmin) {
+        try {
+          const rows = await listUserAccounts();
+          setAccounts(rows.filter((a) => a.account_status === "approved" && a.role !== "admin"));
+          const titles = new Map<string, string>();
+          for (const row of rows) {
+            titles.set(row.user_id, officeThreadTitleFromAccount(row));
+          }
+          setAccountTitles(titles);
+        } catch {
+          setAccounts([]);
+          setAccountTitles(new Map());
+        }
+      } else {
+        setAccounts([]);
+        setAccountTitles(new Map());
+      }
+      setState("ready");
+    } catch (err) {
+      setLocalError((err as Error).message);
       setState("error");
-      setError(message);
-      return;
+      setError((err as Error).message);
     }
-    if (requests.status === "rejected") {
-      setWorkOrders([]);
-      setPartialError("Request conversations couldn’t be loaded.");
-      setError((requests.reason as Error).message);
-    } else if (inbox.status === "rejected") {
-      setOffice(null);
-      setPartialError("Conversations with the office couldn’t be loaded.");
-    }
-    setState("ready");
-  }, [listWorkOrders, setError]);
+  }, [listWorkOrders, listOfficeThreads, listUserAccounts, setError, isAdmin]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const officeViewer = office?.viewer ?? null;
+  useEffect(() => {
+    setCommentVisibility(isTenant ? "tenant_visible" : "internal");
+  }, [isTenant]);
 
-  /** Quiet refetch of the office summaries (new messages, unread state). */
-  const refreshOffice = useCallback(async () => {
-    if (!officeViewer) return;
-    const seq = ++officeSeqRef.current;
-    try {
-      const summaries = await loadOfficeSummaries(officeViewer);
-      if (seq !== officeSeqRef.current) return;
-      setOffice((prev) => (prev ? { ...prev, summaries } : prev));
-    } catch {
-      // Keep what is on screen; the next refresh tries again.
-    }
-  }, [officeViewer]);
-
-  // No realtime in the app: refetch on an interval while visible, and on focus.
-  useVisibleRefresh(() => void refreshOffice(), undefined, state === "ready" && officeViewer != null);
-
-  /** The open conversation saved the viewer's read row: clear the dot without waiting for a refetch. */
-  const handleOfficeRead = useCallback((threadUserId: string) => {
-    officeSeqRef.current += 1;
-    setOffice((prev) =>
-      prev
-        ? {
-            ...prev,
-            summaries: prev.summaries.map((s) =>
-              s.thread_user_id === threadUserId && s.unread ? { ...s, unread: false } : s,
-            ),
-          }
-        : prev,
-    );
-  }, []);
-
-  const officeRef = useRef(office);
-  officeRef.current = office;
-
-  /** The open conversation has a newer latest message (received or sent): update its row. */
-  const handleOfficeLatest = useCallback((message: OfficeMessage) => {
-    const isNews = (summaries: OfficeThreadSummary[]) => {
-      const existing = summaries.find((s) => s.thread_user_id === message.thread_user_id);
-      return !existing || Date.parse(existing.last_message_at) < Date.parse(message.created_at);
-    };
-    if (!officeRef.current || !isNews(officeRef.current.summaries)) return;
-    // Drop any refresh already in flight: it may predate this message.
-    officeSeqRef.current += 1;
-    setOffice((prev) => {
-      if (!prev || !isNews(prev.summaries)) return prev;
-      const existing = prev.summaries.find((s) => s.thread_user_id === message.thread_user_id);
-      const next: OfficeThreadSummary = {
-        thread_user_id: message.thread_user_id,
-        last_message_at: message.created_at,
-        last_message_body: message.body,
-        last_author_role: message.author_role,
-        last_author_user_id: message.author_user_id,
-        unread: existing?.unread ?? false,
-      };
-      return {
-        ...prev,
-        summaries: existing
-          ? prev.summaries.map((s) => (s === existing ? next : s))
-          : [next, ...prev.summaries],
-      };
-    });
-  }, []);
-
-  const linkedThreadId = useMemo(
-    () => new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("thread"),
-    [search],
+  const requestThreads = useMemo(
+    () => threadsFromWorkOrders(workOrders, { openedIds }),
+    [workOrders, openedIds],
   );
 
-  const threads = useMemo(() => {
-    const requestThreads = threadsFromWorkOrders(workOrders, { openedIds });
-    if (!office) return requestThreads;
-
-    if (office.viewer.role !== "admin") {
-      // One "Office" thread of their own, always there so they can write first.
-      const own = ownOfficeThread(office.viewer.userId, office.summaries[0]);
-      return sortThreads(requestThreads, [own]);
-    }
-
-    const officeThreads = threadsFromOfficeSummaries(office.summaries, {
-      people: office.people,
-      viewerUserId: office.viewer.userId,
+  const directThreads = useMemo(() => {
+    const fromDb = threadsFromOfficeSummaries(officeSummaries, {
+      titles: accountTitles.size > 0 ? accountTitles : undefined,
+      ensureOwnThread:
+        !isAdmin && currentUserId
+          ? { userId: currentUserId, title: "Landlord Gopher office" }
+          : undefined,
     });
-    // A link to a person nobody has written to yet opens an empty thread for them.
-    const linkedUserId = officeUserIdFromThreadId(linkedThreadId);
-    const pinned =
-      linkedUserId &&
-      office.people.has(linkedUserId) &&
-      !office.summaries.some((s) => s.thread_user_id === linkedUserId)
-        ? [emptyOfficeThread(linkedUserId, office.people.get(linkedUserId))]
-        : [];
-    return sortThreads([...requestThreads, ...officeThreads], pinned);
-  }, [workOrders, openedIds, office, linkedThreadId]);
+    const known = new Set(fromDb.map((t) => t.id));
+    const extras = extraDirectThreads.filter((t) => !known.has(t.id));
+    return [...fromDb, ...extras];
+  }, [officeSummaries, accountTitles, isAdmin, currentUserId, extraDirectThreads]);
+
+  const threads = useMemo(
+    () => mergeMessageThreads(directThreads, requestThreads),
+    [directThreads, requestThreads],
+  );
 
   const unreadCount = threads.filter((t) => t.unread).length;
 
-  const splitRef = useRef<HTMLDivElement | null>(null);
-  const paneHeight = useAvailableHeight(splitRef, state === "ready" && threads.length > 0);
-
-  // Deep-link ?thread=wo:123 or ?thread=office:<userId> — mark opened; clear
-  // selection when param absent.
+  // Deep-link ?thread=wo:… / office:… / ?request=
   useEffect(() => {
-    const thread = linkedThreadId;
-    if (thread && threads.some((t) => t.id === thread)) {
-      setSelectedId(thread);
+    if (state !== "ready") return;
+    const link = resolveStaffMessagesDeepLink(search, threads, {
+      currentUserId,
+      isAdmin,
+    });
+
+    if (link.kind === "thread") {
+      const officeUser = parseOfficeThreadId(link.threadId);
+      const canSynthesize =
+        officeUser != null &&
+        (isAdmin || (currentUserId != null && officeUser === currentUserId));
+      if (canSynthesize && !threads.some((t) => t.id === link.threadId)) {
+        setExtraDirectThreads((prev) => {
+          if (prev.some((t) => t.id === link.threadId)) return prev;
+          return [
+            ...prev,
+            {
+              id: link.threadId,
+              kind: "direct",
+              title: accountTitles.get(officeUser) ?? "Office conversation",
+              preview: "No messages yet.",
+              updatedAt: new Date().toISOString(),
+              unread: false,
+              threadUserId: officeUser,
+            },
+          ];
+        });
+      }
+      setSelectedId(link.threadId);
       setOpenedIds((prev) => {
-        if (prev.has(thread)) return prev;
-        return new Set(prev).add(thread);
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
       });
       setMobileThread(true);
       return;
     }
-    if (!thread) {
-      setSelectedId(null);
-      setMobileThread(false);
-    }
-  }, [linkedThreadId, threads]);
 
-  const selected: MessageThread | undefined = threads.find((t) => t.id === selectedId);
-  const selectedRequestId =
-    selected?.kind === "request" ? selected.requestId ?? null : null;
-  const selectedOfficeUserId =
-    selected?.kind === "office" ? selected.officeUserId ?? null : null;
-  const selectedRequestIdRef = useRef(selectedRequestId);
-  selectedRequestIdRef.current = selectedRequestId;
-
-  useEffect(() => {
-    setComments([]);
-    setThreadError(null);
-
-    if (selectedRequestId == null) {
-      setThreadLoading(false);
+    if (link.kind === "request") {
+      setSelectedId(link.threadId);
+      setOpenedIds((prev) => {
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
+      });
+      setMobileThread(true);
       return;
     }
 
-    let cancelled = false;
-    setThreadLoading(true);
-    void listMaintenanceComments(selectedRequestId)
-      .then((rows) => {
-        if (cancelled) return;
-        // Defense in depth — landlords only see tenant_visible (RLS also enforces).
-        setComments(
-          isLandlord ? rows.filter((row) => row.visibility === "tenant_visible") : rows,
-        );
-        setThreadError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setComments([]);
-        setThreadError((err as Error).message);
-        setError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setThreadLoading(false);
-      });
+    if (link.kind === "not-found") {
+      setSelectedId(null);
+      setMobileThread(true);
+      return;
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedRequestId, threadReloadKey, listMaintenanceComments, setError, isLandlord]);
+    if (!new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("thread")) {
+      setSelectedId(null);
+      setMobileThread(false);
+    }
+  }, [search, threads, state, accountTitles, currentUserId, isAdmin]);
+
+  const selected: MessageThread | undefined =
+    threads.find((t) => t.id === selectedId) ??
+    extraDirectThreads.find((t) => t.id === selectedId);
+
+  const selectedRequestId =
+    selected?.kind === "request"
+      ? (selected.requestId ?? null)
+      : selectedId
+        ? (() => {
+            const n = Number(selectedId.replace(/^wo:/, ""));
+            return selectedId.startsWith("wo:") && Number.isFinite(n) ? n : null;
+          })()
+        : null;
+  const selectedThreadUserId =
+    selected?.kind === "direct"
+      ? (selected.threadUserId ?? parseOfficeThreadId(selected.id))
+      : selectedId
+        ? parseOfficeThreadId(selectedId)
+        : null;
+
+  const selectedRequestIdRef = useRef(selectedRequestId);
+  selectedRequestIdRef.current = selectedRequestId;
+  const selectedThreadUserIdRef = useRef(selectedThreadUserId);
+  selectedThreadUserIdRef.current = selectedThreadUserId;
+
+  useEffect(() => {
+    setComments([]);
+    setOfficeMessages([]);
+    setThreadError(null);
+
+    if (selectedRequestId != null) {
+      let cancelled = false;
+      setThreadLoading(true);
+      void listMaintenanceComments(selectedRequestId)
+        .then((rows) => {
+          if (cancelled) return;
+          setComments(
+            isLandlord ? rows.filter((row) => row.visibility === "tenant_visible") : rows,
+          );
+          setThreadError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setComments([]);
+          setThreadError((err as Error).message);
+          setError((err as Error).message);
+        })
+        .finally(() => {
+          if (!cancelled) setThreadLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (selectedThreadUserId) {
+      let cancelled = false;
+      setThreadLoading(true);
+      void listOfficeMessages(selectedThreadUserId)
+        .then(async (rows) => {
+          if (cancelled) return;
+          setOfficeMessages(rows);
+          setThreadError(null);
+          try {
+            await markOfficeThreadRead(selectedThreadUserId);
+            setOfficeSummaries((prev) =>
+              prev.map((t) =>
+                t.thread_user_id === selectedThreadUserId ? { ...t, unread: false } : t,
+              ),
+            );
+          } catch (err) {
+            // Still show the thread; surface so unread does not look stuck forever.
+            setNotice(
+              `Opened the conversation, but couldn’t mark it read: ${(err as Error).message}`,
+            );
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setOfficeMessages([]);
+          setThreadError((err as Error).message);
+          setError((err as Error).message);
+        })
+        .finally(() => {
+          if (!cancelled) setThreadLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setThreadLoading(false);
+  }, [
+    selectedRequestId,
+    selectedThreadUserId,
+    threadReloadKey,
+    listMaintenanceComments,
+    listOfficeMessages,
+    markOfficeThreadRead,
+    setError,
+    setNotice,
+    isLandlord,
+  ]);
 
   function openThread(thread: MessageThread) {
     setSelectedId(thread.id);
@@ -396,14 +364,72 @@ function StaffMessagesPage({
     const requestId = selectedRequestId;
     try {
       const created = await addMaintenanceComment(requestId, body, visibility);
-      // Drop if the user switched threads while the request was in flight.
       if (selectedRequestIdRef.current !== requestId) return;
       setComments((prev) => [...prev, created]);
     } catch (err) {
       setError((err as Error).message);
-      // Rethrow so MessageComposer keeps the draft (its catch handles it).
       throw err;
     }
+  }
+
+  async function sendDirect(body: string) {
+    if (!selectedThreadUserId) return;
+    const threadUserId = selectedThreadUserId;
+    try {
+      const created = await sendOfficeMessage(threadUserId, body);
+      if (selectedThreadUserIdRef.current !== threadUserId) return;
+      setOfficeMessages((prev) => [...prev, created]);
+      setOfficeSummaries((prev) => {
+        const rest = prev.filter((t) => t.thread_user_id !== threadUserId);
+        return [
+          {
+            thread_user_id: threadUserId,
+            last_message_at: created.created_at,
+            last_message_body: created.body,
+            last_author_role: created.author_role,
+            last_author_user_id: created.author_user_id,
+            unread: false,
+          },
+          ...rest,
+        ];
+      });
+      setExtraDirectThreads((prev) => prev.filter((t) => t.threadUserId !== threadUserId));
+      void markOfficeThreadRead(threadUserId).catch(() => undefined);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    }
+  }
+
+  function startConversationWith(account: UserAccountRow) {
+    const id = officeThreadId(account.user_id);
+    setExtraDirectThreads((prev) => {
+      if (prev.some((t) => t.id === id) || officeSummaries.some((t) => t.thread_user_id === account.user_id)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id,
+          kind: "direct",
+          title: officeThreadTitleFromAccount(account),
+          preview: "No messages yet.",
+          updatedAt: new Date().toISOString(),
+          unread: false,
+          threadUserId: account.user_id,
+        },
+      ];
+    });
+    setNewMessageOpen(false);
+    openThread({
+      id,
+      kind: "direct",
+      title: officeThreadTitleFromAccount(account),
+      preview: "No messages yet.",
+      updatedAt: new Date().toISOString(),
+      unread: false,
+      threadUserId: account.user_id,
+    });
   }
 
   const currentRole = isAdmin
@@ -423,7 +449,12 @@ function StaffMessagesPage({
           ? `${unreadCount} unread`
           : "Inbox";
 
-  const threadPane = selected ? (
+  const isDirect = selected?.kind === "direct" || Boolean(selectedThreadUserId);
+  const canComposeRequest = selectedRequestId != null && !isLandlord;
+  const canComposeDirect = Boolean(selectedThreadUserId);
+  const composerDisabled = isDirect ? !canComposeDirect : !canComposeRequest;
+
+  const threadPane = selected || selectedRequestId != null || selectedThreadUserId ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-[100px] shrink-0 items-center gap-2 border-b border-border px-4 md:px-5">
         <button
@@ -433,13 +464,16 @@ function StaffMessagesPage({
         >
           ← Back
         </button>
-        {selected.kind === "request" ? (
+        {(selected?.kind === "request" || selectedRequestId != null) && !isDirect ? (
           <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        ) : selected.kind === "office" ? (
-          <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         ) : null}
-        <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{selected.title}</h2>
-        {selectedRequestId != null ? (
+        <h2 className="min-w-0 flex-1 truncate text-base font-semibold">
+          {selected?.title ??
+            (selectedRequestId != null
+              ? `Request ${selectedRequestId}`
+              : "Office conversation")}
+        </h2>
+        {selectedRequestId != null && !isDirect ? (
           <button
             type="button"
             className="shrink-0 text-[13px] font-medium text-brand-text hover:underline"
@@ -449,79 +483,81 @@ function StaffMessagesPage({
           </button>
         ) : null}
       </div>
-      {selectedOfficeUserId != null && officeViewer ? (
-        <OfficeConversation
-          key={selectedOfficeUserId}
-          threadUserId={selectedOfficeUserId}
-          viewer={officeViewer}
-          personLabel={officeViewer.role === "admin" ? selected.title : null}
-          latestMessageAt={selected.updatedAt || null}
-          onRead={handleOfficeRead}
-          onLatestMessage={handleOfficeLatest}
-        />
-      ) : (
-        <>
-          <div className="min-h-0 flex-1 overflow-auto p-4 md:p-5">
-            {threadLoading ? (
-              <>
-                <SkeletonRow />
-                <SkeletonRow />
-              </>
-            ) : threadError ? (
-              <ErrorRetry
-                message={threadError}
-                onRetry={() => setThreadReloadKey((k) => k + 1)}
-              />
-            ) : comments.length === 0 ? (
-              <EmptyState
-                message={
-                  selected.stub
-                    ? "Direct messages are stubbed — no message-center API yet."
-                    : "No comments on this request yet. Send the first update."
-                }
-              />
-            ) : (
-              <ol className="space-y-3" aria-label="Messages">
-                {comments.map((c) => {
-                  const { label, outgoing } = commentSenderLabel(c, { currentRole });
-                  return (
-                    <li
-                      key={c.id}
-                      className={outgoing ? "flex justify-end" : "flex justify-start"}
-                    >
-                      <MessageBubble
-                        sender={label}
-                        body={c.body}
-                        time={formatMessageTime(c.created_at)}
-                        side={outgoing ? "outgoing" : "incoming"}
-                        visibility={c.visibility}
-                        showVisibilityLabel={!isTenant}
-                      />
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </div>
-          <MessageComposer
-            resetKey={selected.id}
-            disabled={isLandlord || selected.kind !== "request"}
-            placeholder={
-              isLandlord
-                ? "Landlord portal is read-only"
-                : selected.kind !== "request"
-                  ? "Direct messages unavailable (stub)"
-                  : isTenant
-                    ? "Message staff…"
-                    : "Write a message…"
-            }
-            showVisibility={!isTenant && !isLandlord && selected.kind === "request"}
-            visibility={commentVisibility}
-            onVisibilityChange={setCommentVisibility}
-            onSend={sendComment}
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4 md:p-5">
+        {threadLoading ? (
+          <>
+            <SkeletonRow />
+            <SkeletonRow />
+          </>
+        ) : threadError ? (
+          <ErrorRetry
+            message={threadError}
+            onRetry={() => setThreadReloadKey((k) => k + 1)}
           />
-        </>
-      )}
+        ) : isDirect ? (
+          officeMessages.length === 0 ? (
+            <EmptyState message="No messages yet. Send the first update to the office." />
+          ) : (
+            officeMessages.map((m) => {
+              const { label, outgoing } = officeMessageSenderLabel(m, {
+                currentUserId,
+                currentRole,
+              });
+              return (
+                <div
+                  key={m.id}
+                  className={outgoing ? "flex justify-end" : "flex justify-start"}
+                >
+                  <MessageBubble
+                    sender={label}
+                    body={m.body}
+                    time={formatMessageTime(m.created_at)}
+                    side={outgoing ? "outgoing" : "incoming"}
+                  />
+                </div>
+              );
+            })
+          )
+        ) : comments.length === 0 ? (
+          <EmptyState message="No comments on this request yet. Send the first update." />
+        ) : (
+          comments.map((c) => {
+            const { label, outgoing } = commentSenderLabel(c, { currentRole });
+            return (
+              <div
+                key={c.id}
+                className={outgoing ? "flex justify-end" : "flex justify-start"}
+              >
+                <MessageBubble
+                  sender={label}
+                  body={c.body}
+                  time={formatMessageTime(c.created_at)}
+                  side={outgoing ? "outgoing" : "incoming"}
+                  visibility={c.visibility}
+                  showVisibilityLabel={!isTenant}
+                />
+              </div>
+            );
+          })
+        )}
+      </div>
+      <MessageComposer
+        resetKey={selected?.id ?? selectedId}
+        disabled={composerDisabled}
+        placeholder={
+          isDirect
+            ? isAdmin
+              ? "Write a message…"
+              : "Message the office…"
+            : isLandlord
+              ? "Landlord portal is read-only on request threads"
+              : "Write a message…"
+        }
+        showVisibility={!isTenant && !isLandlord && !isDirect && selectedRequestId != null}
+        visibility={commentVisibility}
+        onVisibilityChange={setCommentVisibility}
+        onSend={isDirect ? async (body) => sendDirect(body) : sendComment}
+      />
     </div>
   ) : (
     <div className="hidden flex-1 items-center justify-center md:flex">
@@ -529,31 +565,23 @@ function StaffMessagesPage({
     </div>
   );
 
+  const deepLinkMiss =
+    state === "ready" &&
+    resolveStaffMessagesDeepLink(search, threads, { currentUserId, isAdmin }).kind ===
+      "not-found";
+
   return (
     <PageShell
       title="Messages"
       meta={meta}
       width="max-w-none"
       actions={
-        !isTenant && !isLandlord ? (
+        isAdmin ? (
           <Button
             variant="brand"
             size="header"
             type="button"
-            onClick={() => {
-              // A worker's only direct conversation is the one with the office.
-              const own =
-                officeViewer && officeViewer.role !== "admin"
-                  ? threads.find((t) => t.kind === "office")
-                  : undefined;
-              if (own) {
-                openThread(own);
-                return;
-              }
-              setNotice(
-                "New message is stubbed — start from a work order comment thread for now.",
-              );
-            }}
+            onClick={() => setNewMessageOpen(true)}
           >
             New message
           </Button>
@@ -569,68 +597,78 @@ function StaffMessagesPage({
         </div>
       ) : state === "error" ? (
         <ErrorRetry message={error ?? undefined} onRetry={() => void load()} />
-      ) : threads.length === 0 ? (
-        partialError ? (
-          <ErrorRetry message={partialError} onRetry={() => void load()} />
-        ) : (
-          <EmptyState message="No conversations yet." />
-        )
+      ) : threads.length === 0 && !selectedId ? (
+        <EmptyState message="No conversations yet. Message the office, or comment on a maintenance request." />
+      ) : deepLinkMiss && !selected ? (
+        <EmptyState
+          message="That conversation wasn’t found. Pick a thread from your inbox."
+          actionLabel="Back to inbox"
+          onAction={() => (replace ? replace("/messages") : navigate("/messages"))}
+        />
       ) : (
-        <div
-          ref={splitRef}
-          className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]"
-          style={paneHeight ? { minHeight: paneHeight } : undefined}
-        >
+        <div className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]">
           <div
             className={
-              mobileThread && selected
+              mobileThread && (selected || selectedId)
                 ? "hidden w-full md:block md:w-[420px] md:shrink-0 md:border-r md:border-border"
                 : "w-full md:w-[420px] md:shrink-0 md:border-r md:border-border"
             }
           >
-            {partialError ? (
-              <div
-                role="alert"
-                className="flex items-center justify-between gap-3 border-b border-border bg-destructive-tint px-4 py-3"
-              >
-                <p className="text-[13px] text-destructive">{partialError}</p>
-                <button
-                  type="button"
-                  className="shrink-0 text-[13px] font-medium text-destructive underline"
-                  onClick={() => void load()}
-                >
-                  Retry
-                </button>
-              </div>
-            ) : null}
-            <ul aria-label="Conversations">
-              {threads.map((t) => (
-                <li key={t.id}>
-                  <MessageThreadRow
-                    thread={t}
-                    selected={t.id === selectedId}
-                    onSelect={() => openThread(t)}
-                  />
-                </li>
-              ))}
-            </ul>
+            {threads.map((t) => (
+              <MessageThreadRow
+                key={t.id}
+                thread={t}
+                selected={t.id === selectedId}
+                onSelect={() => openThread(t)}
+              />
+            ))}
           </div>
-          {/*
-            The thread is one screen tall and scrolls inside itself, so the
-            newest message and the composer stay in view however long the
-            conversation (or the list beside it) gets.
-          */}
           <div
-            className={cn(
-              "h-[calc(100dvh-8rem)] min-w-0 flex-1 flex-col md:sticky md:top-0 md:h-[calc(100dvh-7rem)] md:self-start",
-              mobileThread && selected ? "flex" : "hidden md:flex",
-            )}
-            style={paneHeight ? { height: paneHeight } : undefined}
+            className={
+              mobileThread && (selected || selectedId)
+                ? "flex min-w-0 flex-1 flex-col"
+                : "hidden min-w-0 flex-1 flex-col md:flex"
+            }
           >
             {threadPane}
           </div>
         </div>
       )}
+
+      <Dialog open={newMessageOpen} onOpenChange={setNewMessageOpen}>
+        <DialogContent className="max-h-[80vh] overflow-hidden sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New message</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Start a direct conversation with a portal user. Request chats stay on the work order.
+          </p>
+          <ul className="max-h-[50vh] space-y-1 overflow-auto">
+            {accounts.length === 0 ? (
+              <li className="py-6 text-center text-sm text-muted-foreground">
+                No approved tenants, landlords, or workers to message yet.
+              </li>
+            ) : (
+              accounts.map((account) => (
+                <li key={account.user_id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-2.5 text-left text-sm hover:bg-muted/60"
+                    onClick={() => startConversationWith(account)}
+                  >
+                    <span className="truncate font-medium">
+                      {officeThreadTitleFromAccount(account)}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {account.email}
+                    </span>
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

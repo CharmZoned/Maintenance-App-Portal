@@ -25,7 +25,6 @@
       "id": "WF3",
       "title": "Worker job pool",
       "summary": "An admin sets the date, time and price and pushes a job; a worker accepts it (first accept wins), can release it back, completes it with a photo, and the tenant confirms the fix. Includes the direct chat with the office."
-    },
-    { "id": "WF4", "title": "Messaging the office", "summary": "A worker writes to the office, the admin sees it unread, opening it marks it read, the admin replies, and threads never cross." }
+    }
   ]
 }
