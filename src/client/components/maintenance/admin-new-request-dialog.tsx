@@ -128,9 +128,8 @@ export function createdNotice(failed: number | boolean, total?: number): string 
   const count = failed === true ? (total ?? 1) : failed === false ? 0 : failed;
   if (count <= 0) return "Request created.";
   if (total != null && count < total) {
-    const noun = count === 1 ? "photo" : "photos";
     const them = count === 1 ? "it" : "them";
-    return `Request created, but ${count} of ${total} ${noun} couldn't be added. Add ${them} from the request.`;
+    return `Request created, but ${count} of ${total} photos couldn't be added. Add ${them} from the request.`;
   }
   return "Request created, but the photos couldn't be added. Add them from the request.";
 }
