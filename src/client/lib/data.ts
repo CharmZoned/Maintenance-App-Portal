@@ -2136,9 +2136,12 @@ export async function listMaintenanceStatusHistory(
 }
 
 /**
- * When each request last moved to In progress, from ONE status-history query
- * for all the ids (list rows: "Started today"). Requests with no such row map
- * to null. RLS trims the history to what the viewer may read.
+ * When each request last moved to In progress (the start of its current
+ * in-progress spell, as inProgressSince computes from full history), from ONE
+ * status-history query for all the ids (list rows: "Started today"). Only
+ * in-progress transitions are fetched, newest first, so a row cap can never
+ * drop the latest start. Requests with no such row map to null. RLS trims the
+ * history to what the viewer may read.
  */
 export async function listInProgressSince(
   requestIds: readonly number[],
@@ -2150,15 +2153,16 @@ export async function listInProgressSince(
     .from("MaintenanceRequestStatusHistory")
     .select("maintenance_request_id, to_status, created_at")
     .in("maintenance_request_id", ids)
-    .order("created_at", { ascending: true });
+    // `_` matches any one character: "in_progress" and "In Progress" alike.
+    .ilike("to_status", "in_progress")
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   if (error) throwSb(error);
   for (const row of data ?? []) {
-    // Stored labels vary in case ("In Progress" / "in_progress"): compare the mapped value.
+    // Newest first: the first row per request is its latest move to In progress.
+    if (out.get(row.maintenance_request_id) != null) continue;
     if (workOrderStatusFromDb(row.to_status) !== "in_progress") continue;
-    const prev = out.get(row.maintenance_request_id) ?? null;
-    if (prev == null || Date.parse(row.created_at) >= Date.parse(prev)) {
-      out.set(row.maintenance_request_id, row.created_at);
-    }
+    out.set(row.maintenance_request_id, row.created_at);
   }
   return out;
 }
