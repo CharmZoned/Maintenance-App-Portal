@@ -90,7 +90,8 @@ export type PropertyCardModel = {
   chips: FactChip[];
   facts: { label: string; value: string }[];
   footer: string;
-  rentStatus: RentStatus;
+  /** Null when portfolio detail rows have not loaded successfully. */
+  rentStatus: RentStatus | null;
   searchText: string;
 };
 
@@ -182,7 +183,10 @@ type PortfolioInput = {
   documents: PropertyDocument[];
   currency?: string;
   now?: Date;
-  /** False while unit rows are still loading; fall back to property counts. */
+  /**
+   * False while unit/charge/request rows are still loading or after a detail
+   * load failure. Fall back to property counts and unavailable rent/request copy.
+   */
   unitsLoaded?: boolean;
 };
 
@@ -373,12 +377,18 @@ function buildPropertyCardModel(input: {
   const occupied = input.unitsLoaded
     ? units.filter((unit) => unit.status === "occupied").length
     : (input.property.occupied_count ?? 0);
-  const openOrders = input.workOrders.filter((order) => order.status !== "closed");
-  const rent = classifyRent(input.charges, input.now);
-  const unread = threadsFromWorkOrders(input.workOrders, { now: input.now }).filter((thread) => thread.unread).length;
+  const detailsReady = input.unitsLoaded;
+  const openOrders = detailsReady
+    ? input.workOrders.filter((order) => order.status !== "closed")
+    : [];
+  const rent = detailsReady ? classifyRent(input.charges, input.now) : null;
+  const unread = detailsReady
+    ? threadsFromWorkOrders(input.workOrders, { now: input.now }).filter((thread) => thread.unread).length
+    : 0;
   const address = propertyAddress(input.property);
   const occupancyValue = occupancyFact(occupied, unitCount);
   const allVacant = unitCount > 0 && occupied === 0;
+  const unavailable = "Details didn't load";
 
   return {
     id: input.property.id,
@@ -387,18 +397,24 @@ function buildPropertyCardModel(input: {
     unreadLabel: unread === 0 ? null : unread === 1 ? "1 unread message" : `${unread} unread messages`,
     chips: [
       { label: plural(unitCount, "unit"), tone: "neutral" },
-      occupancyChip(occupied, unitCount, units),
-      rentChip(rent),
-      requestsChip(openOrders),
+      occupancyChip(occupied, unitCount, detailsReady ? units : []),
+      detailsReady && rent ? rentChip(rent) : { label: "Rent: unavailable", tone: "neutral" },
+      detailsReady ? requestsChip(openOrders) : { label: "Requests unavailable", tone: "neutral" },
     ],
     facts: [
       { label: "Occupancy", value: occupancyValue },
-      { label: `Rent · ${month}`, value: rentFact(rent, currency, allVacant) },
-      { label: "Open requests", value: requestFact(openOrders) },
-      { label: "Last activity", value: lastActivity(input.workOrders, input.documents, input.now) },
+      {
+        label: `Rent · ${month}`,
+        value: detailsReady && rent ? rentFact(rent, currency, allVacant) : unavailable,
+      },
+      { label: "Open requests", value: detailsReady ? requestFact(openOrders) : unavailable },
+      {
+        label: "Last activity",
+        value: detailsReady ? lastActivity(input.workOrders, input.documents, input.now) : unavailable,
+      },
     ],
     footer: unitFooter(units, input.unitsLoaded, unitCount),
-    rentStatus: rent.status,
+    rentStatus: rent?.status ?? null,
     searchText: [input.property.name, address, input.property.city, input.property.state, ...units.map((unit) => unit.name)]
       .filter(Boolean)
       .join(" ")

@@ -60,6 +60,7 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
       setLoading(true);
       setMissing(false);
       setLoadError(null);
+      setTab("overview");
       try {
         const nextProperty = await getProperty(id);
         const nextUnits = await listUnits(id);

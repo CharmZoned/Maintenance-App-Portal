@@ -97,12 +97,13 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
   const visible = useMemo(() => filterPropertyCards(cards, { query, rent }), [cards, query, rent]);
   const unitCount = properties.reduce((sum, property) => sum + (property.unit_count ?? 0), 0);
   const occupied = properties.reduce((sum, property) => sum + (property.occupied_count ?? 0), 0);
+  const detailsReady = !detailLoading && !detailError;
   const description = portfolioDescription({
     properties: properties.length,
-    units: detailLoading ? unitCount : units.length,
-    occupied: detailLoading
-      ? occupied
-      : units.filter((unit) => unit.status === "occupied").length,
+    units: detailsReady ? units.length : unitCount,
+    occupied: detailsReady
+      ? units.filter((unit) => unit.status === "occupied").length
+      : occupied,
   });
 
   function messageGopher() {

@@ -256,6 +256,45 @@ describe("landlord properties view model", () => {
     expect(isMissingPropertyError("JSON object requested, multiple (or no) rows returned")).toBe(true);
     expect(isMissingPropertyError("Failed to fetch")).toBe(false);
   });
+
+  it("does not claim empty rent or requests when portfolio details failed to load", () => {
+    const cards = buildPortfolioCards({
+      now,
+      unitsLoaded: false,
+      properties: [
+        property({ unit_count: 2, occupied_count: 2 }),
+        property({
+          id: 2,
+          name: "Birch House",
+          address: "48 Birch Ave",
+          city: null,
+          unit_count: 1,
+          occupied_count: 0,
+        }),
+      ],
+      units: [],
+      charges: [],
+      workOrders: [],
+      documents: [],
+    });
+
+    const maple = cards.find((card) => card.name === "Maple Court");
+    expect(maple?.chips.map((chip) => chip.label)).toEqual([
+      "2 units",
+      "2 of 2 occupied",
+      "Rent: unavailable",
+      "Requests unavailable",
+    ]);
+    expect(maple?.rentStatus).toBeNull();
+    expect(maple?.facts.find((fact) => fact.label === "Rent · November")?.value).toBe("Details didn't load");
+    expect(maple?.facts.find((fact) => fact.label === "Open requests")?.value).toBe("Details didn't load");
+    expect(maple?.footer).toBe("2 units");
+    expect(filterPropertyCards(cards, { query: "", rent: "none" })).toEqual([]);
+    expect(filterPropertyCards(cards, { query: "", rent: "all" }).map((card) => card.name)).toEqual([
+      "Birch House",
+      "Maple Court",
+    ]);
+  });
 });
 
 describe("landlord property card", () => {
