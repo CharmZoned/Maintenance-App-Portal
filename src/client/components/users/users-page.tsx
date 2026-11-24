@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Landlord } from "@/types";
 import { ArrowLeft, UserCog } from "lucide-react";
 import * as data from "@/lib/data";
 import type { UserAccountRow, StaffMember } from "@/lib/data";
@@ -45,6 +46,7 @@ const ROLES: AppRole[] = ["tenant", "landlord", "maintenance", "admin"];
 
 const EMPTY_ACCOUNTS: UserAccountRow[] = [];
 const EMPTY_STAFF: StaffMember[] = [];
+const EMPTY_LANDLORDS: Landlord[] = [];
 
 function statusVariant(status: AccountStatus): "default" | "secondary" | "destructive" | "outline" {
   if (status === "approved") return "default";
@@ -77,9 +79,13 @@ export function UsersPage({
   search?: string;
   navigate?: (to: string) => void;
 }) {
-  const { setError, setNotice, landlords, listTenants, refreshLookups } = useApp();
+  const { setError, setNotice, listTenants, refreshLookups } = useApp();
   const accounts = useResource(data.listUserAccounts, EMPTY_ACCOUNTS, true);
   const staff = useResource(data.listStaff, EMPTY_STAFF, true);
+  // Own load (not the app-wide lookup, which turns a failure into []), so the
+  // approve dialog can say the list didn't load instead of "none yet".
+  const landlordList = useResource(data.listLandlords, EMPTY_LANDLORDS, true);
+  const landlords = landlordList.data;
   const fetchTenants = useCallback(() => listTenants(), [listTenants]);
   const tenants = useResource(fetchTenants, [], true);
 
@@ -397,13 +403,14 @@ export function UsersPage({
         initialRole={assign?.role}
         accounts={rows}
         tenants={tenants.state === "ready" ? tenants.data : null}
-        landlords={landlords}
+        landlords={landlordList.state === "ready" ? landlordList.data : null}
         staff={staff.state === "ready" ? staff.data : null}
         onDone={(_row, message) => {
           setNotice(message);
           void accounts.reload({ quiet: true });
           void tenants.reload({ quiet: true });
           void staff.reload({ quiet: true });
+          void landlordList.reload({ quiet: true });
           void refreshLookups();
         }}
       />

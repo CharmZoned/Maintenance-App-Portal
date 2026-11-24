@@ -84,7 +84,7 @@ export function AssignAccountDialog({
   accounts: UserAccountRow[];
   /** `null` = that list failed to load (the picker says so). */
   tenants: Tenant[] | null;
-  landlords: Landlord[];
+  landlords: Landlord[] | null;
   staff: StaffMember[] | null;
   onDone: (row: Tables<"user_roles">, message: string) => void;
 }) {
@@ -99,6 +99,8 @@ export function AssignAccountDialog({
   const [company, setCompany] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Once the admin picks a source or record themselves, stop auto-picking.
+  const [touched, setTouched] = useState(false);
 
   const options = useMemo<RecordOption[] | null>(() => {
     if (!user) return [];
@@ -118,6 +120,7 @@ export function AssignAccountDialog({
       }));
     }
     if (role === "landlord") {
+      if (!landlords) return null;
       return landlords.map((l) => ({
         id: l.id,
         label: l.company_name?.trim()
@@ -158,26 +161,28 @@ export function AssignAccountDialog({
     setCompany("");
     setError(null);
     setSaving(false);
+    setTouched(false);
     setRole(initialRole ?? suggestedRole(user));
   }, [open, user, initialRole]);
 
-  // Pick the best record source whenever the role changes.
+  // Pick the best record source when the role changes, and again when the
+  // record list finishes loading (an email match can only appear then),
+  // until the admin makes their own choice.
+  const emailMatchId = emailMatch?.id ?? null;
   useEffect(() => {
-    if (!open || !user) return;
+    if (!open || !user || touched) return;
     const current = linkedIdFor(user, role);
     if (current != null) {
       setSource("existing");
       setLinkId(String(current));
-    } else if (emailMatch) {
+    } else if (emailMatchId != null) {
       setSource("existing");
-      setLinkId(String(emailMatch.id));
+      setLinkId(String(emailMatchId));
     } else {
       setSource("create");
       setLinkId("");
     }
-    // emailMatch is derived from role; including it would fight the user's own choice.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, user, role]);
+  }, [open, user, role, emailMatchId, touched]);
 
   if (!user) return null;
 
@@ -298,7 +303,10 @@ export function AssignAccountDialog({
                   name={`${uid}-role`}
                   value={r}
                   checked={role === r}
-                  onChange={() => setRole(r)}
+                  onChange={() => {
+                    setTouched(false);
+                    setRole(r);
+                  }}
                   className="sr-only"
                 />
                 <span className="text-sm font-medium text-foreground">{ROLE_LABEL[r]}</span>
@@ -343,7 +351,10 @@ export function AssignAccountDialog({
                     name={`${uid}-source`}
                     value={value}
                     checked={source === value}
-                    onChange={() => setSource(value)}
+                    onChange={() => {
+                      setTouched(true);
+                      setSource(value);
+                    }}
                     className="sr-only"
                   />
                   <span className="text-sm font-medium text-foreground">{title}</span>
@@ -364,7 +375,13 @@ export function AssignAccountDialog({
                     No {recordLabel.toLowerCase()} records yet. Create one from this sign-up instead.
                   </p>
                 ) : (
-                  <Select value={linkId} onValueChange={setLinkId}>
+                  <Select
+                    value={linkId}
+                    onValueChange={(v) => {
+                      setTouched(true);
+                      setLinkId(v);
+                    }}
+                  >
                     <SelectTrigger id={`${uid}-link`} aria-describedby={`${uid}-link-hint`} className="text-left">
                       <SelectValue placeholder={`Choose a ${recordLabel.toLowerCase()}`} />
                     </SelectTrigger>

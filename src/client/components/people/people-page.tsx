@@ -432,7 +432,7 @@ export function PeoplePage({
         mode="approve"
         accounts={accounts.data}
         tenants={tenantsForDialog}
-        landlords={landlordList.data}
+        landlords={landlordList.state === "ready" ? landlordList.data : null}
         staff={staffForDialog}
         onDone={(_row, message) => {
           setNotice(message);
