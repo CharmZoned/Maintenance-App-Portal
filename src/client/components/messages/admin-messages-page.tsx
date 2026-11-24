@@ -145,7 +145,7 @@ export function AdminMessagesPage({
     }),
   );
 
-  // Deep-link ?thread=wo:123 | office:<user id> — open it; clear selection when absent.
+  // Deep-link ?thread=wo:123 | office:<user id> — open it; clear selection when absent or unknown.
   useEffect(() => {
     const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
     const thread = params.get("thread");
@@ -156,11 +156,11 @@ export function AdminMessagesPage({
       reads.follow(thread);
       return;
     }
-    if (!thread) {
-      reads.follow(null);
-      setSelectedId(null);
-      setMobileThread(false);
-    }
+    // No thread, or one that isn't in the list: show nothing open rather than
+    // leaving the previous conversation on screen under a different URL.
+    reads.follow(null);
+    setSelectedId(null);
+    setMobileThread(false);
   }, [search, threads, reads]);
 
   const selected: MessageThread | undefined = threads.find((t) => t.id === selectedId);

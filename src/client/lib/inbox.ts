@@ -239,18 +239,24 @@ export function loadAdminInbox(): Promise<InboxConversation[]> {
   return load;
 }
 
-async function readAdminInbox(): Promise<InboxConversation[]> {
+/**
+ * `withBodies: false` reads the same rows without message text — enough for
+ * the unread rule (authorship and times), and much lighter for the rail badge,
+ * which reloads on every route change.
+ */
+async function readAdminInbox({ withBodies = true } = {}): Promise<InboxConversation[]> {
+  const body = withBodies ? ", body" : "";
   const [office, officeReads, comments, requestReads] = await Promise.all([
     supabase
       .from("OfficeMessages")
-      .select("id, created_at, thread_user_id, author_user_id, author_role, body")
+      .select(`id, created_at, thread_user_id, author_user_id, author_role${body}`)
       .order("created_at", { ascending: false })
       .limit(OFFICE_MESSAGE_WINDOW),
     supabase.from("OfficeThreadReads").select("thread_user_id, last_read_at"),
     supabase
       .from("MaintenanceRequestComments")
       .select(
-        "id, created_at, maintenance_request_id, author_user_id, author_role, author_tenant_id, author_staff_id, visibility, body",
+        `id, created_at, maintenance_request_id, author_user_id, author_role, author_tenant_id, author_staff_id, visibility${body}`,
       )
       .order("created_at", { ascending: false })
       .limit(REQUEST_COMMENT_WINDOW),
@@ -260,17 +266,19 @@ async function readAdminInbox(): Promise<InboxConversation[]> {
   fail(officeReads.error);
   fail(comments.error);
   fail(requestReads.error);
+  const withBody = <T extends object>(rows: T[]) => rows.map((r) => ({ body: "", ...r }));
   return buildInbox({
-    officeMessages: (office.data ?? []) as OfficeMessageRow[],
+    officeMessages: withBody(office.data ?? []) as unknown as OfficeMessageRow[],
     officeReads: (officeReads.data ?? []) as OfficeReadRow[],
-    comments: (comments.data ?? []) as RequestCommentRow[],
+    comments: withBody(comments.data ?? []) as unknown as RequestCommentRow[],
     requestReads: (requestReads.data ?? []) as RequestReadRow[],
   });
 }
 
 /** The signed-in admin's unread count (Messages badge). */
 export async function countAdminUnread(): Promise<number> {
-  return countUnreadConversations(await loadAdminInbox());
+  // Same rows and rule as the Messages page, minus the message text.
+  return countUnreadConversations(await readAdminInbox({ withBodies: false }));
 }
 
 /**
