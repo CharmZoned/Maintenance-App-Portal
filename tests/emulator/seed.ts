@@ -792,6 +792,9 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   await officeMessage(sam, admin, "-19 hours", "Tom will be home to let you in. No lockbox needed.");
   await officeMessage(lena, lena, "-2 days", "What did the garbage disposal repair in 1A come to?");
   await officeMessage(lena, admin, "-1 days -22 hours", "It was $120. It will be on this month's statement.");
+  await officeMessage(lena, lena, "-5 hours", "Thanks. Could someone also look at the hallway light by the front door at Maple Court?");
+  // Last word is the office's, so Lena opens the portal to one unread message.
+  await officeMessage(lena, admin, "-3 hours", "Yes. We'll add it to Sam's next visit and confirm the time here.");
 
   return {
     leases: { tenant: { id: tinaLease }, tenant2: { id: tomLease }, ended: { id: endedLease } },

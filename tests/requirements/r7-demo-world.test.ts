@@ -171,7 +171,7 @@ describe("[R7] Demo world: each role sees its own slice", () => {
       "Property insurance certificate",
     ]);
     const lena = await clientFor("landlord");
-    expect((await officeMessages(lena)).map((m) => m.author_role)).toEqual(["landlord", "admin"]);
+    expect((await officeMessages(lena)).map((m) => m.author_role)).toEqual(["landlord", "admin", "landlord", "admin"]);
   });
 
   test("Admin · sees everything: every status, both prices, the ledger and the approval queue", async () => {
@@ -221,7 +221,7 @@ describe("[R7] Demo world: each role sees its own slice", () => {
     expect(accounts.filter((a) => a.account_status === "pending").map((a) => a.email)).toEqual(["pending@test.local"]);
 
     const admin = await clientFor("admin");
-    expect(await officeMessages(admin), "both office threads").toHaveLength(4);
+    expect(await officeMessages(admin), "both office threads").toHaveLength(6);
     const tina = await clientFor("tenant");
     expect(await officeMessages(tina), "threads never cross").toEqual([]);
   });

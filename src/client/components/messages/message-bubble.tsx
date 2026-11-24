@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { CommentVisibility } from "@/types";
 
@@ -9,6 +10,7 @@ export function MessageBubble({
   side = "incoming",
   visibility,
   showVisibilityLabel = false,
+  footer,
 }: {
   sender: string;
   body: string;
@@ -16,6 +18,8 @@ export function MessageBubble({
   side?: "incoming" | "outgoing";
   visibility?: CommentVisibility;
   showVisibilityLabel?: boolean;
+  /** Extra line under the body, e.g. the "Regarding #MR-…" chip on office messages. */
+  footer?: ReactNode;
 }) {
   const outgoing = side === "outgoing";
   return (
@@ -47,7 +51,8 @@ export function MessageBubble({
           </span>
         ) : null}
       </div>
-      <p className="text-sm text-foreground whitespace-pre-wrap">{body}</p>
+      <p className="text-sm text-foreground whitespace-pre-wrap break-words">{body}</p>
+      {footer}
       <p className="text-[11px] text-muted-foreground">{time}</p>
     </div>
   );
