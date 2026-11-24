@@ -29,7 +29,7 @@ function requestRow(page: Page, title: string) {
 /** One click from the role's list lands on the request page. */
 async function openFromList(page: Page, title: string) {
   await requestRow(page, title).click();
-  await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+  await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
   await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
 }
 
@@ -108,7 +108,7 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
     await requestRow(page, TITLE).click();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+    await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
 
     await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
     await expect(page.getByText(DESCRIPTION)).toBeVisible();
@@ -146,7 +146,7 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
     await page.getByRole("textbox", { name: "Message" }).fill(TENANT_REPLY);
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await expect(page.getByText(TENANT_REPLY)).toBeVisible();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+    await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
     await shot(page, testInfo, "Tenant reads the update and replies on the page");
   });
 

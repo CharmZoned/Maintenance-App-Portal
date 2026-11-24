@@ -46,7 +46,7 @@ test.describe("Request page · per role", () => {
     await page.goto("/maintenance");
     // The landlord queue (grouped by property) opens the request from its row's View control.
     await page.getByRole("button", { name: `View ${EMERGENCY}` }).filter({ visible: true }).first().click();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+    await expect(page).toHaveURL(/\/maintenance\/\d+(\?from=[^&]*)?$/);
     await expect(page.getByRole("heading", { name: EMERGENCY })).toBeVisible();
     await expect(page.getByText("Emergency").first()).toBeVisible();
     await expect(page.getByText("Urgent")).toHaveCount(0);

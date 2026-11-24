@@ -61,9 +61,9 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await shot(page, testInfo, "Admin dashboard");
   });
 
-  test("a worker gets My jobs + Messages only (no empty admin shell)", async ({ page }, testInfo) => {
+  test("a worker gets My jobs, Calendar and Messages only (no empty admin shell)", async ({ page }, testInfo) => {
     await signIn(page, "worker");
-    expect(await navLinks(page)).toEqual(["My jobs", "Messages"]);
+    expect(await navLinks(page)).toEqual(["My jobs", "Calendar", "Messages"]);
     await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute(
       "href",
       "/maintenance",
