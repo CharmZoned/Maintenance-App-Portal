@@ -28,6 +28,7 @@ import {
   formatActivityStamp,
   PRIORITY_OPTIONS,
   priorityLevel,
+  inProgressSince,
   requestNextStep,
   toRequestStatus,
   type RequestStatus,
@@ -340,7 +341,7 @@ export function RequestDetailView({
           title={order.title}
           requestNumber={number}
           status={status}
-          nextStep={requestNextStep(order, { assigneeName: assignee })}
+          nextStep={requestNextStep(order, { assigneeName: assignee, startedAt: inProgressSince(history) })}
           priority={priorityLevel(order.priority)}
           location={placeLabel(order)}
           reportedBy={reporterLabel}

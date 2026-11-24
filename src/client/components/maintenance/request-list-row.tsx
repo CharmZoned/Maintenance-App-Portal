@@ -127,14 +127,7 @@ function dateValue(o: WorkOrder, col: RequestDateColumn): string {
  * grid, which has its own Assigned to column (spec §6.1).
  */
 export function listNextStep(o: WorkOrder, assigneeName: string | null, withName: boolean): string | undefined {
-  const status = toRequestStatus(o);
-  const step = requestNextStep(o, { assigneeName: withName ? assigneeName : null });
-  // The shared helper falls back to the bare word "Assigned" when it has
-  // neither a date nor a name; say what is actually missing instead.
-  if (status === "Assigned" && !o.scheduled_at && (!withName || !assigneeName)) {
-    return "Not scheduled yet";
-  }
-  return step === status ? undefined : step;
+  return requestNextStep(o, { assigneeName, omitAssignee: !withName });
 }
 
 function assigneeFallback(o: WorkOrder, name: string | null): string | null {

@@ -74,12 +74,39 @@ describe("request-status helpers", () => {
       requestNextStep(
         wo({ status: "in_progress", resolution_notes: "Will seal tomorrow" }),
       ),
-    ).toBe("Work in progress");
+    ).toBeUndefined();
     expect(
       requestNextStep(
         wo({ status: "closed", resolution_notes: "Sealed and tested" }),
       ),
     ).toBe("Sealed and tested");
+  });
+
+  it("words the next step per status (spec §1)", () => {
+    expect(requestNextStep(wo({ status: "open" }))).toBe("Not assigned yet");
+    expect(requestNextStep(wo({ status: "scheduled", assigned_staff_id: 2 }))).toBe("Not scheduled yet");
+    expect(
+      requestNextStep(wo({ status: "scheduled", assigned_staff_id: 2, scheduled_at: "2026-11-14" }), {
+        assigneeName: "Sam Fixit",
+      }),
+    ).toBe("Today · Sam Fixit");
+    expect(
+      requestNextStep(wo({ status: "scheduled", assigned_staff_id: 2, scheduled_at: "2026-11-14" }), {
+        assigneeName: "Sam Fixit",
+        omitAssignee: true,
+      }),
+    ).toBe("Today");
+    expect(
+      requestNextStep(wo({ status: "in_progress", assigned_staff_id: 2 }), {
+        assigneeName: "Sam Fixit",
+        startedAt: "2026-11-14T09:40:00",
+      }),
+    ).toBe("Started today · Sam Fixit");
+    expect(requestNextStep(wo({ status: "in_progress" }), { assigneeName: "Sam Fixit" })).toBe("Sam Fixit");
+    expect(requestNextStep(wo({ status: "on_hold", hold_reason: "waiting for part" }))).toBe("Waiting for part");
+    expect(
+      requestNextStep(wo({ status: "closed", completed_at: "2026-11-14T10:00:00", resolution_notes: "Fixed it" })),
+    ).toBe("Today · Fixed it");
   });
 
   it("formats date-only schedules without a midnight clock", () => {

@@ -91,12 +91,7 @@ export function jobContextLine(order: WorkOrder): string {
 
 /** Next step beside the chip. The worker is always the assignee, so no name. */
 export function jobNextStep(order: WorkOrder): string | undefined {
-  const status = toRequestStatus(order);
-  const step = requestNextStep(order, { assigneeName: null });
-  if (!step || step === status) {
-    return status === "Assigned" ? "Not scheduled yet" : undefined;
-  }
-  return step;
+  return requestNextStep(order, { omitAssignee: true });
 }
 
 /** Scheduled day for the date column ("Today", "Tue 17 Nov"), or "". */
