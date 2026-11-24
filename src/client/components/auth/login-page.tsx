@@ -247,7 +247,11 @@ export function LoginPage({
           ) : null}
 
           {mode === "signup" ? (
-            <SupportContactNotice variant="urgent" lead="While your account is pending," />
+            <SupportContactNotice
+              variant="urgent"
+              lead="While your account is pending,"
+              audience={intentRole === "landlord" ? "owner" : "tenant"}
+            />
           ) : null}
 
           <button

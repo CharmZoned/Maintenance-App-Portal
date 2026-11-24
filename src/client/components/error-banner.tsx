@@ -1,23 +1,9 @@
 import { useApp } from "../context";
-import { X } from "lucide-react";
+import { FloatingBanner } from "./patterns/floating-banner";
 
+/** App-wide error message. Stays until dismissed; drawn above open dialogs. */
 export function ErrorBanner() {
   const { error, setError } = useApp();
   if (!error) return null;
-  return (
-    <div
-      role="alert"
-      className="fixed bottom-4 left-1/2 z-50 flex w-[min(90vw,520px)] -translate-x-1/2 items-start gap-3 rounded-md bg-destructive-tint px-4 py-3 text-sm text-destructive shadow-float"
-    >
-      <span className="flex-1">{error}</span>
-      <button
-        type="button"
-        onClick={() => setError(null)}
-        className="opacity-80 hover:opacity-100"
-        aria-label="Dismiss"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    </div>
-  );
+  return <FloatingBanner tone="error" message={error} onDismiss={() => setError(null)} />;
 }

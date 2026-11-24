@@ -428,7 +428,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             </div>
           </div>
 
-          <SupportContactNotice variant="urgent" />
+          <SupportContactNotice variant={priority === "emergency" ? "urgent" : "compact"} />
 
           <div className="space-y-1.5">
             <Label htmlFor="tenant-permission" className="text-xs font-semibold">

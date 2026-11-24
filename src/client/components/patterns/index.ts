@@ -6,3 +6,4 @@ export { EmptyState } from "./empty-state";
 export { ErrorRetry } from "./error-retry";
 export { SuccessNotice } from "./success-notice";
 export { SupportContactNotice } from "./support-contact-notice";
+export { FloatingBanner, type FloatingBannerTone } from "./floating-banner";

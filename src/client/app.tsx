@@ -6,6 +6,7 @@ import { useRouter, type Route } from "./hooks/use-router";
 import { AppContext } from "./context";
 import { ErrorBanner } from "./components/error-banner";
 import { NoticeBanner } from "./components/notice-banner";
+import { MAIN_CONTENT_ID } from "./lib/focus-return";
 import { PortalErrorBoundary } from "./components/portal-error-boundary";
 import { DashboardPage } from "./components/dashboard/dashboard-page";
 import { PropertiesList } from "./components/properties/properties-list";
@@ -389,7 +390,11 @@ export function App() {
   };
 
   const main = (
-    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+    <main
+      id={MAIN_CONTENT_ID}
+      tabIndex={-1}
+      className="relative flex min-w-0 flex-1 flex-col overflow-hidden outline-none"
+    >
       {/* Pages keep their own list loaders — do not blank the shell while lookups finish. */}
       <PortalErrorBoundary>
         {isTenant ? (
@@ -598,6 +603,16 @@ export function App() {
   return withStagingChrome(
     <AppContext.Provider value={state}>
       <ShellChromeProvider value={chrome}>
+        <a
+          href={`#${MAIN_CONTENT_ID}`}
+          onClick={(e) => {
+            e.preventDefault();
+            document.getElementById(MAIN_CONTENT_ID)?.focus();
+          }}
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-sm focus:bg-card focus:px-4 focus:py-2.5 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-float focus:outline-none focus:ring-[3px] focus:ring-ring/40"
+        >
+          Skip to content
+        </a>
         <div
           className="flex min-h-0 flex-col overflow-hidden bg-background text-foreground md:flex-row"
           style={{

@@ -3,6 +3,7 @@ import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/page-shell";
 import { ErrorRetry, SkeletonRow, SupportContactNotice } from "@/components/patterns";
+import { EMERGENCY_LINE } from "@/components/patterns/support-contact-notice";
 import { TenantSubmitDialog } from "@/components/maintenance/tenant-submit-dialog";
 import {
   countPropertyDocuments,
@@ -239,16 +240,16 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
                 />
               </div>
 
+              <div className="lg:hidden">
+                <SupportCard />
+              </div>
+
               <UpdatesCard
                 messagesSummary={messagesSummary}
                 documentsSummary={documentsSummary}
                 onMessages={() => navigate("/messages")}
                 onDocuments={() => navigate("/documents")}
               />
-
-              <div className="lg:hidden">
-                <SupportCard />
-              </div>
 
               <p className="hidden text-xs leading-[1.125rem] text-muted-foreground lg:block">
                 Your unit. Your conversations. Your documents.
@@ -484,8 +485,7 @@ function SupportCard() {
         </p>
         <SupportContactNotice variant="list" />
         <p className="pt-2 text-sm leading-[1.375rem] text-muted-foreground">
-          Urgent repair? Call rather than message. In immediate danger, contact local emergency
-          services first.
+          {EMERGENCY_LINE} For an urgent repair, call rather than waiting for a portal reply.
         </p>
       </div>
     </section>

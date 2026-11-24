@@ -3,6 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useFocusReturn } from "@/lib/focus-return";
 
 const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
@@ -27,7 +28,9 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onOpenAutoFocus, onCloseAutoFocus, ...props }, ref) => {
+  const focusReturn = useFocusReturn({ onOpenAutoFocus, onCloseAutoFocus });
+  return (
   <DialogPortal>
     <DialogOverlay>
       <div className="flex min-h-full items-center justify-center">
@@ -37,10 +40,12 @@ const DialogContent = React.forwardRef<
             "relative z-50 grid w-full max-w-lg gap-4 rounded-lg bg-card p-5 text-card-foreground shadow-float",
             className,
           )}
+          onOpenAutoFocus={focusReturn.onOpenAutoFocus}
+            onCloseAutoFocus={focusReturn.onCloseAutoFocus}
           {...props}
         >
           {children}
-          <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm text-muted-foreground transition-colors duration-150 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none">
+          <DialogPrimitive.Close className="absolute right-2 top-2 flex size-11 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none">
             <X className="h-4 w-4" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
@@ -48,7 +53,8 @@ const DialogContent = React.forwardRef<
       </div>
     </DialogOverlay>
   </DialogPortal>
-));
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
