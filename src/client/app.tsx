@@ -30,7 +30,11 @@ import { LandlordsPage } from "./components/landlords/landlords-page";
 import { ApplicationsPage } from "./components/applications/applications-page";
 import { UsersPage } from "./components/users/users-page";
 import { LoginPage } from "./components/auth/login-page";
-import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
+import {
+  ResetConfirmPage,
+  ResetLinkExpiredPage,
+  ResetRequestPage,
+} from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
 import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
@@ -92,13 +96,14 @@ function activeFor(route: Route): string {
   return route.name;
 }
 
-type AuthScreen = "login" | "reset-request" | "reset-confirm";
+type AuthScreen = "login" | "reset-request";
+
+/** Where reset emails land. Choosing a new password is driven by this path. */
+const RESET_PASSWORD_PATH = "/reset-password";
 
 export function App() {
   const auth = useAuth();
-  const [authScreen, setAuthScreen] = useState<AuthScreen>(() =>
-    window.location.pathname === "/reset-password" ? "reset-confirm" : "login",
-  );
+  const [authScreen, setAuthScreen] = useState<AuthScreen>("login");
   const ready = auth.gate.state === "ready";
   const isAdmin = auth.gate.state === "ready" && auth.gate.role.role === "admin";
   const isTenant =
@@ -145,19 +150,13 @@ export function App() {
     if (ready) reportLocation(path);
   }, [path, ready]);
 
-  useEffect(() => {
-    if (window.location.pathname === "/reset-password") {
-      setAuthScreen("reset-confirm");
-    }
-  }, []);
-
   // Phase 4b / WS-R + role shell: one replace landing (redirect/intent → clamp).
   // No separate effects — avoids same-tick order races and replace-then-push history.
   // Skip while choosing a new password from a recovery link — clamp would yank
   // /reset-password → role home before the form can submit.
   useEffect(() => {
     if (!ready) return;
-    if (window.location.pathname === "/reset-password") return;
+    if (window.location.pathname === RESET_PASSWORD_PATH) return;
     const audience: PortalAudience = isTenant
       ? "tenant"
       : isLandlord
@@ -225,25 +224,31 @@ export function App() {
     );
   }
 
+  // Leaving /reset-password always moves the URL off it, so signing in next
+  // does not land on the change-password screen.
+  const leaveResetPassword = (screen: AuthScreen) => {
+    auth.setAuthError(null);
+    setAuthScreen(screen);
+    if (path === RESET_PASSWORD_PATH) navigate("/", { search: "" });
+  };
+
   if (auth.gate.state === "unauthenticated") {
+    // No session on /reset-password: the link expired, was used, or the page
+    // was opened directly. Password fields could never save here (UX-01).
+    if (path === RESET_PASSWORD_PATH) {
+      return withStagingChrome(
+        <ResetLinkExpiredPage
+          onRequestNew={() => leaveResetPassword("reset-request")}
+          onBack={() => leaveResetPassword("login")}
+        />,
+      );
+    }
     if (authScreen === "reset-request") {
       return withStagingChrome(
         <ResetRequestPage
           error={auth.authError}
-          onBack={() => setAuthScreen("login")}
+          onBack={() => leaveResetPassword("login")}
           onSubmit={auth.requestPasswordReset}
-        />,
-      );
-    }
-    if (authScreen === "reset-confirm") {
-      return withStagingChrome(
-        <ResetConfirmPage
-          error={auth.authError}
-          onSubmit={auth.updatePassword}
-          onDone={() => {
-            window.history.replaceState(null, "", "/dashboard");
-            setAuthScreen("login");
-          }}
         />,
       );
     }
@@ -253,8 +258,34 @@ export function App() {
         error={auth.authError}
         onLogin={auth.login}
         onSignup={auth.signup}
-        onForgot={() => setAuthScreen("reset-request")}
+        onForgot={() => leaveResetPassword("reset-request")}
         onDemoSignedIn={goDemoHome}
+      />,
+    );
+  }
+
+  // Signed in on /reset-password: from a reset email link (any account state,
+  // so a pending account can still set a password), or opened directly to
+  // change the password — then Cancel goes back to the role home.
+  if (path === RESET_PASSWORD_PATH) {
+    const resetHome = ready
+      ? ROLE_HOME[
+          isTenant ? "tenant" : isLandlord ? "landlord" : isMaintenance ? "maintenance" : "staff"
+        ]
+      : "/";
+    const goResetHome = () => navigate(resetHome, { replace: true, search: "" });
+    return withStagingChrome(
+      <ResetConfirmPage
+        mode={auth.recovery ? "recovery" : "change"}
+        email={auth.gate.user.email}
+        error={auth.authError}
+        onSubmit={auth.updatePassword}
+        onCancel={
+          auth.recovery
+            ? () => void auth.logout().then(() => leaveResetPassword("login"))
+            : goResetHome
+        }
+        onDone={goResetHome}
       />,
     );
   }
@@ -355,22 +386,6 @@ export function App() {
         : "staff";
 
   const homePath = ROLE_HOME[audience];
-
-  // reset-password while already authenticated (from email link)
-  if (authScreen === "reset-confirm" && window.location.pathname === "/reset-password") {
-    return withStagingChrome(
-      <ResetConfirmPage
-        error={auth.authError}
-        onSubmit={auth.updatePassword}
-        onDone={() => {
-          setAuthScreen("login");
-          // replace:true syncs React path even when URL already matches (avoids
-          // replaceState-then-navigate no-op leaving route stuck on /reset-password).
-          navigate(homePath, { replace: true, search: "" });
-        }}
-      />,
-    );
-  }
 
   const isStaffShell = audience === "staff";
   const navItems = isStaffShell

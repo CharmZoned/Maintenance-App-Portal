@@ -36,7 +36,7 @@ export const INTENT_DEFAULTS = ROLE_HOME;
 
 const INTENT_LABELS: Record<string, string> = {
   tenant: "Tenant sign-in",
-  landlord: "Landlord sign-in",
+  landlord: "Property owner sign-in",
   staff: "Staff and admin sign-in",
 };
 

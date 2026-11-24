@@ -7,8 +7,9 @@ import { STAGING_TOOLS_ALLOWED } from "@/lib/env";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password-policy";
 import { intentLoginLabel } from "@/lib/safe-redirect";
 import { AuthCard, AuthField, AuthNotice, AuthShell } from "./auth-card";
+import { rememberResetEmail } from "./auth-errors";
 import { PasswordInput } from "./password-input";
-import { cn } from "@/lib/utils";
+import { ChoiceGroup, type ChoiceOption } from "@/components/patterns/choice-group";
 import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import type { QuickSignInProps } from "./quick-signin";
 
@@ -17,6 +18,12 @@ export type SignupExtras = {
   intentRole: "tenant" | "landlord";
   address: string;
 };
+
+/** `landlord` stays the stored intent value; people see "Property owner" (UX-04). */
+const ACCOUNT_TYPES: readonly ChoiceOption<SignupExtras["intentRole"]>[] = [
+  { value: "tenant", label: "Tenant", description: "I rent a home" },
+  { value: "landlord", label: "Property owner", description: "I own rental property" },
+];
 
 interface Props {
   onLogin: (email: string, password: string) => Promise<void>;
@@ -50,8 +57,11 @@ export function LoginPage({
   });
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
-  const [info, setInfo] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Hide the last server error once the person switches between sign in / sign up.
+  const [showServerError, setShowServerError] = useState(true);
+  /** Email a confirmation link was sent to — replaces the form so it can't be sent twice. */
+  const [confirmSentTo, setConfirmSentTo] = useState<string | null>(null);
   // Capture once — login URL intent does not change while this screen is mounted.
   const [intent] = useState(() => new URLSearchParams(window.location.search).get("intent"));
   const [autoRole] = useState<DemoRoleKey | null>(() =>
@@ -80,18 +90,16 @@ export function LoginPage({
     if (mode === "signup") {
       if (!fullName.trim()) {
         setLocalError("Enter your full name.");
-        setInfo(null);
         return;
       }
       if (password.length < PASSWORD_MIN_LENGTH) {
         setLocalError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
-        setInfo(null);
         return;
       }
     }
     setBusy(true);
-    setInfo(null);
     setLocalError(null);
+    setShowServerError(true);
     try {
       if (mode === "login") {
         await onLogin(email.trim(), password);
@@ -102,9 +110,8 @@ export function LoginPage({
           address: address.trim(),
         });
         if (result === "confirm") {
-          setInfo(
-            "Check your email to verify your account. After verification your status is pending until an admin approves you.",
-          );
+          setConfirmSentTo(email.trim());
+          setPassword("");
         }
       }
     } catch {
@@ -113,6 +120,51 @@ export function LoginPage({
       setBusy(false);
     }
   }
+
+  function switchMode(next: "login" | "signup") {
+    setMode(next);
+    setLocalError(null);
+    setShowServerError(false);
+  }
+
+  if (confirmSentTo) {
+    return (
+      <AuthShell>
+        <AuthCard wide>
+          <AuthNotice tone="muted">
+            <h1 className="text-[15px] font-semibold text-foreground">Check your email</h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              We sent a link to{" "}
+              <span className="font-medium text-foreground">{confirmSentTo}</span> to verify your
+              account. Open it, then we review new accounts within one business day — we’ll email
+              you once you’re approved.
+            </p>
+          </AuthNotice>
+          <p className="text-xs text-muted-foreground">
+            No email after a few minutes? Check spam, or contact the office below.
+          </p>
+          <SupportContactNotice
+            variant="urgent"
+            lead="While your account is pending,"
+            audience={intentRole === "landlord" ? "owner" : "tenant"}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 w-full"
+            onClick={() => {
+              setConfirmSentTo(null);
+              switchMode("login");
+            }}
+          >
+            Back to sign in
+          </Button>
+        </AuthCard>
+      </AuthShell>
+    );
+  }
+
+  const serverError = showServerError ? error : null;
 
   return (
     <AuthShell>
@@ -124,8 +176,9 @@ export function LoginPage({
               <code>.env.example</code> to <code>.env</code>.
             </AuthNotice>
           )}
-          {(localError || error) && <AuthNotice tone="danger">{localError ?? error}</AuthNotice>}
-          {info && <AuthNotice tone="success">{info}</AuthNotice>}
+          {(localError || serverError) && (
+            <AuthNotice tone="danger">{localError ?? serverError}</AuthNotice>
+          )}
 
           {mode === "signup" && (
             <AuthField label="Full name" htmlFor="full-name">
@@ -171,37 +224,28 @@ export function LoginPage({
 
           {mode === "signup" && (
             <>
-              <div className="flex w-full flex-col gap-1.5">
-                <p className="text-xs font-medium text-muted-foreground">I am a…</p>
-                <div className="flex gap-2" role="group" aria-label="Account type">
-                  {(
-                    [
-                      ["tenant", "Tenant"],
-                      ["landlord", "Property owner"],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setIntentRole(value)}
-                      aria-pressed={intentRole === value}
-                      className={cn(
-                        "flex-1 rounded-sm border px-3 py-2.5 text-[13px] font-medium",
-                        intentRole === value
-                          ? "border-brand bg-brand-tint text-brand-text"
-                          : "border-border bg-card text-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {/* Stub: intent is stored on signup metadata; admin still assigns the real role. */}
-                  Preference only — an admin assigns your portal role after review.
-                </p>
-              </div>
-              <AuthField label="Your address or unit (optional)" htmlFor="address">
+              <ChoiceGroup
+                label="Account type"
+                name="account-type"
+                value={intentRole}
+                onChange={setIntentRole}
+                options={ACCOUNT_TYPES}
+                hint={
+                  <>
+                    {/* Stub: intent is stored on signup metadata; admin still assigns the real role. */}
+                    <p>Preference only — an admin assigns your portal role after review.</p>
+                    <p>Maintenance technician? Ask the office for an invite.</p>
+                  </>
+                }
+              />
+              <AuthField
+                label={
+                  intentRole === "landlord"
+                    ? "Property address (optional)"
+                    : "Your address or unit (optional)"
+                }
+                htmlFor="address"
+              >
                 <Input
                   id="address"
                   className="h-11"
@@ -209,7 +253,13 @@ export function LoginPage({
                   onChange={(e) => setAddress(e.target.value)}
                   maxLength={SIGNUP_ADDRESS_MAX}
                   autoComplete="street-address"
+                  aria-describedby={intentRole === "landlord" ? "address-hint" : undefined}
                 />
+                {intentRole === "landlord" ? (
+                  <p id="address-hint" className="text-xs text-muted-foreground">
+                    Your main property — you can add more later.
+                  </p>
+                ) : null}
               </AuthField>
             </>
           )}
@@ -218,7 +268,10 @@ export function LoginPage({
             <button
               type="button"
               className="text-left text-[13px] font-medium text-brand-text hover:underline"
-              onClick={onForgot}
+              onClick={() => {
+                rememberResetEmail(email);
+                onForgot();
+              }}
             >
               Forgot password?
             </button>
@@ -257,11 +310,7 @@ export function LoginPage({
           <button
             type="button"
             className="text-left text-[13px] text-muted-foreground hover:text-foreground hover:underline"
-            onClick={() => {
-              setMode(mode === "login" ? "signup" : "login");
-              setInfo(null);
-              setLocalError(null);
-            }}
+            onClick={() => switchMode(mode === "login" ? "signup" : "login")}
           >
             {mode === "login" ? "New here? Create an account" : "Already have an account? Sign in"}
           </button>

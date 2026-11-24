@@ -63,7 +63,7 @@ describe("intentLoginLabel", () => {
     expect(intentLoginLabel("")).toBe("Sign in to your portal");
     expect(intentLoginLabel("   ")).toBe("Sign in to your portal");
     expect(intentLoginLabel("tenant")).toBe("Tenant sign-in");
-    expect(intentLoginLabel("Landlord")).toBe("Landlord sign-in");
+    expect(intentLoginLabel("Landlord")).toBe("Property owner sign-in");
     expect(intentLoginLabel("staff")).toBe("Staff and admin sign-in");
     expect(intentLoginLabel("unknown")).toBe("Sign in to your portal");
   });
