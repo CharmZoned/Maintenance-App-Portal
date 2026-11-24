@@ -196,6 +196,18 @@ test.describe("[R1] Accounts and login — screens", () => {
     await signOut(page);
     await signIn(page, { email: "worker2@test.local", password: "BrandNew456!" });
   });
+
+  test("a used or expired reset link explains itself and offers a new one", async ({ page }, testInfo) => {
+    await page.goto("/reset-password");
+    await expect(
+      page.getByRole("heading", { name: "This reset link has expired or was already used." }),
+    ).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+    await shot(page, testInfo, "Expired reset link");
+    await page.getByRole("button", { name: "Send a new link" }).click();
+    await expect(page.getByRole("heading", { name: "Reset password" })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/");
+  });
 });
 
 test.describe("[R2] Account approval — screens", () => {
