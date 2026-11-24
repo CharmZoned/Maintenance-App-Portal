@@ -12,6 +12,7 @@ import {
   type MaintenanceComment,
   type MaintenancePhoto,
   type MaintenanceStatusEvent,
+  type Property,
   type Unit,
   type WorkOrder,
   type WorkOrderPriority,
@@ -203,10 +204,43 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
     app.isLandlord,
   ]);
 
+  /**
+   * Property options. The maintenance shell never loads `app.properties` (see
+   * refreshLookups), so an opened order's property had no matching option and
+   * the box showed empty. Fill the gap from the order's joined name and from
+   * the units the viewer can read.
+   */
+  const propertyOptions = useMemo<Property[]>(() => {
+    const byId = new Map<number, Property>(app.properties.map((p) => [p.id, p]));
+    const add = (id: number | null | undefined, name: string | null | undefined) => {
+      if (id == null || byId.has(id)) return;
+      // WorkOrderStaffFields reads only id + name from a property option.
+      byId.set(id, { id, name: name?.trim() || "Current property" } as Property);
+    };
+    for (const u of units) add(u.property_id, u.property_name);
+    add(workOrder?.property_id, workOrder?.property_name);
+    return [...byId.values()];
+  }, [app.properties, units, workOrder?.property_id, workOrder?.property_name]);
+
   const filteredUnits = useMemo(() => {
-    if (!propertyId) return units;
-    return units.filter((u) => u.property_id === Number(propertyId));
-  }, [units, propertyId]);
+    const scoped = propertyId ? units.filter((u) => u.property_id === Number(propertyId)) : units;
+    // Same gap for the unit: keep the order's own unit selectable when it is not listed.
+    if (
+      workOrder?.unit_id != null &&
+      Number(unitId) === workOrder.unit_id &&
+      !scoped.some((u) => u.id === workOrder.unit_id)
+    ) {
+      return [
+        ...scoped,
+        {
+          id: workOrder.unit_id,
+          property_id: workOrder.property_id ?? Number(propertyId),
+          name: workOrder.unit_name?.trim() || "Current unit",
+        } as Unit,
+      ];
+    }
+    return scoped;
+  }, [units, propertyId, unitId, workOrder?.unit_id, workOrder?.unit_name, workOrder?.property_id]);
 
   useEffect(() => {
     if (!unitId) return;
@@ -550,7 +584,7 @@ export function WorkOrderDialog({ open, onOpenChange, workOrder, defaults, onSav
                 isAdmin={app.isAdmin}
                 readOnlyCore={readOnlyCore}
                 canStartWork={canStartWork}
-                properties={app.properties}
+                properties={propertyOptions}
                 filteredUnits={filteredUnits}
                 vendors={app.vendors}
                 staff={staff}

@@ -454,10 +454,14 @@ export function App() {
         ) : isMaintenance ? (
           <>
             {route.name === "maintenance" && (
-              <MyJobsPage search={search} replace={replace} />
+              <MyJobsPage search={search} replace={replace} navigate={navigate} />
             )}
             {route.name === "request" && (
-              <RequestDetailPage id={route.id} navigate={navigate} />
+              <RequestDetailPage
+                id={route.id}
+                navigate={navigate}
+                viewerStaffId={auth.gate.state === "ready" ? auth.gate.role.staff_id : null}
+              />
             )}
             {route.name === "messages" && (
               <MessagesPage search={search} navigate={navigate} replace={replace} />
