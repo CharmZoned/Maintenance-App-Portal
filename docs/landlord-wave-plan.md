@@ -21,7 +21,7 @@ The landlord has four jobs: **see their units, see their requests, put a request
 
 ## 2. Decisions (answered by the owner 2026-11-24)
 
-**Answers:** D1 yes · D2 yes · D3 tenant does **not** see a landlord-filed request; the landlord form **does** include "Permission to enter", **default No** · D4 as recommended · D5 as recommended · D6 real link (`OfficeMessages.request_id`) · D7 hide, don't delete.
+**Answers:** D1 yes · D2 yes · D3 **changed 2026-11-24: the tenant DOES see a landlord-filed request on their current unit** (view only; common-area requests stay hidden from tenants; replying and confirming the fix stay with the reporter); the landlord form includes "Permission to enter", **default No**, and tells the landlord their tenant will see the request · D4 as recommended · D5 as recommended · D6 real link (`OfficeMessages.request_id`) · D7 hide, don't delete.
 
 **Integration branch:** `claude/pensive-mayer-8ggg5v` (not `landlord-wave`; only this branch may be pushed). Stream branches are local `landlord/<id>` branches merged into it.
 
@@ -29,7 +29,7 @@ The landlord has four jobs: **see their units, see their requests, put a request
 |---|---|---|---|
 | D1 | Can landlords submit requests? (SOW §1 says yes, §2 only names tenants) | **Yes.** Build it and note it in the beta release notes. | LG-A1, LG-C |
 | D2 | Can landlords file **common-area** requests (no unit)? | **Yes:** the schema already allows it. | LG-A1, LG-C |
-| D3 | Does the tenant of that unit see a landlord-filed request? | **No for beta.** RLS keeps tenants to requests they submitted. The admin coordinates entry. The landlord form shows "Permission to enter" defaulting to No. | LG-A1, LG-C |
+| D3 | Does the tenant of that unit see a landlord-filed request? | **Yes (owner, 2026-11-24)**: the current tenant of that unit sees it, view only, labelled "Reported by your landlord". Common-area requests are not shown to tenants. The landlord form shows "Permission to enter" defaulting to No and says the tenant will see the request. | LG-A3, LG-C |
 | D4 | Status names | **Display** New / Assigned / In progress / On hold / Completed everywhere. Keep the five DB values (Wave 3 decision #11). Tell the client in writing that "On hold" is an added status. | LG-F |
 | D5 | Priority names | One set, everywhere: **Normal / High / Emergency** (DB `urgent` → "Emergency"). Never print the raw DB value. | LG-F |
 | D6 | "Regarding request #…" in chat | **A nullable `request_id` column on `OfficeMessages`.** The check ensures the author can see that request. The fallback is plain text, with no migration. | LG-A2, LG-B |
@@ -71,12 +71,17 @@ Each stream owns its files. A file listed under one stream is edited **only** by
   - a landlord is refused if they pre-set status or assignee;
   - a landlord can add photos, at most 5.
 - `tests/requirements/r7-permissions.test.ts`:
-  - a tenant does not see a landlord-filed request on their unit (D3);
+  - the unit's tenant sees a landlord-filed request on their unit, view only; another unit's tenant and tenants of a common-area request do not (D3, see LG-A3);
   - a landlord cannot link a chat message to a request they can't see.
 
 **Also:** regenerate `src/client/types.supabase.ts`.
 
 **Owns:** `supabase/migrations/2026112410*`, `src/client/types.supabase.ts`, the two test files above.
+
+### LG-A3 · Tenant sees landlord-filed requests (1 agent, after LG-A)
+- New migration `20261124120000_tenant_sees_landlord_requests.sql`: the tenant SELECT path (policy + `private.can_select_maintenance_request` and the photo / status-history / price / worker-name helpers) also allows a request where `submitted_by_landlord_id IS NOT NULL` and `unit_id = private.current_tenant_unit_id()`. No tenant write paths change (no comment, photo upload, fix confirmation or update on these rows).
+- Tenant UI (`tenant-requests-page.tsx`, `tenant-request-detail-panel.tsx`, tenant branch of `request-detail-page.tsx`): such requests appear with "Reported by your landlord"; replace the "Only requests you submitted appear here" copy; hide reply/confirm controls on them.
+- R4/R7 tests: unit tenant sees it; other unit's tenant, common-area, and a former tenant of the unit do not; tenant can't comment, upload or update it.
 
 ### LG-B · Landlord ↔ office chat (1 agent) — priority 1
 - New `src/client/lib/office-messages.ts`, kept out of `data.ts` to avoid conflicts:
