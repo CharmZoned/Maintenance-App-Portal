@@ -1,19 +1,24 @@
 import type { MaintenanceComment, WorkOrder } from "@/types";
 
-/** Inbox thread — request-linked uses live WO comments; direct is UI-only stub. */
-export type MessageThreadKind = "request" | "direct";
+/**
+ * Inbox thread. `request` = a request's comment thread (MaintenanceRequestComments);
+ * `office` = a direct conversation with the Landlord Gopher office (OfficeMessages).
+ */
+export type MessageThreadKind = "request" | "office";
 
 export type MessageThread = {
+  /** `wo:<id>` for a request, `office` / `office:<user_id>` for an office thread. */
   id: string;
   kind: MessageThreadKind;
   title: string;
   preview: string;
+  /** Empty when the thread has no messages yet. */
   updatedAt: string;
   unread: boolean;
   /** Present when kind === "request". */
   requestId?: number;
-  /** Stub flag for PR notes / UI banner. */
-  stub?: boolean;
+  /** Present when kind === "office": whose thread it is. */
+  threadUserId?: string;
 };
 
 export type NotificationItemData = {
@@ -92,8 +97,19 @@ export function threadsFromWorkOrders(
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-/** Direct / property threads — no message-center API yet. */
-export const STUB_DIRECT_THREADS: MessageThread[] = [];
+/**
+ * Preview line for an office thread row: "You: …" for your own side,
+ * "<who>: …" for the other side, or a prompt when the thread is empty.
+ */
+export function officeThreadPreview(
+  last: { body: string; author_role: string } | null | undefined,
+  opts: { viewerIsAdmin: boolean; otherName: string },
+): string {
+  if (!last) return opts.viewerIsAdmin ? "No messages yet" : "Ask the office anything about your properties.";
+  const mine = opts.viewerIsAdmin ? last.author_role === "admin" : last.author_role !== "admin";
+  const body = last.body.replace(/\s+/g, " ").trim();
+  return `${mine ? "You" : opts.otherName}: ${body}`;
+}
 
 export function notificationsFromWorkOrders(
   workOrders: WorkOrder[],
