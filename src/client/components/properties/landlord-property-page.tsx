@@ -4,6 +4,7 @@ import { useApp } from "@/context";
 import {
   LandlordDocumentRow,
   LandlordPageIntro,
+  LandlordPortalTitle,
   LandlordScopeHeading,
   StatusBanner,
   ToneBadge,
@@ -146,7 +147,18 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
   }
 
   return (
-    <PageShell title={property?.name ?? "Property"} width="max-w-6xl">
+    <PageShell
+      title={
+        <LandlordPortalTitle
+          crumb={
+            property?.name
+              ? `Landlord portal / Properties / ${property.name}`
+              : "Landlord portal / Properties"
+          }
+        />
+      }
+      width="max-w-6xl"
+    >
       <Button type="button" variant="ghost" size="touch" className="-ml-2" onClick={() => navigate("/properties")}>
         <ChevronLeft aria-hidden />
         Back to properties

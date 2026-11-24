@@ -37,6 +37,12 @@ export interface RequestHeaderProps {
   onBack: () => void;
   /** Hide the phone-only title (e.g. when a caller already renders it). */
   hidePhoneTitle?: boolean;
+  /**
+   * When true (default), phone chrome already has the back control so the
+   * in-content back link starts at tablet. Landlord uses LandlordPortalTitle
+   * in the chrome instead, so pass false to keep a phone back link here.
+   */
+  phoneBackInHeader?: boolean;
 }
 
 /**
@@ -91,6 +97,7 @@ export function RequestHeader({
   backLabel,
   onBack,
   hidePhoneTitle = false,
+  phoneBackInHeader = true,
 }: RequestHeaderProps) {
   const number = requestNumber.startsWith("#") ? requestNumber : `#${requestNumber}`;
   const step = headerNextStep(status, nextStep, assigneeName);
@@ -103,8 +110,8 @@ export function RequestHeader({
 
   return (
     <div className="flex flex-col gap-2.5">
-      {/* Phone: the header bar carries the back button, so the link shows from tablet up. */}
-      <div className="hidden md:flex">
+      {/* Phone: when the header bar already has back, the link starts at tablet. */}
+      <div className={phoneBackInHeader ? "hidden md:flex" : "flex"}>
         <RequestBackLink label={backLabel} onBack={onBack} />
       </div>
       {hidePhoneTitle ? null : (

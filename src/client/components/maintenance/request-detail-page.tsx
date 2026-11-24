@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft } from "lucide-react";
 import { useApp } from "@/context";
+import { LandlordPortalTitle } from "@/components/landlord";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +102,17 @@ export function requestNumberLabel(order: Pick<WorkOrder, "id" | "request_number
   const raw = order.request_number?.trim();
   if (!raw) return `#${order.id}`;
   return raw.startsWith("#") ? raw : `#${raw}`;
+}
+
+/**
+ * Landlord toolbar title (#101): breadcrumb on desktop, request number on phone.
+ * Matches LandlordRequestShell from the pre-unify landlord detail page.
+ */
+export function landlordRequestShellTitle(requestNumber?: string) {
+  const crumb = requestNumber
+    ? `Landlord portal / Maintenance / ${requestNumber}`
+    : "Landlord portal / Maintenance";
+  return <LandlordPortalTitle crumb={crumb} mobileLabel={requestNumber ?? "Maintenance"} />;
 }
 
 export function personName(first?: string | null, last?: string | null): string {
@@ -372,29 +384,34 @@ export function RequestDetailView({
     />
   ) : null;
 
+  // Landlord keeps #101's portal crumb / mobileLabel in the chrome; other roles
+  // keep the unified phone back + desktop title treatment from this PR.
+  const shellTitle =
+    role === "landlord" ? (
+      landlordRequestShellTitle(number)
+    ) : (
+      <>
+        {/* Phone (Header / Phone, Type = Back): back icon + parent label. The number sits by the title below. */}
+        <span className="flex items-center gap-1 md:hidden">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label={`Back to ${back.label}`}
+            className="-ml-3 flex size-11 shrink-0 items-center justify-center rounded-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          >
+            <ChevronLeft className="size-5" aria-hidden />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-[17px] leading-[22px]">{back.label}</span>
+        </span>
+        <span className="hidden md:inline">{order.title}</span>
+        <span className="hidden pl-2 align-baseline text-sm font-normal tracking-normal text-muted-foreground md:inline">
+          {number}
+        </span>
+      </>
+    );
+
   return (
-    <PageShell
-      title={
-        <>
-          {/* Phone (Header / Phone, Type = Back): back icon + parent label. The number sits by the title below. */}
-          <span className="flex items-center gap-1 md:hidden">
-            <button
-              type="button"
-              onClick={onBack}
-              aria-label={`Back to ${back.label}`}
-              className="-ml-3 flex size-11 shrink-0 items-center justify-center rounded-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
-            >
-              <ChevronLeft className="size-5" aria-hidden />
-            </button>
-            <span className="min-w-0 flex-1 truncate text-[17px] leading-[22px]">{back.label}</span>
-          </span>
-          <span className="hidden md:inline">{order.title}</span>
-          <span className="hidden pl-2 align-baseline text-sm font-normal tracking-normal text-muted-foreground md:inline">
-            {number}
-          </span>
-        </>
-      }
-    >
+    <PageShell title={shellTitle}>
       {/* Phone content is p-4 (16px): pull the shell's 24px padding in by 8px. */}
       <div className="flex flex-col gap-4 max-md:-mx-2 max-md:-mt-2 md:gap-6">
         <RequestHeader
@@ -409,6 +426,7 @@ export function RequestDetailView({
           assigneeName={assignee}
           backLabel={back.label}
           onBack={onBack}
+          phoneBackInHeader={role !== "landlord"}
         />
 
         <div className="flex flex-col gap-4 md:gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
@@ -869,9 +887,11 @@ export function RequestDetailPage({
     };
   }, [accounts, viewerUserId, staff, staffMap, tenantIdOfOrder, tenantNameOfOrder, role, myStaffId]);
 
+  const unresolvedTitle = role === "landlord" ? landlordRequestShellTitle() : "Request";
+
   if (loading) {
     return (
-      <PageShell title="Request">
+      <PageShell title={unresolvedTitle}>
         <RequestLoadingState withActionsPanel={sectionsForRole(role).actionsPanel} />
       </PageShell>
     );
@@ -879,7 +899,7 @@ export function RequestDetailPage({
 
   if (loadError) {
     return (
-      <PageShell title="Request">
+      <PageShell title={unresolvedTitle}>
         <RequestErrorState backLabel={back.label} onBack={goBack} onRetry={() => void load()} />
       </PageShell>
     );
@@ -888,7 +908,7 @@ export function RequestDetailPage({
   if (!order) {
     const action = notAvailableActionFor(role);
     return (
-      <PageShell title="Request">
+      <PageShell title={unresolvedTitle}>
         <RequestNotAvailableState
           backLabel={back.label}
           onBack={goBack}
