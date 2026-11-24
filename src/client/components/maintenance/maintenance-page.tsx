@@ -7,6 +7,7 @@ import {
   type DeepLinkProps,
 } from "@/lib/deep-link";
 import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import type { StaffMember } from "@/lib/data";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import {
   StatusChip,
 } from "@/components/patterns";
 import { cn } from "@/lib/utils";
+import { landlordNextStep, priorityLevel } from "@/lib/request-status";
 import {
   staffQueueTab,
   toRequestStatus,
@@ -83,6 +85,8 @@ function StaffLandlordMaintenancePage({
   navigate,
 }: DeepLinkProps & { navigate?: (to: string) => void } = {}) {
   const app = useApp();
+  /** Landlord rows move the next-step hint under the context line on phones. */
+  const isPhone = useMediaQuery("(max-width: 639px)");
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -437,6 +441,7 @@ function StaffLandlordMaintenancePage({
         <div className="overflow-hidden rounded-md border border-border bg-card">
           {filtered.map((w) => {
             const status = toRequestStatus(w);
+            const priority = priorityLevel(w.priority);
             const assignee =
               w.assigned_staff_id != null
                 ? staffById.get(w.assigned_staff_id)
@@ -446,22 +451,31 @@ function StaffLandlordMaintenancePage({
               : w.assigned_staff_id
                 ? "Assigned"
                 : null;
+            const contextLine = workOrderContextLine(w, {
+              isTenant: false,
+              assigneeLabel,
+            });
+            const next = app.isLandlord ? landlordNextStep(w) : null;
             return (
               <ListRow
                 key={w.id}
                 title={w.title}
-                context={workOrderContextLine(w, {
-                  isTenant: false,
-                  assigneeLabel,
-                })}
-                priority={
-                  w.priority === "urgent" ? (
-                    <PriorityChip level="Emergency" />
-                  ) : w.priority === "high" ? (
-                    <PriorityChip level="High" />
-                  ) : null
+                context={
+                  next && isPhone ? (
+                    <>
+                      <span className="block truncate">{contextLine}</span>
+                      <span className="mt-1 block whitespace-normal" data-next-step={next.who}>
+                        {next.text}
+                      </span>
+                    </>
+                  ) : (
+                    contextLine
+                  )
                 }
-                status={<StatusChip status={status} />}
+                priority={priority ? <PriorityChip level={priority} /> : null}
+                status={
+                  <StatusChip status={status} nextStep={next && !isPhone ? next.text : undefined} />
+                }
                 onClick={() => openOrder(w)}
               />
             );
