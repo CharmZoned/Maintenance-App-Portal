@@ -397,7 +397,7 @@ export function AdminMessagesPage({
           variant="brand"
           size="header"
           type="button"
-          onClick={() => setNotice("New message is stubbed — start from a work order comment thread for now.")}
+          onClick={() => setNotice("Starting a new conversation from here is coming soon. For now, open the maintenance request and post a comment there.")}
         >
           New message
         </Button>
