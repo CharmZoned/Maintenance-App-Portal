@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Building2, MapPin, Plus } from "lucide-react";
 import { useApp } from "@/context";
 import { cn, colorClasses } from "@/lib/utils";
@@ -7,8 +7,150 @@ import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
 import { PROPERTY_TYPE_LABELS, type Property } from "@/types";
 import { PageShell } from "@/components/page-shell";
+import { useShellChrome } from "@/components/chrome/shell-chrome-context";
+import type { NavigateOptions } from "@/hooks/use-router";
+import { OwnerFilter } from "./owner-filter";
+import { PropertyCard } from "./property-card";
+import {
+  buildPropertyOwners,
+  landlordIndex,
+  ownerIdentity,
+  parseOwnerParam,
+  portfolioSummary,
+  withOwnerParam,
+} from "./property-owners";
 
-export function PropertiesList({ navigate }: { navigate: (to: string) => void }) {
+type Navigate = (to: string, opts?: NavigateOptions) => void;
+
+/**
+ * Properties page. In the admin workspace: owners filter + a grid that fills
+ * the content width (`AdminPropertiesList`). Landlords keep their own view
+ * (`LandlordPropertiesList`) — one owner, so no owner filter.
+ */
+export function PropertiesList({ navigate }: { navigate: Navigate }) {
+  const inAdminWorkspace = Boolean(useShellChrome()?.onOpenNav);
+  return inAdminWorkspace ? (
+    <AdminPropertiesList navigate={navigate} />
+  ) : (
+    <LandlordPropertiesList navigate={navigate} />
+  );
+}
+
+function AdminPropertiesList({ navigate }: { navigate: Navigate }) {
+  const { properties, landlords, canMutatePortfolio } = useApp();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<Property | undefined>(undefined);
+  // The owner filter lives in the URL (?owner=<landlord id>), so coming back
+  // from a property restores it. The router doesn't hand this page `search`,
+  // so the initial value comes straight from the location.
+  const [ownerFilter, setOwnerFilter] = useState<number | null>(() =>
+    parseOwnerParam(window.location.search),
+  );
+
+  const byId = useMemo(() => landlordIndex(landlords), [landlords]);
+  const owners = useMemo(() => buildPropertyOwners(properties, byId), [properties, byId]);
+  const total = {
+    propertyCount: properties.length,
+    unitCount: properties.reduce((sum, p) => sum + (p.unit_count ?? 0), 0),
+    occupiedCount: properties.reduce((sum, p) => sum + (p.occupied_count ?? 0), 0),
+  };
+
+  const showOwnerFilter = owners.length > 1;
+  // A filter for an owner who no longer has properties shows everyone's.
+  const activeOwner =
+    showOwnerFilter && ownerFilter != null ? owners.find((o) => o.id === ownerFilter) ?? null : null;
+  const visible = activeOwner
+    ? properties.filter((p) => p.landlord_id === activeOwner.id)
+    : properties;
+
+  const selectOwner = (ownerId: number | null) => {
+    setOwnerFilter(ownerId);
+    navigate(window.location.pathname, {
+      replace: true,
+      search: withOwnerParam(window.location.search, ownerId),
+    });
+  };
+
+  const openNew = () => {
+    setEditing(undefined);
+    setDialogOpen(true);
+  };
+
+  return (
+    <PageShell
+      title="Properties"
+      meta={portfolioSummary(total)}
+      actions={
+        canMutatePortfolio && properties.length > 0 ? (
+          <Button onClick={openNew}>
+            <Plus className="h-4 w-4" />
+            New property
+          </Button>
+        ) : null
+      }
+    >
+      {properties.length === 0 ? (
+        <EmptyProperties canMutate={canMutatePortfolio} onNew={openNew} />
+      ) : (
+        <>
+          {showOwnerFilter ? (
+            <OwnerFilter
+              owners={owners}
+              total={total}
+              selected={activeOwner?.id ?? null}
+              onSelect={selectOwner}
+            />
+          ) : null}
+          <ul
+            aria-label={activeOwner ? `Properties owned by ${activeOwner.name}` : "Properties"}
+            className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-4"
+          >
+            {visible.map((p) => (
+              <PropertyCard
+                key={p.id}
+                property={p}
+                owner={ownerIdentity(p.landlord_id, byId, p.landlord_name).name}
+                onNavigate={navigate}
+                onEdit={
+                  canMutatePortfolio
+                    ? () => {
+                        setEditing(p);
+                        setDialogOpen(true);
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </ul>
+        </>
+      )}
+
+      <PropertyDialog open={dialogOpen} onOpenChange={setDialogOpen} property={editing} />
+    </PageShell>
+  );
+}
+
+function EmptyProperties({ canMutate, onNew }: { canMutate: boolean; onNew: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
+      <Building2 className="size-8 text-faint" aria-hidden />
+      <p className="font-medium">No properties yet</p>
+      <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
+        {canMutate
+          ? "Add your first property to start managing units, leases, and rent."
+          : "Properties linked to your landlord account will appear here."}
+      </p>
+      {canMutate && (
+        <Button className="mt-2" onClick={onNew}>
+          <Plus className="h-4 w-4" /> New property
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** The landlord portal's Properties page — unchanged by the admin redesign. */
+function LandlordPropertiesList({ navigate }: { navigate: Navigate }) {
   const { properties, canMutatePortfolio } = useApp();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Property | undefined>(undefined);
@@ -30,20 +172,10 @@ export function PropertiesList({ navigate }: { navigate: (to: string) => void })
       }
     >
       {properties.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
-            <Building2 className="size-8 text-faint" aria-hidden />
-            <p className="font-medium">No properties yet</p>
-            <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-              {canMutatePortfolio
-                ? "Add your first property to start managing units, leases, and rent."
-                : "Properties linked to your landlord account will appear here."}
-            </p>
-            {canMutatePortfolio && (
-              <Button className="mt-2" onClick={() => { setEditing(undefined); setDialogOpen(true); }}>
-                <Plus className="h-4 w-4" /> New property
-              </Button>
-            )}
-          </div>
+          <EmptyProperties
+            canMutate={canMutatePortfolio}
+            onNew={() => { setEditing(undefined); setDialogOpen(true); }}
+          />
         ) : (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {properties.map((p) => {
