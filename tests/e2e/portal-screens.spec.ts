@@ -234,8 +234,9 @@ test.describe("[R2] Account approval — screens", () => {
     const row = page.locator("div.space-y-3 > div", { hasText: "pending@test.local" }).first();
     await expect(row).toBeVisible();
     await shot(page, testInfo, "Approval queue");
-    await row.getByRole("button", { name: "Approve", exact: true }).click();
-    await page.getByRole("alertdialog").getByRole("button", { name: "Approve" }).click();
+    await row.getByRole("button", { name: "Approve…", exact: true }).click();
+    // Pat's sign-up email matched a Staff row, so the dialog arrives pre-linked.
+    await page.getByRole("dialog").getByRole("button", { name: "Approve as Team member" }).click();
     await page.getByRole("button", { name: /^Approved/ }).click();
     await expect(page.locator("div.space-y-3 > div", { hasText: "pending@test.local" }).first()).toBeVisible();
     await shot(page, testInfo, "Account approved");

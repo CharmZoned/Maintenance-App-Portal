@@ -558,7 +558,7 @@ export function App() {
               ))}
             {route.name === "users" &&
               (isAdmin ? (
-                <UsersPage />
+                <UsersPage search={search} navigate={navigate} />
               ) : (
                 <Placeholder
                   title="Admins only"

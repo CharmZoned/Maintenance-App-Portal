@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { UserCog } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, UserCog } from "lucide-react";
 import * as data from "@/lib/data";
 import type { UserAccountRow, StaffMember } from "@/lib/data";
 import { useApp } from "@/context";
+import { cn } from "@/lib/utils";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { ErrorRetry, SkeletonRow } from "@/components/patterns";
+import { AssignAccountDialog, type AssignAccountMode } from "@/components/people/assign-account-dialog";
+import {
+  RECORD_LABEL,
+  ROLE_LABEL,
+  assignedRole,
+  displayName,
+  linkedIdFor,
+  roleNeedsRecord,
+  signupClaim,
+} from "@/components/people/account-labels";
+import { useResource } from "@/components/people/use-resource";
 import type { AccountStatus, AppRole } from "@/types.supabase";
 
 type StatusFilter = AccountStatus | "all";
@@ -28,7 +41,10 @@ const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "all", label: "All" },
 ];
 
-const ROLES: AppRole[] = ["admin", "maintenance", "landlord", "tenant"];
+const ROLES: AppRole[] = ["tenant", "landlord", "maintenance", "admin"];
+
+const EMPTY_ACCOUNTS: UserAccountRow[] = [];
+const EMPTY_STAFF: StaffMember[] = [];
 
 function statusVariant(status: AccountStatus): "default" | "secondary" | "destructive" | "outline" {
   if (status === "approved") return "default";
@@ -42,78 +58,90 @@ function isEmailUnconfirmed(user: UserAccountRow): boolean {
   return user.email_confirmed_at === null;
 }
 
-function approveBlockedReason(user: UserAccountRow): string | null {
-  if (isEmailUnconfirmed(user)) {
-    return "Email must be confirmed before approving.";
-  }
-  if (!user.role) return "Assign a role before approving.";
-  if (user.role === "maintenance" && user.staff_id == null) {
-    return "Link a Staff row before approving a maintenance account.";
-  }
-  if (user.role === "tenant" && user.tenant_id == null) {
-    return "Link a Tenant row before approving a tenant account.";
-  }
-  if (user.role === "landlord" && user.landlord_id == null) {
-    return "Link a Landlord row before approving a landlord account.";
-  }
-  return null;
+function parseSearch(search: string) {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  return { userId: params.get("user"), from: params.get("from") };
 }
 
-/** True when Approve is allowed (no block reason). */
-function canApproveForPortal(user: UserAccountRow): boolean {
-  return approveBlockedReason(user) == null;
-}
+/**
+ * Users — every portal login, its role, linked record and approval status.
+ * Role changes and approvals go through the same dialog as People → Approvals,
+ * so a role that needs a Tenant / Landlord / Team member record asks for it in
+ * the same step. `?user=<id>` opens on that account (scrolled to, highlighted,
+ * focused); `&from=approvals` adds a way back.
+ */
+export function UsersPage({
+  search = "",
+  navigate,
+}: {
+  search?: string;
+  navigate?: (to: string) => void;
+}) {
+  const { setError, setNotice, landlords, listTenants, refreshLookups } = useApp();
+  const accounts = useResource(data.listUserAccounts, EMPTY_ACCOUNTS, true);
+  const staff = useResource(data.listStaff, EMPTY_STAFF, true);
+  const fetchTenants = useCallback(() => listTenants(), [listTenants]);
+  const tenants = useResource(fetchTenants, [], true);
 
-export function UsersPage() {
-  const { setError, landlords, listTenants } = useApp();
-  const [rows, setRows] = useState<UserAccountRow[]>([]);
-  const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [tenants, setTenants] = useState<Awaited<ReturnType<typeof listTenants>>>([]);
+  const { userId: focusUserId, from } = useMemo(() => parseSearch(search), [search]);
   const [filter, setFilter] = useState<StatusFilter>("pending");
-  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [assign, setAssign] = useState<{
+    user: UserAccountRow;
+    mode: AssignAccountMode;
+    role?: AppRole;
+  } | null>(null);
   const [confirm, setConfirm] = useState<{
     user: UserAccountRow;
-    status: AccountStatus;
+    status: "rejected" | "suspended";
   } | null>(null);
+  const [confirmAdmin, setConfirmAdmin] = useState<UserAccountRow | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [accounts, staffRows, tenantRows] = await Promise.all([
-        data.listUserAccounts(),
-        data.listStaff(),
-        listTenants(),
-      ]);
-      setRows(accounts);
-      setStaff(staffRows);
-      setTenants(tenantRows);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [setError, listTenants]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+  const rows = accounts.data;
   const visible = useMemo(
     () => (filter === "all" ? rows : rows.filter((r) => r.account_status === filter)),
     [rows, filter],
   );
 
-  async function applyStatus(user: UserAccountRow, status: AccountStatus) {
-    if (status === "approved" && !canApproveForPortal(user)) {
-      setError(approveBlockedReason(user) ?? "Cannot approve this account yet.");
-      setConfirm(null);
-      return;
+  // ?user=: show the filter that contains them, then scroll + focus their card.
+  const focused = useRef<string | null>(null);
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  useEffect(() => {
+    if (!focusUserId || accounts.state !== "ready" || focused.current === focusUserId) return;
+    const target = rows.find((r) => r.user_id === focusUserId);
+    if (!target) return;
+    setFilter(target.account_status);
+    focused.current = focusUserId;
+    requestAnimationFrame(() => {
+      const el = cardRefs.current.get(focusUserId);
+      if (!el) return;
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.focus({ preventScroll: true });
+    });
+  }, [focusUserId, accounts.state, rows]);
+
+  function recordName(user: UserAccountRow): string | null {
+    if (!user.role || !roleNeedsRecord(user.role)) return null;
+    const id = linkedIdFor(user, user.role);
+    if (id == null) return null;
+    if (user.role === "tenant") {
+      const t = tenants.data.find((x) => x.id === id);
+      return t ? `${t.first_name} ${t.last_name}` : `Tenant #${id}`;
     }
+    if (user.role === "landlord") {
+      const l = landlords.find((x) => x.id === id);
+      return l ? l.company_name?.trim() || `${l.first_name} ${l.last_name}` : `Landlord #${id}`;
+    }
+    const s = staff.data.find((x) => x.id === id);
+    return s ? `${s.first_name} ${s.last_name}` : `Team member #${id}`;
+  }
+
+  async function applyStatus(user: UserAccountRow, status: "rejected" | "suspended") {
     setBusyId(user.user_id);
     try {
       await data.setAccountStatus(user.user_id, status);
-      await load();
+      setNotice(`${displayName(user)} is ${status}.`);
+      await accounts.reload({ quiet: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -122,122 +150,70 @@ export function UsersPage() {
     }
   }
 
-  async function changeRole(user: UserAccountRow, role: AppRole) {
-    if (
-      user.account_status === "approved" &&
-      role === "landlord" &&
-      user.landlord_id == null
-    ) {
-      setError("Link a Landlord row before keeping an approved landlord account.");
-      return;
-    }
-    if (
-      user.account_status === "approved" &&
-      role === "tenant" &&
-      user.tenant_id == null
-    ) {
-      setError("Link a Tenant row before keeping an approved tenant account.");
-      return;
-    }
-    if (
-      user.account_status === "approved" &&
-      role === "maintenance" &&
-      user.staff_id == null
-    ) {
-      setError("Link a Staff row before keeping an approved maintenance account.");
-      return;
-    }
+  async function makeAdmin(user: UserAccountRow) {
     setBusyId(user.user_id);
     try {
-      await data.adminSetUserRole(user.user_id, role, {
-        landlord_id: role === "landlord" ? user.landlord_id : null,
-        tenant_id: role === "tenant" ? user.tenant_id : null,
-        staff_id: role === "maintenance" ? user.staff_id : null,
-      });
-      await load();
+      await data.assignAccountRole(user.user_id, "admin", { approve: false });
+      setNotice(`${displayName(user)} is now an admin.`);
+      await accounts.reload({ quiet: true });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusyId(null);
+      setConfirmAdmin(null);
     }
   }
 
-  async function changeStaffLink(user: UserAccountRow, staffId: string) {
-    if (user.account_status === "approved" && staffId === "none") {
-      setError("Suspend or reject before clearing the Staff link on an approved account.");
+  function pickRole(user: UserAccountRow, role: AppRole) {
+    if (role === assignedRole(user)) return;
+    if (role === "admin") {
+      setConfirmAdmin(user);
       return;
     }
-    setBusyId(user.user_id);
-    try {
-      const id = staffId === "none" ? null : Number(staffId);
-      await data.adminSetUserRole(user.user_id, "maintenance", { staff_id: id });
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusyId(null);
-    }
+    // Roles with a record ask for it in the same step.
+    setAssign({ user, mode: "role", role });
   }
 
-  async function changeLandlordLink(user: UserAccountRow, landlordId: string) {
-    if (user.account_status === "approved" && landlordId === "none") {
-      setError("Suspend or reject before clearing the Landlord link on an approved account.");
-      return;
-    }
-    setBusyId(user.user_id);
-    try {
-      const id = landlordId === "none" ? null : Number(landlordId);
-      await data.adminSetUserRole(user.user_id, "landlord", { landlord_id: id });
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function changeTenantLink(user: UserAccountRow, tenantId: string) {
-    if (user.account_status === "approved" && tenantId === "none") {
-      setError("Suspend or reject before clearing the Tenant link on an approved account.");
-      return;
-    }
-    setBusyId(user.user_id);
-    try {
-      const id = tenantId === "none" ? null : Number(tenantId);
-      await data.adminSetUserRole(user.user_id, "tenant", { tenant_id: id });
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusyId(null);
-    }
-  }
+  const backToApprovals =
+    from === "approvals" && navigate ? (
+      <Button variant="ghost" size="sm" onClick={() => navigate("/people?tab=approvals")} className="-ml-2 w-fit">
+        <ArrowLeft aria-hidden /> Back to Approvals
+      </Button>
+    ) : null;
 
   return (
     <PageShell
       title="Users"
-      meta="Account approval queue — not rental applications"
+      section="People / Users"
+      meta="Portal logins — not rental applications"
       actions={
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void accounts.reload()}
+          disabled={accounts.state === "loading"}
+        >
           Refresh
         </Button>
       }
     >
+      {backToApprovals}
       <p className="text-sm text-muted-foreground">
-        Approve portal sign-ins here. Rental applicants live under{" "}
+        Approve, change roles and suspend portal logins here. Rental applicants live under{" "}
         <span className="font-medium text-foreground">Applications</span>.
       </p>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
         {STATUS_FILTERS.map((f) => (
           <Button
             key={f.id}
             size="sm"
             variant={filter === f.id ? "default" : "outline"}
+            aria-pressed={filter === f.id}
             onClick={() => setFilter(f.id)}
           >
             {f.label}
-            {f.id !== "all" && (
+            {f.id !== "all" && accounts.state === "ready" && (
               <span className="ml-1 opacity-70">
                 ({rows.filter((r) => r.account_status === f.id).length})
               </span>
@@ -246,73 +222,78 @@ export function UsersPage() {
         ))}
       </div>
 
-      {loading ? (
-        <p className="text-sm text-muted-foreground">Loading users…</p>
+      {accounts.state === "loading" || accounts.state === "idle" ? (
+        <div className="overflow-hidden rounded-md border border-border" aria-busy="true" aria-label="Loading users">
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      ) : accounts.state === "error" ? (
+        <div className="rounded-md border border-border bg-card">
+          <ErrorRetry
+            message="We couldn't load portal users. Check your connection and try again."
+            onRetry={() => void accounts.reload()}
+          />
+        </div>
       ) : visible.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 px-6 py-20 text-center">
           <UserCog className="size-8 text-faint" aria-hidden />
           <p className="font-medium">No users in this filter</p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            New signups appear as pending; email must be confirmed before Approve.
+            New sign-ups appear as pending; email must be confirmed before Approve.
           </p>
         </div>
       ) : (
         <div className="space-y-3">
           {visible.map((user) => {
             const busy = busyId === user.user_id;
-            const blockReason = approveBlockedReason(user);
+            const highlighted = user.user_id === focusUserId;
+            const linkedName = recordName(user);
+            const role = assignedRole(user);
             const linkedTenant =
               user.role === "tenant" && user.tenant_id != null
-                ? tenants.find((t) => t.id === user.tenant_id)
+                ? tenants.data.find((t) => t.id === user.tenant_id)
                 : undefined;
-            const tenantMissingUnit =
-              linkedTenant != null && linkedTenant.active_unit_id == null;
-            // Soft warn: still allow Approve (portal sign-in works); submit needs a unit.
+            const tenantMissingUnit = linkedTenant != null && linkedTenant.active_unit_id == null;
             const showApprove = user.account_status !== "approved";
-            const softUnitWarn =
-              tenantMissingUnit && canApproveForPortal(user)
-                ? "Linked tenant has no unit — they can sign in but cannot submit maintenance until a unit is assigned."
-                : null;
             return (
-              <Card key={user.user_id} className="space-y-3 p-4">
+              <Card
+                key={user.user_id}
+                ref={(el: HTMLDivElement | null) => {
+                  if (el) cardRefs.current.set(user.user_id, el);
+                  else cardRefs.current.delete(user.user_id);
+                }}
+                tabIndex={highlighted ? -1 : undefined}
+                aria-label={highlighted ? `${displayName(user)} (opened from Approvals)` : undefined}
+                className={cn(
+                  "space-y-3 p-4 outline-none",
+                  highlighted && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                )}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 space-y-1">
-                    <p className="truncate font-medium">{user.email || "(no email)"}</p>
+                    <p className="truncate font-medium">{displayName(user)}</p>
+                    {user.full_name ? (
+                      <p className="truncate text-[13px] text-muted-foreground">{user.email}</p>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <Badge variant={statusVariant(user.account_status)}>
-                        {user.account_status}
-                      </Badge>
-                      {isEmailUnconfirmed(user) && (
-                        <Badge variant="outline">unconfirmed email</Badge>
-                      )}
-                      <span>role: {user.role ?? "none"}</span>
-                      {user.staff_id != null && <span>staff #{user.staff_id}</span>}
-                      {user.landlord_id != null && <span>landlord #{user.landlord_id}</span>}
-                      {user.tenant_id != null && <span>tenant #{user.tenant_id}</span>}
-                      {tenantMissingUnit && (
-                        <span className="text-amber-800">no unit on tenant</span>
-                      )}
+                      <Badge variant={statusVariant(user.account_status)}>{user.account_status}</Badge>
+                      {isEmailUnconfirmed(user) && <Badge variant="outline">unconfirmed email</Badge>}
+                      <span>{signupClaim(user)}</span>
                     </div>
-                    {showApprove && blockReason && (
-                      <p className="text-xs text-amber-800">{blockReason}</p>
-                    )}
-                    {showApprove && !blockReason && softUnitWarn && (
-                      <p className="text-xs text-amber-800">{softUnitWarn}</p>
-                    )}
-                    {!showApprove && tenantMissingUnit && (
-                      <p className="text-xs text-amber-800">
-                        Linked tenant has no unit — assign a unit on Tenants so they can submit maintenance.
-                      </p>
-                    )}
+                    {user.signup_address ? (
+                      <p className="text-xs text-muted-foreground">Address: {user.signup_address}</p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {showApprove && (
                       <Button
                         size="sm"
-                        disabled={busy || !canApproveForPortal(user)}
-                        onClick={() => setConfirm({ user, status: "approved" })}
+                        disabled={busy || isEmailUnconfirmed(user)}
+                        title={isEmailUnconfirmed(user) ? "Waiting for them to confirm their email" : undefined}
+                        onClick={() => setAssign({ user, mode: "approve" })}
                       >
-                        {user.account_status === "pending" ? "Approve" : "Re-approve"}
+                        {user.account_status === "pending" ? "Approve…" : "Re-approve…"}
                       </Button>
                     )}
                     {user.account_status === "approved" && (
@@ -325,17 +306,7 @@ export function UsersPage() {
                         Suspend
                       </Button>
                     )}
-                    {user.account_status !== "rejected" && user.account_status !== "approved" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => setConfirm({ user, status: "rejected" })}
-                      >
-                        Reject
-                      </Button>
-                    )}
-                    {user.account_status === "approved" && (
+                    {user.account_status !== "rejected" && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -350,125 +321,92 @@ export function UsersPage() {
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Role</Label>
+                    <Label className="text-xs" htmlFor={`role-${user.user_id}`}>
+                      Role
+                    </Label>
                     <Select
-                      value={user.role ?? "unassigned"}
+                      value={role ?? "unassigned"}
                       onValueChange={(v) => {
                         if (v === "unassigned") return;
-                        void changeRole(user, v as AppRole);
+                        pickRole(user, v as AppRole);
                       }}
                       disabled={busy}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Assign role" />
+                      <SelectTrigger id={`role-${user.user_id}`}>
+                        <SelectValue placeholder="No role yet" />
                       </SelectTrigger>
                       <SelectContent>
-                        {!user.role && (
+                        {!role && (
                           <SelectItem value="unassigned" disabled>
-                            Unassigned
+                            No role yet
                           </SelectItem>
                         )}
                         {ROLES.map((r) => (
                           <SelectItem key={r} value={r}>
-                            {r}
+                            {ROLE_LABEL[r]}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-                  {user.role === "maintenance" && (
+                  {role && roleNeedsRecord(role) ? (
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Staff link (required for portal access)</Label>
-                      <Select
-                        value={user.staff_id != null ? String(user.staff_id) : "none"}
-                        onValueChange={(v) => void changeStaffLink(user, v)}
-                        disabled={busy}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Staff" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem
-                            value="none"
-                            disabled={user.account_status === "approved"}
-                          >
-                            None
-                            {user.account_status === "approved"
-                              ? " (suspend first)"
-                              : ""}
-                          </SelectItem>
-                          {staff.map((s) => (
-                            <SelectItem key={s.id} value={String(s.id)}>
-                              {s.last_name}, {s.first_name} ({s.email})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <p className="text-xs font-medium">{RECORD_LABEL[role]} record</p>
+                      <div className="flex min-h-8 flex-wrap items-center gap-2 text-sm">
+                        {linkedName ? (
+                          <span className="text-foreground">{linkedName}</span>
+                        ) : (
+                          <span className="text-warning">Not linked yet</span>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() =>
+                            setAssign({ user, mode: "role", role })
+                          }
+                        >
+                          {linkedName ? "Change…" : "Link…"}
+                        </Button>
+                      </div>
+                      {tenantMissingUnit ? (
+                        <p className="text-xs text-warning">
+                          No unit yet — add a lease on Tenants so they can submit requests.
+                        </p>
+                      ) : null}
                     </div>
-                  )}
-                  {user.role === "landlord" && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Landlord link (required for landlord portal)</Label>
-                      <Select
-                        value={user.landlord_id != null ? String(user.landlord_id) : "none"}
-                        onValueChange={(v) => void changeLandlordLink(user, v)}
-                        disabled={busy}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Landlord" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem
-                            value="none"
-                            disabled={user.account_status === "approved"}
-                          >
-                            None
-                            {user.account_status === "approved" ? " (suspend first)" : ""}
-                          </SelectItem>
-                          {landlords.map((l) => (
-                            <SelectItem key={l.id} value={String(l.id)}>
-                              {l.company_name?.trim() || `${l.last_name}, ${l.first_name}`}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  {user.role === "tenant" && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Tenant link (required for tenant portal)</Label>
-                      <Select
-                        value={user.tenant_id != null ? String(user.tenant_id) : "none"}
-                        onValueChange={(v) => void changeTenantLink(user, v)}
-                        disabled={busy}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Tenant" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem
-                            value="none"
-                            disabled={user.account_status === "approved"}
-                          >
-                            None
-                            {user.account_status === "approved" ? " (suspend first)" : ""}
-                          </SelectItem>
-                          {tenants.map((t) => (
-                            <SelectItem key={t.id} value={String(t.id)}>
-                              {t.last_name}, {t.first_name}
-                              {t.email ? ` (${t.email})` : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                  ) : !role ? (
+                    <p className="self-end pb-1.5 text-[13px] text-muted-foreground">
+                      Pick a role to link their record, or use Approve… to do both and approve.
+                    </p>
+                  ) : null}
                 </div>
               </Card>
             );
           })}
         </div>
       )}
+
+      <AssignAccountDialog
+        open={assign != null}
+        onOpenChange={(o) => {
+          if (!o) setAssign(null);
+        }}
+        user={assign?.user ?? null}
+        mode={assign?.mode ?? "role"}
+        initialRole={assign?.role}
+        accounts={rows}
+        tenants={tenants.state === "ready" ? tenants.data : null}
+        landlords={landlords}
+        staff={staff.state === "ready" ? staff.data : null}
+        onDone={(_row, message) => {
+          setNotice(message);
+          void accounts.reload({ quiet: true });
+          void tenants.reload({ quiet: true });
+          void staff.reload({ quiet: true });
+          void refreshLookups();
+        }}
+      />
 
       <ConfirmDelete
         open={confirm != null}
@@ -477,25 +415,29 @@ export function UsersPage() {
         }}
         title={
           confirm
-            ? `${confirm.status === "approved" ? "Approve" : confirm.status === "rejected" ? "Reject" : "Suspend"} “${confirm.user.email ?? confirm.user.user_id}”?`
+            ? `${confirm.status === "rejected" ? "Reject" : "Suspend"} ${displayName(confirm.user)}?`
             : ""
         }
         description={
-          confirm?.status === "approved"
-            ? "They can use the portal after refreshing their session (Check again / sign in again)."
-            : confirm?.status === "rejected"
-              ? "They will stay signed in but blocked from the portal until re-approved."
-              : "Access is revoked on their next role resolve / refresh."
+          confirm?.status === "rejected"
+            ? "They stay signed in but can't use the portal until re-approved."
+            : "They lose access the next time the portal checks their role."
         }
-        confirmLabel={
-          confirm?.status === "approved"
-            ? "Approve"
-            : confirm?.status === "rejected"
-              ? "Reject"
-              : "Suspend"
-        }
+        confirmLabel={confirm?.status === "rejected" ? "Reject" : "Suspend"}
         onConfirm={() => {
           if (confirm) void applyStatus(confirm.user, confirm.status);
+        }}
+      />
+      <ConfirmDelete
+        open={confirmAdmin != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmAdmin(null);
+        }}
+        title={confirmAdmin ? `Make ${displayName(confirmAdmin)} an admin?` : ""}
+        description="Admins can see and change every record, including tenant screening data and other accounts."
+        confirmLabel="Make admin"
+        onConfirm={() => {
+          if (confirmAdmin) void makeAdmin(confirmAdmin);
         }}
       />
     </PageShell>

@@ -28,6 +28,18 @@ export function linkedIdFor(user: UserAccountRow, role: AppRole): number | null 
   return null;
 }
 
+/**
+ * The role an admin actually gave this login. Unmatched sign-ups are stored
+ * as an unlinked 'maintenance' queue row; that is a placeholder, not a choice,
+ * so it reads as "no role yet".
+ */
+export function assignedRole(user: UserAccountRow): AppRole | null {
+  if (user.role === "maintenance" && user.staff_id == null && user.account_status !== "approved") {
+    return null;
+  }
+  return user.role;
+}
+
 /** True when the role row already points at its record (e.g. sign-up email matched). */
 export function hasLinkedRecord(user: UserAccountRow): boolean {
   return user.role != null && roleNeedsRecord(user.role) && linkedIdFor(user, user.role) != null;
