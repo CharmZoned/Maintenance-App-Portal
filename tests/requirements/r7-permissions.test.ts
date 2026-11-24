@@ -4,11 +4,14 @@
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
+import { listRequestReporterNames } from "@/lib/request-reporters";
 import legacyWorker from "../../archive/legacy-d1-hono/index";
 import {
   anonClient,
   clientFor,
   expectDenied,
+  expectOk,
+  pngFile,
   resetWorld,
   serviceClient,
   signInApp,
@@ -226,7 +229,9 @@ describe("[R7] Permissions", () => {
       // account_status = 'approved'.
       const approved = await clientFor("tenant");
       expect((await approved.from("Staff").select("id")).data).toEqual([{ id: world.staff.worker.id }]);
-      expect((await approved.from("Landlords").select("id")).data).toEqual([{ id: world.landlord.id }]);
+      // Tenants never read the landlord's contact record (since 20261124120000); a
+      // landlord-filed request shows the landlord's name through an RPC instead.
+      expect((await approved.from("Landlords").select("id")).data).toEqual([]);
 
       await sql(`update public.user_roles set account_status = 'suspended' where user_id = $1`, [
         world.users.tenant.id,
@@ -701,6 +706,279 @@ describe("[R7] Permissions", () => {
         expect(after.status).not.toBe("waived");
         expect(after.amount_paid).toBe(100);
       });
+    });
+  });
+
+  // Runs last: it adds requests, and the counts in the blocks above assume the fixture set.
+  describe("landlord-filed requests (D3) and office message links (D6)", () => {
+    const fileAsLandlord = async (title: string, over: Record<string, unknown>) => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert({
+            title,
+            description: "Filed by the landlord",
+            category: "Plumbing",
+            submitted_by_landlord_id: world.landlord.id,
+            ...over,
+          })
+          .select("id")
+          .single(),
+        `landlord files "${title}"`,
+      ) as { id: number };
+      return Number(row.id);
+    };
+
+    // D3 (changed by the owner 2026-11-24): the current tenant of the unit sees a
+    // landlord-filed request on it, view only, with the landlord's name only.
+    let unitRequestId: number;
+    const reporterNames = async (persona: "tenant" | "tenant2" | "landlord" | "worker" | "worker2" | "admin", ids: number[]) =>
+      (await clientFor(persona)).rpc("list_request_reporter_names", { p_request_ids: ids });
+
+    test("the unit's tenant sees a landlord-filed request on their unit, with its photos, history and worker", async () => {
+      unitRequestId = await fileAsLandlord("Leak under 1A (landlord)", { unit_id: world.units.a.id });
+      const id = unitRequestId;
+      await signInApp("landlord");
+      await data.uploadMaintenancePhoto(id, pngFile("leak.png"));
+      // The office assigns Riley and leaves a tenant-visible update and an internal note.
+      await sql(
+        `update public."MaintenanceRequests"
+            set assigned_staff_id = $2, scheduled_for = now() + interval '1 day', status = 'Scheduled'
+          where id = $1`,
+        [id, world.staff.worker2.id],
+      );
+      await sql(
+        `insert into public."MaintenanceRequestComments" (maintenance_request_id, author_role, body, visibility)
+         values ($1, 'admin', 'Plumber booked for tomorrow', 'tenant_visible'),
+                ($1, 'admin', 'Landlord pays for this one', 'internal')`,
+        [id],
+      );
+
+      const tenant = await clientFor("tenant");
+      expect((await tenant.from("MaintenanceRequests").select("id").eq("id", id)).data).toEqual([{ id }]);
+      const trail = (await tenant.from("MaintenanceRequestStatusHistory").select("to_status").eq("maintenance_request_id", id))
+        .data;
+      expect(trail?.map((r) => r.to_status)).toEqual(["Open", "Scheduled"]);
+      expect(
+        (await tenant.from("MaintenanceRequestPhotos").select("id").eq("maintenance_request_id", id)).data,
+      ).toHaveLength(1);
+      expect(
+        (await tenant.from("MaintenanceRequestComments").select("body").eq("maintenance_request_id", id)).data,
+      ).toEqual([{ body: "Plumber booked for tomorrow" }]);
+      // The assigned worker's name, as on the tenant's own requests.
+      const staff = (await tenant.from("Staff").select("id, first_name")).data ?? [];
+      expect(staff.map((s) => s.id).sort()).toEqual([world.staff.worker.id, world.staff.worker2.id].sort());
+      // Prices and staff notes stay hidden.
+      for (const table of ["MaintenanceRequestWorkerPrices", "MaintenanceRequestLandlordPrices", "MaintenanceRequestStaffNotes"]) {
+        expect((await tenant.from(table).select("maintenance_request_id").eq("maintenance_request_id", id)).data, table).toEqual(
+          [],
+        );
+      }
+
+      await signInApp("tenant");
+      const orders = await data.listWorkOrders();
+      expect(orders.find((w) => w.id === id)).toMatchObject({ tenant_id: null, unit_id: world.units.a.id });
+      const photos = await data.listMaintenancePhotos(id);
+      expect(photos).toHaveLength(1);
+      expect(photos[0]!.url).toBeTruthy();
+      expect((await data.listMaintenanceStatusHistory(id)).length).toBeGreaterThan(0);
+
+      const landlord = await clientFor("landlord");
+      expect((await landlord.from("MaintenanceRequests").select("id").eq("id", id)).data).toEqual([{ id }]);
+    });
+
+    test("the tenant sees the landlord's name, but never the landlord's email or phone", async () => {
+      const id = unitRequestId;
+      const named = await reporterNames("tenant", [id, requestId]);
+      expect(named.error).toBeNull();
+      // Only the landlord-filed request comes back; the tenant's own has no landlord reporter.
+      expect(named.data).toEqual([{ request_id: id, landlord_name: "Owner Holdings LLC" }]);
+
+      await signInApp("tenant");
+      expect(await listRequestReporterNames([id, requestId])).toEqual(new Map([[id, "Owner Holdings LLC"]]));
+
+      const tenant = await clientFor("tenant");
+      const contact = await tenant.from("Landlords").select("email, mobile_phone").eq("id", world.landlord.id);
+      expect(contact.data ?? []).toEqual([]);
+      expect((await tenant.from("Landlords").select("*")).data ?? []).toEqual([]);
+
+      // Callers who can't see the request get nothing, not even the name.
+      for (const persona of ["tenant2", "worker"] as const) {
+        const other = await reporterNames(persona, [id]);
+        expect(other.error, persona).toBeNull();
+        expect(other.data, persona).toEqual([]);
+      }
+      const anon = await anonClient().rpc("list_request_reporter_names", { p_request_ids: [id] });
+      expect(anon.error !== null || (anon.data ?? []).length === 0).toBe(true);
+      // The landlord, the assigned worker and the admin get it too.
+      for (const persona of ["landlord", "worker2", "admin"] as const) {
+        expect((await reporterNames(persona, [id])).data, persona).toEqual([
+          { request_id: id, landlord_name: "Owner Holdings LLC" },
+        ]);
+      }
+    });
+
+    test("another unit's tenant, and a tenant who moved out of the unit, do not see it", async () => {
+      const id = unitRequestId;
+      const tenant2 = await clientFor("tenant2");
+      expect((await tenant2.from("MaintenanceRequests").select("id").eq("id", id)).data).toEqual([]);
+      expect(
+        (await tenant2.from("MaintenanceRequestPhotos").select("id").eq("maintenance_request_id", id)).data,
+      ).toEqual([]);
+      expect(
+        (await tenant2.from("MaintenanceRequestStatusHistory").select("id").eq("maintenance_request_id", id)).data,
+      ).toEqual([]);
+      expect((await tenant2.from("Staff").select("id")).data ?? []).toEqual([]);
+
+      // Tina moves to another unit: the 1A request disappears at once, her own request stays.
+      await sql(`update public."Tenants" set unit_id = $2 where id = $1`, [world.tenants.tenant.id, world.units.other.id]);
+      try {
+        const moved = await clientFor("tenant");
+        const ids = ((await moved.from("MaintenanceRequests").select("id")).data ?? []).map((r) => r.id);
+        expect(ids).not.toContain(id);
+        expect(ids).toContain(requestId);
+        expect(
+          (await moved.from("MaintenanceRequestPhotos").select("id").eq("maintenance_request_id", id)).data,
+        ).toEqual([]);
+        expect(
+          (await moved.from("MaintenanceRequestStatusHistory").select("id").eq("maintenance_request_id", id)).data,
+        ).toEqual([]);
+        expect(
+          (await moved.from("MaintenanceRequestComments").select("id").eq("maintenance_request_id", id)).data,
+        ).toEqual([]);
+        expect((await moved.rpc("list_request_reporter_names", { p_request_ids: [id] })).data).toEqual([]);
+
+        // No unit at all (moved out).
+        await sql(`update public."Tenants" set unit_id = null where id = $1`, [world.tenants.tenant.id]);
+        const out = await clientFor("tenant");
+        expect((await out.from("MaintenanceRequests").select("id").eq("id", id)).data).toEqual([]);
+      } finally {
+        await sql(`update public."Tenants" set unit_id = $2 where id = $1`, [world.tenants.tenant.id, world.units.a.id]);
+      }
+    });
+
+    test("a tenant does not see a landlord-filed common-area request on their property", async () => {
+      const id = await fileAsLandlord("Stairwell light (landlord)", { unit_id: null, property_id: world.property.id });
+      await signInApp("landlord");
+      await data.uploadMaintenancePhoto(id, pngFile("stairs.png"));
+      for (const persona of ["tenant", "tenant2", "worker"] as const) {
+        const client = await clientFor(persona);
+        expect((await client.from("MaintenanceRequests").select("id").eq("id", id)).data, persona).toEqual([]);
+        expect(
+          (await client.from("MaintenanceRequestPhotos").select("id").eq("maintenance_request_id", id)).data,
+          persona,
+        ).toEqual([]);
+        expect(
+          (await client.from("MaintenanceRequestStatusHistory").select("id").eq("maintenance_request_id", id)).data,
+          persona,
+        ).toEqual([]);
+      }
+      expect((await reporterNames("tenant", [id])).data).toEqual([]);
+    });
+
+    test("the tenant cannot comment on, add photos to, confirm or change a landlord-filed request", async () => {
+      const id = unitRequestId;
+      const tenant = await clientFor("tenant");
+
+      expectDenied(
+        await tenant
+          .from("MaintenanceRequestComments")
+          .insert({
+            maintenance_request_id: id,
+            author_user_id: world.users.tenant.id,
+            author_role: "tenant",
+            author_tenant_id: world.tenants.tenant.id,
+            body: "Any news?",
+            visibility: "tenant_visible",
+          })
+          .select(),
+        "tenant comment on a landlord-filed request",
+      );
+      await signInApp("tenant");
+      await expect(data.addMaintenanceComment(id, "Any news?", "tenant_visible")).rejects.toThrow();
+      expect(await sql(`select 1 from public."MaintenanceRequestComments" where maintenance_request_id = $1 and author_role = 'tenant'`, [id])).toHaveLength(0);
+
+      await expect(data.uploadMaintenancePhoto(id, pngFile("tenant.png"))).rejects.toThrow();
+      const up = await tenant.storage
+        .from("maintenance-photos")
+        .upload(`${id}/tenant-direct.png`, new Blob([new Uint8Array([1])], { type: "image/png" }));
+      expect(up.error).not.toBeNull();
+      expect(
+        await sql(`select 1 from public."MaintenanceRequestPhotos" where maintenance_request_id = $1 and uploaded_by_role = 'tenant'`, [id]),
+      ).toHaveLength(0);
+
+      expectDenied(
+        await tenant.from("MaintenanceRequests").update({ title: "Changed by tenant", priority: "urgent" }).eq("id", id).select(),
+        "tenant update",
+      );
+      expectDenied(await tenant.from("MaintenanceRequests").delete().eq("id", id).select(), "tenant delete");
+
+      // Office links: a tenant may not tag their office message with this request.
+      expectDenied(
+        await tenant
+          .from("OfficeMessages")
+          .insert({ thread_user_id: world.users.tenant.id, author_role: "tenant", body: "About 1A", request_id: id })
+          .select(),
+        "tenant links a landlord-filed request",
+      );
+
+      // Completed: only the reporter answers "is it fixed?", and the landlord is the reporter.
+      await sql(
+        `update public."MaintenanceRequests" set status = 'Closed', closed_at = now(), resolution_notes = 'Fixed' where id = $1`,
+        [id],
+      );
+      const confirm = await tenant.rpc("confirm_maintenance_request_fixed", { p_request_id: id, p_fixed: true });
+      expect(confirm.error).not.toBeNull();
+
+      const [row] = await sql<{ title: string; tenant_fix_response: string | null }>(
+        `select title, tenant_fix_response from public."MaintenanceRequests" where id = $1`,
+        [id],
+      );
+      expect(row).toEqual({ title: "Leak under 1A (landlord)", tenant_fix_response: null });
+      // Still visible, view only.
+      expect((await tenant.from("MaintenanceRequests").select("id").eq("id", id)).data).toEqual([{ id }]);
+    });
+
+    test("a landlord can link a chat message to their own request, but not to one they can't see", async () => {
+      const own = await fileAsLandlord("Boiler noise (landlord)", { unit_id: null, property_id: world.property.id });
+      const [other] = await sql<{ id: number }>(
+        `insert into public."MaintenanceRequests" (title, description, category, property_id)
+         values ('Birch House roof', 'Office-filed', 'Roof / leaks', $1) returning id`,
+        [world.otherProperty.id],
+      );
+      const otherId = Number(other.id);
+      const say = (client: Awaited<ReturnType<typeof clientFor>>, threadUser: string, role: string, requestIdLink: number) =>
+        client
+          .from("OfficeMessages")
+          .insert({ thread_user_id: threadUser, author_role: role, body: "About this request", request_id: requestIdLink })
+          .select("id, request_id")
+          .single();
+
+      const landlord = await clientFor("landlord");
+      expect(expectOk(await say(landlord, world.users.landlord.id, "landlord", own))).toMatchObject({ request_id: own });
+      expect(expectOk(await say(landlord, world.users.landlord.id, "landlord", requestId))).toMatchObject({
+        request_id: requestId,
+      });
+      expectDenied(await say(landlord, world.users.landlord.id, "landlord", otherId), "another landlord's request");
+
+      const worker2 = await clientFor("worker2");
+      expectDenied(await say(worker2, world.users.worker2.id, "maintenance", requestId), "a job not assigned to them");
+
+      const admin = await clientFor("admin");
+      expectOk(await say(admin, world.users.landlord.id, "admin", own), "admin links a request");
+
+      expect(
+        await sql(`select 1 from public."OfficeMessages" where request_id = $1`, [otherId]),
+      ).toHaveLength(0);
+
+      // Deleting the request keeps the message and clears the link.
+      await sql(`delete from public."MaintenanceRequests" where id = $1`, [own]);
+      const kept = await sql<{ request_id: number | null }>(
+        `select request_id from public."OfficeMessages" where thread_user_id = $1 and body = 'About this request' order by id`,
+        [world.users.landlord.id],
+      );
+      expect(kept.map((r) => r.request_id)).toEqual([null, requestId, null]);
     });
   });
 });

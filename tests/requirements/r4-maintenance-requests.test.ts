@@ -5,10 +5,12 @@
  */
 import { beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
+import { listRequestReporterNames } from "@/lib/request-reporters";
 import { MAINTENANCE_CATEGORIES } from "@/types";
 import {
   clientFor,
   expectDenied,
+  expectOk,
   pdfFile,
   pngFile,
   resetWorld,
@@ -181,6 +183,264 @@ describe("[R4] Maintenance requests", () => {
           .eq("id", id)
           .select(),
       );
+    });
+  });
+
+  describe("a landlord files a request", () => {
+    type Row = Record<string, unknown> & { id: number };
+    const fresh = (over: Record<string, unknown> = {}) => ({
+      title: "Hallway light out",
+      description: "The light on the stairs has stopped working.",
+      category: "Electrical",
+      submitted_by_landlord_id: world.landlord.id,
+      ...over,
+    });
+
+    test("on their own unit: created Open, numbered, property filled in, permission to enter No by default", async () => {
+      const client = await clientFor("landlord");
+      const res = await client
+        .from("MaintenanceRequests")
+        .insert(fresh({ unit_id: world.units.a.id }))
+        .select("*")
+        .single();
+      const row = expectOk(res, "landlord files on their own unit") as Row;
+      expect(row).toMatchObject({
+        status: "Open",
+        unit_id: world.units.a.id,
+        property_id: world.property.id,
+        submitted_by_landlord_id: world.landlord.id,
+        submitted_by_tenant_id: null,
+        permission_to_enter: false,
+        assigned_staff_id: null,
+      });
+      expect(String(row.request_number)).toMatch(/^MR-\d{6}$/);
+    });
+
+    test("on a common area of their own property (no unit), and can read it back", async () => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert(
+            fresh({
+              title: "Front gate sticks",
+              category: "Exterior / yard",
+              unit_id: null,
+              property_id: world.property.id,
+              permission_to_enter: true,
+            }),
+          )
+          .select("id, unit_id, property_id, permission_to_enter")
+          .single(),
+        "landlord files a common-area request",
+      ) as Row;
+      expect(row).toMatchObject({ unit_id: null, property_id: world.property.id, permission_to_enter: true });
+
+      const { data: mine } = await client.from("MaintenanceRequests").select("id").eq("id", row.id);
+      expect(mine).toEqual([{ id: row.id }]);
+      const admin = await clientFor("admin");
+      expect((await admin.from("MaintenanceRequests").select("id").eq("id", row.id)).data).toEqual([{ id: row.id }]);
+    });
+
+    test("the status history records the landlord as the one who created it", async () => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ title: "History — landlord", unit_id: null, property_id: world.property.id }))
+          .select("id")
+          .single(),
+      ) as Row;
+      const { data: trail } = await client
+        .from("MaintenanceRequestStatusHistory")
+        .select("from_status, to_status, changed_by_role, changed_by_user_id, note")
+        .eq("maintenance_request_id", row.id);
+      expect(trail).toEqual([
+        {
+          from_status: null,
+          to_status: "Open",
+          changed_by_role: "landlord",
+          changed_by_user_id: world.users.landlord.id,
+          note: "Created",
+        },
+      ]);
+    });
+
+    test("is refused on another landlord's unit or property", async () => {
+      const client = await clientFor("landlord");
+      expectDenied(
+        await client.from("MaintenanceRequests").insert(fresh({ unit_id: world.units.other.id })).select(),
+        "another landlord's unit",
+      );
+      expectDenied(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ unit_id: null, property_id: world.otherProperty.id }))
+          .select(),
+        "another landlord's common area",
+      );
+      expect(
+        await sql(`select 1 from public."MaintenanceRequests" where submitted_by_landlord_id is not null and property_id = $1`, [
+          world.otherProperty.id,
+        ]),
+      ).toHaveLength(0);
+    });
+
+    test("is refused in another landlord's name, in a tenant's name, or with no reporter", async () => {
+      const client = await clientFor("landlord");
+      const unit = { unit_id: world.units.a.id };
+      expectDenied(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ ...unit, submitted_by_landlord_id: world.otherLandlord.id }))
+          .select(),
+      );
+      expectDenied(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ ...unit, submitted_by_landlord_id: null, submitted_by_tenant_id: world.tenants.tenant.id }))
+          .select(),
+      );
+      expectDenied(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ ...unit, submitted_by_tenant_id: world.tenants.tenant.id }))
+          .select(),
+      );
+      expectDenied(
+        await client.from("MaintenanceRequests").insert(fresh({ ...unit, submitted_by_landlord_id: null })).select(),
+      );
+    });
+
+    test("is refused if they pre-set the status, a worker, a date or a pool offer", async () => {
+      const client = await clientFor("landlord");
+      const unit = { unit_id: world.units.a.id };
+      const forged: Array<[string, Record<string, unknown>]> = [
+        ["assignee", { assigned_staff_id: world.staff.worker.id }],
+        ["status", { status: "Scheduled", assigned_staff_id: world.staff.worker.id, scheduled_for: new Date().toISOString() }],
+        ["closed", { status: "Closed", closed_at: new Date().toISOString(), resolution_notes: "done" }],
+        ["schedule", { scheduled_for: new Date().toISOString() }],
+        ["pool offer", { offered_at: new Date().toISOString(), scheduled_for: new Date().toISOString() }],
+        ["vendor", { vendor_id: world.vendor.id }],
+        ["test data", { is_test_data: true }],
+      ];
+      for (const [why, over] of forged) {
+        expectDenied(
+          await client
+            .from("MaintenanceRequests")
+            .insert(fresh({ ...unit, title: `Forged ${why}`, ...over }))
+            .select(),
+          why,
+        );
+      }
+      expect(await sql(`select 1 from public."MaintenanceRequests" where title like 'Forged %'`)).toHaveLength(0);
+    });
+
+    test("a request can never carry both a tenant and a landlord reporter", async () => {
+      await expect(
+        sql(
+          `insert into public."MaintenanceRequests"
+             (title, description, category, unit_id, submitted_by_tenant_id, submitted_by_landlord_id)
+           values ('Two reporters', 'x', 'Other', $1, $2, $3)`,
+          [world.units.a.id, world.tenants.tenant.id, world.landlord.id],
+        ),
+      ).rejects.toThrow(/requests_single_reporter/);
+    });
+
+    test("a tenant cannot file in a landlord's name", async () => {
+      const client = await clientFor("tenant");
+      expectDenied(
+        await client
+          .from("MaintenanceRequests")
+          .insert({
+            title: "Tenant as landlord",
+            description: "Should be refused",
+            category: "Other",
+            unit_id: world.units.a.id,
+            property_id: world.property.id,
+            submitted_by_landlord_id: world.landlord.id,
+          })
+          .select(),
+      );
+    });
+
+    test("the landlord adds photos to their request, at most 5", async () => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ title: "Landlord photos", unit_id: null, property_id: world.property.id }))
+          .select("id")
+          .single(),
+      ) as Row;
+      await signInApp("landlord");
+      for (let i = 0; i < 5; i++) {
+        const photo = await data.uploadMaintenancePhoto(row.id, pngFile(`landlord-${i}.png`));
+        expect(photo.storage_path).toMatch(new RegExp(`^${row.id}/[^/]+\\.png$`));
+      }
+      expect(await data.listMaintenancePhotos(row.id)).toHaveLength(5);
+      await expect(data.uploadMaintenancePhoto(row.id, pngFile("landlord-sixth.png"))).rejects.toThrow(
+        /at most 5 photos/i,
+      );
+      const rows = await sql<{ uploaded_by_role: string }>(
+        `select uploaded_by_role from public."MaintenanceRequestPhotos" where maintenance_request_id = $1`,
+        [row.id],
+      );
+      expect(rows).toHaveLength(5);
+      expect(rows.every((r) => r.uploaded_by_role === "landlord")).toBe(true);
+    });
+
+    test("the landlord cannot replace or remove a photo someone else added to their request", async () => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ title: "Landlord photos — worker's photo", unit_id: world.units.a.id }))
+          .select("id")
+          .single(),
+      ) as Row;
+      await assign(row.id);
+      await signInApp("worker");
+      const workPhoto = await data.uploadMaintenancePhoto(row.id, pngFile("work.png"));
+
+      const landlord = await clientFor("landlord");
+      const overwritten = await landlord.storage
+        .from("maintenance-photos")
+        .upload(workPhoto.storage_path, pngFile("swap.png"), { contentType: "image/png", upsert: true });
+      expect(overwritten.error, "landlord overwrite of the worker's file").not.toBeNull();
+      await landlord.storage.from("maintenance-photos").remove([workPhoto.storage_path]);
+      expectDenied(await landlord.from("MaintenanceRequestPhotos").delete().eq("id", workPhoto.id).select());
+      expect(
+        await sql(`select 1 from storage.objects where bucket_id = 'maintenance-photos' and name = $1`, [
+          workPhoto.storage_path,
+        ]),
+      ).toHaveLength(1);
+      expect(await sql(`select 1 from public."MaintenanceRequestPhotos" where id = $1`, [workPhoto.id])).toHaveLength(1);
+    });
+
+    test("the unit's tenant sees it in their list with the landlord's name, view only (D3)", async () => {
+      const client = await clientFor("landlord");
+      const row = expectOk(
+        await client
+          .from("MaintenanceRequests")
+          .insert(fresh({ title: "Landlord-filed — tenant view", unit_id: world.units.a.id }))
+          .select("id")
+          .single(),
+      ) as Row;
+      await signInApp("landlord");
+      await data.uploadMaintenancePhoto(row.id, pngFile("landlord-view.png"));
+
+      await signInApp("tenant");
+      const mine = await data.listWorkOrders();
+      expect(mine.find((w) => w.id === row.id)).toMatchObject({ title: "Landlord-filed — tenant view", tenant_id: null });
+      expect(await data.listMaintenancePhotos(row.id)).toHaveLength(1);
+      expect((await data.listMaintenanceStatusHistory(row.id)).map((e) => e.to_status)).toContain("Open");
+      expect((await listRequestReporterNames([row.id])).get(row.id)).toBe("Owner Holdings LLC");
+      await expect(data.addMaintenanceComment(row.id, "Thanks!", "tenant_visible")).rejects.toThrow();
+      await expect(data.uploadMaintenancePhoto(row.id, pngFile("tenant-adds.png"))).rejects.toThrow();
+
+      await signInApp("tenant2");
+      expect((await data.listWorkOrders()).map((w) => w.id)).not.toContain(row.id);
     });
   });
 
