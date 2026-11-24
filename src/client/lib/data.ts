@@ -1363,15 +1363,23 @@ export async function listWorkOrders(params?: {
   if (params?.limit != null && params.limit > 0) q = q.limit(params.limit);
   const { data: rows, error } = await q;
   if (error) throwSb(error);
+  return hydrateWorkOrderRows(rows ?? [], Boolean(params?.skip_staff_notes));
+}
 
-  const propIds = [...new Set((rows ?? []).map((r) => r.property_id).filter(Boolean))] as number[];
-  const unitIds = [...new Set((rows ?? []).map((r) => r.unit_id).filter(Boolean))] as number[];
+type MaintenanceRequestRow = Tables<"MaintenanceRequests">;
+
+/** Joins the names, notes and prices a `WorkOrder` carries onto raw request rows. */
+async function hydrateWorkOrderRows(
+  rows: MaintenanceRequestRow[],
+  skipNotes: boolean,
+): Promise<WorkOrder[]> {
+  const propIds = [...new Set(rows.map((r) => r.property_id).filter(Boolean))] as number[];
+  const unitIds = [...new Set(rows.map((r) => r.unit_id).filter(Boolean))] as number[];
   const tenantIds = [
-    ...new Set((rows ?? []).map((r) => r.submitted_by_tenant_id).filter(Boolean)),
+    ...new Set(rows.map((r) => r.submitted_by_tenant_id).filter(Boolean)),
   ] as number[];
-  const vendorIds = [...new Set((rows ?? []).map((r) => r.vendor_id).filter(Boolean))] as number[];
-  const requestIds = (rows ?? []).map((r) => r.id);
-  const skipNotes = Boolean(params?.skip_staff_notes);
+  const vendorIds = [...new Set(rows.map((r) => r.vendor_id).filter(Boolean))] as number[];
+  const requestIds = rows.map((r) => r.id);
 
   const [{ data: props }, { data: units }, { data: tenants }, { data: vendors }, notesMap, prices] =
     await Promise.all([
@@ -1398,7 +1406,7 @@ export async function listWorkOrders(params?: {
   const tenantMap = new Map((tenants ?? []).map((t) => [t.id, t]));
   const vendorMap = new Map((vendors ?? []).map((v) => [v.id, v]));
 
-  return (rows ?? []).map((r) => {
+  return rows.map((r) => {
     const p = r.property_id ? propMap.get(r.property_id) : undefined;
     const u = r.unit_id ? unitMap.get(r.unit_id) : undefined;
     const t = r.submitted_by_tenant_id ? tenantMap.get(r.submitted_by_tenant_id) : undefined;
@@ -1416,6 +1424,32 @@ export async function listWorkOrders(params?: {
       landlord_price: prices.landlord.get(r.id) ?? null,
     });
   });
+}
+
+
+/**
+ * Requests the admin dashboard needs, and no more: every open request plus the
+ * closed ones completed on or after `closedSince` (ISO instant). Older closed
+ * requests are history the dashboard never shows, and loading them all makes
+ * the page slower every month. Two bounded row queries, one join pass.
+ */
+export async function listWorkOrdersForDashboard(closedSince: string): Promise<WorkOrder[]> {
+  const [open, closed] = await Promise.all([
+    supabase
+      .from("MaintenanceRequests")
+      .select("*")
+      .in("status", [...WORK_ORDER_OPEN_STATUSES_DB])
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("MaintenanceRequests")
+      .select("*")
+      .eq("status", workOrderStatusToDb("closed"))
+      .gte("closed_at", closedSince)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (open.error) throwSb(open.error);
+  if (closed.error) throwSb(closed.error);
+  return hydrateWorkOrderRows([...(open.data ?? []), ...(closed.data ?? [])], false);
 }
 
 export async function createWorkOrder(input: NewWorkOrder): Promise<WorkOrder> {

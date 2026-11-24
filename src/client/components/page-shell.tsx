@@ -30,7 +30,7 @@ export function PageShell({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border px-6">
+      <header className="flex h-toolbar shrink-0 items-center gap-3 border-b border-border px-6 admin:bg-card">
         {chrome?.onOpenNav ? (
           // Admin workspace only: below `lg` the rail is a drawer, opened from here.
           <button

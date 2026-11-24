@@ -93,7 +93,10 @@ export interface AdminDashboardSources {
   // Core — without these the page cannot be drawn at all.
   properties: Property[];
   units: Unit[];
-  /** Every request, open and closed (closed ones feed "completed" and spend). */
+  /**
+   * Every open request, plus closed ones completed since `dashboardClosedSince`
+   * (they feed "completed", spend, and recent activity and threads).
+   */
   workOrders: WorkOrder[];
 
   // Secondary — each degrades only the tiles and cards that use it.
@@ -280,6 +283,20 @@ function shiftPeriod(period: string, delta: number): string {
 }
 
 /** The three rent periods the dashboard reads: last month, this month, next month. */
+/** How far back closed requests still matter for recent activity and threads. */
+export const CLOSED_REQUEST_LOOKBACK_DAYS = 90;
+
+/**
+ * The oldest completion time a closed request can have and still show on the
+ * dashboard: the start of this year (spend "this year") or the activity
+ * look-back, whichever is earlier. Returned as an ISO instant for the query.
+ */
+export function dashboardClosedSince(now: Date): string {
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const lookBack = new Date(now.getFullYear(), now.getMonth(), now.getDate() - CLOSED_REQUEST_LOOKBACK_DAYS);
+  return (startOfYear < lookBack ? startOfYear : lookBack).toISOString();
+}
+
 export function dashboardChargePeriods(now: Date): string[] {
   const current = periodOf(toDay(now));
   return [shiftPeriod(current, -1), current, shiftPeriod(current, 1)];

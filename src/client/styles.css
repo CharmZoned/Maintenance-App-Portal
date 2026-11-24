@@ -364,12 +364,15 @@
 }
 
 /*
- * Admin workspace scope (Figma "001 - Admin Pages"). The admin chrome and the
- * screens built from that page carry a navy rail and a warm paper background.
- * The token NAMES are unchanged, so every existing utility (bg-card,
- * text-muted-foreground, bg-sidebar…) keeps working inside the scope; only the
- * values differ. Put `lg-admin` on the admin rail, drawer, page shell, and on
- * any portalled surface (menus, sheets) that belongs to them.
+ * Admin workspace scope (Figma "001 - Admin Pages"). The admin workspace
+ * carries a navy rail and a warm paper background. The token NAMES are
+ * unchanged, so every existing utility (bg-card, text-muted-foreground,
+ * bg-sidebar…) keeps working inside the scope; only the values differ.
+ *
+ * `AdminWorkspace` puts `lg-admin` on the document root while the admin shell
+ * is mounted, so every admin page and everything portalled to `body` shares
+ * it. The rail, drawer and page shell also carry the class themselves, which
+ * keeps them correct when rendered outside that shell (the dev preview).
  *
  * Light only: in dark the scope falls through to the app's dark ramp.
  */
@@ -409,6 +412,12 @@
 .lg-admin {
   color: var(--foreground);
 }
+
+/* `admin:` — styles that apply only inside the admin workspace scope. In the
+   admin palette the page is paper and surfaces are white, so shared pieces that
+   paint the page colour elsewhere (list rows, the page header band) lift to the
+   card colour here without changing the other portals. */
+@custom-variant admin (.lg-admin &);
 
 /* Utilities so landlord page titles can use `lg-heading md:lg-display`
    without copying the sizes. Same rules the admin intro already uses. */
