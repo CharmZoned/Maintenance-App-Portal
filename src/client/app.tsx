@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { reportLocation } from "@clawnify/app/client";
 import { useAppState } from "./hooks/use-app-state";
 import { useAuth } from "./hooks/use-auth";
@@ -113,6 +113,14 @@ export function App() {
   const { path, search, route, navigate, replace } = useRouter();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifUnread, setNotifUnread] = useState(false);
+  const notificationsPath = useRef(path);
+  // The bell panel is modal. A route change (rail, tab, or deep link) closes it
+  // so it cannot stay open over the next page.
+  useEffect(() => {
+    if (notificationsPath.current === path) return;
+    notificationsPath.current = path;
+    setNotificationsOpen(false);
+  }, [path]);
   // Admin rail badges (staff shell only) — refreshed on every route change.
   const navCounts = useAdminNavCounts({
     enabled: ready && !isTenant && !isLandlord && !isMaintenance,
