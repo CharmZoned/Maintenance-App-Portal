@@ -2,9 +2,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChoiceGroup, type ChoiceOption } from "@/components/patterns";
 import {
-  formatVisit,
   VISIT_WINDOWS,
   visitFromChoice,
+  visitInfo,
   type VisitChoice,
   type VisitWindowId,
 } from "@/lib/request-status";
@@ -40,7 +40,10 @@ export function VisitWindowFields({
 }) {
   const stored = visitFromChoice(value);
   const error = "error" in stored && value.date ? stored.error : null;
-  const preview = "error" in stored ? "" : formatVisit({ ...stored, status: "scheduled", assigned_staff_id: 0 });
+  const info = "error" in stored ? null : visitInfo({ ...stored, status: "scheduled", assigned_staff_id: 0 });
+  // Scheduling into the past is allowed (recording a visit), but say so.
+  const past = info?.missed ? `${info.day} · ${info.time}` : null;
+  const preview = info && !past ? info.label : "";
   return (
     <>
       <div className="grid gap-1.5">
@@ -97,10 +100,21 @@ export function VisitWindowFields({
       ) : null}
       <p
         id={`${idPrefix}-error`}
-        className={error ? "text-xs leading-4 text-destructive" : "text-xs leading-4 text-muted-foreground"}
+        className={
+          error
+            ? "text-xs leading-4 text-destructive"
+            : past
+              ? "text-xs font-medium leading-4 text-warning"
+              : "text-xs leading-4 text-muted-foreground"
+        }
         aria-live="polite"
       >
-        {error ?? (preview ? `The tenant is told: ${preview}.` : "The tenant is told who is coming and when.")}
+        {error ??
+          (past
+            ? `This window is already over (${past}). Pick a later one, unless you are recording a past visit.`
+            : preview
+              ? `The tenant is told: ${preview}.`
+              : "The tenant is told who is coming and when.")}
       </p>
     </>
   );
