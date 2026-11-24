@@ -347,6 +347,7 @@ export interface Database {
           request_number: string;
           unit_id: number | null;
           submitted_by_tenant_id: number | null;
+          submitted_by_landlord_id: number | null;
           title: string;
           description: string;
           category: string;
@@ -380,6 +381,7 @@ export interface Database {
           request_number?: string;
           unit_id?: number | null;
           submitted_by_tenant_id?: number | null;
+          submitted_by_landlord_id?: number | null;
           title: string;
           description: string;
           category: string;
@@ -447,6 +449,7 @@ export interface Database {
           author_user_id: string | null;
           author_role: Database["public"]["Enums"]["app_role"];
           body: string;
+          request_id: number | null;
         };
         Insert: {
           id?: number;
@@ -455,6 +458,7 @@ export interface Database {
           author_user_id?: string | null;
           author_role: Database["public"]["Enums"]["app_role"];
           body: string;
+          request_id?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["OfficeMessages"]["Insert"]>;
         Relationships: [];
