@@ -40,7 +40,7 @@ export function FoundationGalleryPage() {
           <Badge variant="neutral">Neutral</Badge>
           <Badge variant="info">Info</Badge>
           <Badge variant="success">Paid</Badge>
-          <Badge variant="warning">Urgent</Badge>
+          <Badge variant="warning">High</Badge>
           <Badge variant="destructive">Overdue</Badge>
           <Badge variant="brand">Count</Badge>
         </div>

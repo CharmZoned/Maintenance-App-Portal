@@ -12,6 +12,7 @@ import { ANON_KEY, SERVICE_ROLE_KEY, verifyJwt, type JwtClaims } from "./jwt";
 import { RestApi } from "./rest";
 import { seedWorld, type World } from "./seed";
 import { StorageApi } from "./storage";
+import { demoPhotoBytes } from "./demo-photos";
 
 export interface Emulator {
   url: string;
@@ -86,7 +87,19 @@ export async function startEmulator(opts: { port?: number; quiet?: boolean } = {
     await db.reset();
     auth.reset();
     storage.reset();
-    return o.seed ? seedWorld(db, auth, { demo: o.demo === true }) : null;
+    if (!o.seed) return null;
+    const world = await seedWorld(db, auth, { demo: o.demo === true });
+    // The demo photo rows get their committed sample images, so thumbnails load locally.
+    for (const photo of world.demo?.photos ?? []) {
+      const bytes = demoPhotoBytes(photo.storage_path);
+      if (!bytes) continue;
+      const [row] = await db.admin<{ owner: string | null }>(
+        `select uploaded_by_user_id::text as owner from public."MaintenanceRequestPhotos" where id = $1`,
+        [photo.id],
+      );
+      await storage.putObject("maintenance-photos", photo.storage_path, bytes, photo.content_type, row?.owner ?? null);
+    }
+    return world;
   };
 
   const handler = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {

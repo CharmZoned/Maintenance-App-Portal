@@ -91,7 +91,9 @@ export interface DemoWorld {
    * MaintenanceRequestPhotos rows: what tenants attached when reporting, and the
    * worker's completion photo on the closed job. As with documents, only the
    * rows are seeded; the file at `storage_path` (bucket `maintenance-photos`)
-   * is uploaded by the caller (the staging reset does).
+   * is uploaded by the caller (the staging reset and `pnpm dev:local` do). The
+   * images are committed under tests/emulator/demo-photos/, named like the last
+   * segment of `storage_path` (see ./demo-photos.ts).
    */
   photos: Array<{
     id: number;
@@ -711,6 +713,12 @@ async function seedDemoExtras(db: SeedDb, world: World): Promise<DemoWorld> {
   await photo("closed", closed, sam, "-20 days -23 hours", "demo-disposal-fixed.png", "Running again after the fix.");
   await photo("onHold", onHold, tom, "-9 days", "demo-window-latch.png", "The cracked latch on the left window.");
   await photo("pooled", pooled, tina, "-20 hours", "demo-faucet-drip.png", "Drips even when fully closed.");
+  await photo("scheduled", scheduled, tom, "-2 days", "demo-dishwasher-water.png", "Water left in the bottom after a full cycle.");
+  await photo("inProgress", inProgress, tina, "-1 days -4 hours", "demo-radiator-cold.png", "Cold to the touch, top to bottom.");
+  await photo("inProgress", inProgress, riley, "-1 hours", "demo-radiator-valve.png", "Valve seized; bleeding it now.");
+  // Two photos on the pooled electrical job, so the request page shows "2 of 5".
+  await photo("pooledElectrical", pooledElectrical, tom, "-6 hours", "demo-outlet-scorch.png", "Scorch mark above the top socket.");
+  await photo("pooledElectrical", pooledElectrical, tom, "-5 hours -59 minutes", "demo-outlet-bathroom.png", "The outlet next to the sink.");
 
   // ── Property documents ──────────────────────────────────────────────
   // Rows only (see DemoWorld.documents). Paths follow `{property_id}/{file}`.

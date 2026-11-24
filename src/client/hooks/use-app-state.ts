@@ -279,6 +279,11 @@ export function useAppState(
     return data.listWorkOrders(params);
   }, []);
 
+  /** One request by id (RLS applies; null when the viewer may not read it). */
+  const getWorkOrder = useCallback(async (id: number): Promise<WorkOrder | null> => {
+    return data.getWorkOrder(id);
+  }, []);
+
   const createWorkOrder = useCallback(async (input: NewWorkOrder) => {
     if (!isAdmin) throw new Error("Only admins can create maintenance requests.");
     return data.createWorkOrder(input);
@@ -390,6 +395,7 @@ export function useAppState(
     updateVendor,
     deleteVendor,
     listWorkOrders,
+    getWorkOrder,
     createWorkOrder,
     submitTenantRequest,
     updateWorkOrder,
@@ -402,6 +408,8 @@ export function useAppState(
     getDashboardSummary: data.getDashboardSummary,
     listPayments: data.listPayments,
     listMaintenancePhotos: data.listMaintenancePhotos,
+    listFirstMaintenancePhotos: data.listFirstMaintenancePhotos,
+    listInProgressSince: data.listInProgressSince,
     uploadMaintenancePhoto: async (
       requestId: number,
       file: File,
@@ -424,6 +432,12 @@ export function useAppState(
     listUserAccounts: data.listUserAccounts,
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
     listStaff: data.listStaff,
+    acceptMaintenanceRequest: async (requestId: number) => {
+      if (!isMaintenance) throw new Error("Only a worker can accept jobs.");
+      return data.acceptMaintenanceRequest(requestId);
+    },
+    listAvailableJobLocations: data.listAvailableJobLocations,
+    getAvailableJobLocation: data.getAvailableJobLocation,
     getTenantHomeContext: data.getTenantHomeContext,
     listPropertyDocuments: data.listPropertyDocuments,
     getPropertyDocumentDownloadUrl: data.getPropertyDocumentDownloadUrl,

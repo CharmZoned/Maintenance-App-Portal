@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
 import { UnitDialog } from "./unit-dialog";
 import { PropertyDocumentsPanel } from "./property-documents-panel";
-import { WorkOrderDialog } from "../maintenance/work-order-dialog";
+import { AdminNewRequestDialog } from "../maintenance/admin-new-request-dialog";
+import { PriorityChip, StatusChip } from "@/components/patterns";
+import { priorityLevel, toRequestStatus } from "@/lib/request-status";
 import { PROPERTY_TYPE_LABELS, UNIT_READINESS_LABELS, type Property, type Unit, type WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
 
@@ -185,33 +186,44 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
 
         <section>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[1.0625rem] font-semibold leading-tight">Work orders</h2>
+            <h2 className="text-[1.0625rem] font-semibold leading-tight">Maintenance requests</h2>
             {app.canCreateWorkOrders && (
               <Button size="sm" variant="outline" onClick={() => setWoDialogOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" /> New work order
+                <Plus className="mr-1 h-4 w-4" /> New request
               </Button>
             )}
           </div>
           {workOrders.length === 0 ? (
-            <Card className="p-8 text-center text-sm text-muted-foreground">No work orders for this property.</Card>
+            <Card className="p-8 text-center text-sm text-muted-foreground">No maintenance requests for this property.</Card>
           ) : (
             <Card className="divide-y">
               {workOrders.map((w) => (
-                <div key={w.id} className="flex items-center justify-between gap-4 p-4">
+                <a
+                  key={w.id}
+                  href={`/maintenance/${w.id}`}
+                  onClick={(e) => {
+                    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    e.preventDefault();
+                    navigate(`/maintenance/${w.id}`);
+                  }}
+                  className="flex items-center justify-between gap-4 p-4 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
                   <div className="flex min-w-0 items-start gap-3">
                     <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{w.title}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {[w.unit_name, w.vendor_name, formatDate(w.created_at)].filter(Boolean).join(" · ")}
+                        {[w.unit_name ? `Unit ${w.unit_name}` : "Common area", w.vendor_name, formatDate(w.created_at)]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </p>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Badge variant="neutral" className="capitalize">{w.priority}</Badge>
-                    <Badge variant="secondary" className="capitalize">{w.status.replace("_", " ")}</Badge>
+                    {priorityLevel(w.priority) ? <PriorityChip level={priorityLevel(w.priority)!} /> : null}
+                    <StatusChip status={toRequestStatus(w)} />
                   </div>
-                </div>
+                </a>
               ))}
             </Card>
           )}
@@ -230,11 +242,13 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
         propertyId={property.id}
         unit={editingUnit}
       />
-      <WorkOrderDialog
-        open={woDialogOpen}
-        onOpenChange={(o) => { setWoDialogOpen(o); if (!o) load(); }}
-        defaults={{ property_id: property.id }}
-      />
+      {app.canCreateWorkOrders ? (
+        <AdminNewRequestDialog
+          open={woDialogOpen}
+          onOpenChange={(o) => { setWoDialogOpen(o); if (!o) load(); }}
+          defaults={{ property_id: property.id }}
+        />
+      ) : null}
     </PageShell>
   );
 }

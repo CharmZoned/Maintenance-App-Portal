@@ -2,6 +2,7 @@ import type { OfficeMessage, OfficeThreadSummary, StaffMember, UserAccountRow } 
 import { requestKey, type InboxConversation } from "@/lib/inbox";
 import { displayNameFromEmail, roleLabel } from "@/lib/portal-nav";
 import type { Landlord, MaintenanceComment, Tenant, WorkOrder } from "@/types";
+import { STATUS_LABEL } from "@/lib/request-status";
 
 /** Inbox thread — request-linked uses WO comments; direct uses OfficeMessages. */
 export type MessageThreadKind = "request" | "direct";
@@ -63,7 +64,7 @@ export function workOrderThreadTitle(wo: WorkOrder): string {
 
 export function workOrderPreview(wo: WorkOrder): string {
   if (wo.status === "closed" && wo.resolution_notes?.trim()) {
-    return `Closed · ${wo.resolution_notes.trim()}`;
+    return `${STATUS_LABEL.closed} · ${wo.resolution_notes.trim()}`;
   }
   if (wo.description?.trim()) return wo.description.trim();
   return wo.title;

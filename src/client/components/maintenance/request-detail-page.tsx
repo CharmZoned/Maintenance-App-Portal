@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronLeft } from "lucide-react";
 import { useApp } from "@/context";
-import { LandlordPageIntro, LandlordPortalTitle, LandlordPropertyHeading } from "@/components/landlord";
-import { Badge } from "@/components/ui/badge";
+import { LandlordPortalTitle } from "@/components/landlord";
+import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,91 +10,783 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { PageShell } from "@/components/page-shell";
 import {
-  ErrorRetry,
-  PriorityChip,
-  SkeletonRow,
-  StatusChip,
-  type RequestStatus,
-} from "@/components/patterns";
-import { formatDocumentDate } from "@/lib/landlord-documents";
-import { workOrderStatusFromDb } from "@/lib/mappers";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ConfirmDelete } from "@/components/ui/alert-dialog";
+import * as data from "@/lib/data";
+import type { StaffMember } from "@/lib/data";
 import {
   formatActivityStamp,
+  PRIORITY_OPTIONS,
   priorityLevel,
+  inProgressSince,
+  requestDayWord,
   requestNextStep,
   toRequestStatus,
-  unitPropertyLabel,
+  type RequestStatus,
 } from "@/lib/request-status";
-import { cn, formatDate, toIsoDate } from "@/lib/utils";
-import type {
-  CommentVisibility,
-  MaintenanceComment,
-  MaintenancePhoto,
-  MaintenanceStatusEvent,
-  WorkOrder,
-  WorkOrderStatus,
+import { buildTimeline, type RequestViewerRole } from "@/lib/request-timeline";
+import { cn, toIsoDate } from "@/lib/utils";
+import {
+  MAINTENANCE_CATEGORIES,
+  type MaintenanceComment,
+  type MaintenancePhoto,
+  type MaintenanceStatusEvent,
+  type Vendor,
+  type WorkOrder,
+  type WorkOrderPriority,
+  type WorkOrderStatus,
 } from "@/types";
-import { WorkOrderDialog } from "./work-order-dialog";
-import { TenantRequestDetailPanel } from "./tenant-request-detail-panel";
-import { photoSlotsLeft, takePhotoFiles } from "./work-order-status";
-
-type CompanionKind = "complete" | "hold" | null;
+import {
+  RequestActionsPanel,
+  RequestStatusMenu,
+  WORKER_ACTION_LABEL,
+  WORKER_ACTION_TARGET,
+  workerPrimaryAction,
+} from "./request/request-actions-panel";
+import { RequestHeader } from "./request/request-header";
+import { RequestPhotosCard } from "./request/request-photos-card";
+import {
+  RequestBanner,
+  RequestErrorState,
+  RequestLoadingState,
+  RequestNotAvailableState,
+  type RequestBannerTone,
+} from "./request/request-states";
+import { RequestComposer, RequestTimeline, type RequestTimelineComposer } from "./request/request-timeline";
+import {
+  backLinkFor,
+  notAvailableActionFor,
+  sectionsForRole,
+  viewerRoleFrom,
+  type RequestSectionVisibility,
+} from "./request/role-visibility";
+import {
+  changedPriceFields,
+  MAX_MAINTENANCE_PHOTOS,
+  photoSlotsLeft,
+  takePhotoFiles,
+} from "./work-order-status";
 
 /**
- * N3 Request detail — full page (Figma 03 Request). Role chrome differs:
- * admin actions panel, worker sticky Start→Complete, tenant message + photos,
- * landlord read-only detail (Figma LRQ). Landlord comments stay tenant_visible.
+ * THE request page (route /maintenance/:id) for admin, worker (`maintenance`),
+ * tenant and landlord. Follows the admin desktop frame of Figma
+ * "UPGRADED — Request" (25:987) and shows / hides parts by role through
+ * sectionsForRole() (spec §2.6). There is no per-role layout any more: the
+ * tenant's narrow "Updates" card and the landlord's separate shell are retired.
+ *
+ * Layout: header title = request title with "#MR-…" beside it; content = request
+ * head (back link, summary line, location line), then a two-column grid on
+ * desktop (Details / Photos / Timeline | Actions). Roles without an actions
+ * panel keep the same grid with an empty right track. Tablet: one column with
+ * Actions before Details. Phone: one column, actions last, sticky primary bar.
+ *
+ * No "Landlord conversation" card: request messaging with the landlord is out
+ * of scope per the SOW.
  */
+
+// ── Pure helpers (exported for tests) ──────────────────────────────
+
+/** "#MR-001000", or "#<id>" for rows without a request number. */
+export function requestNumberLabel(order: Pick<WorkOrder, "id" | "request_number">): string {
+  const raw = order.request_number?.trim();
+  if (!raw) return `#${order.id}`;
+  return raw.startsWith("#") ? raw : `#${raw}`;
+}
+
+/**
+ * Landlord toolbar title (#101): breadcrumb on desktop, request number on phone.
+ * Matches LandlordRequestShell from the pre-unify landlord detail page.
+ */
+export function landlordRequestShellTitle(requestNumber?: string) {
+  const crumb = requestNumber
+    ? `Landlord portal / Maintenance / ${requestNumber}`
+    : "Landlord portal / Maintenance";
+  return <LandlordPortalTitle crumb={crumb} mobileLabel={requestNumber ?? "Maintenance"} />;
+}
+
+export function personName(first?: string | null, last?: string | null): string {
+  return [first, last].filter(Boolean).join(" ").trim();
+}
+
+type StaffLookup = ReadonlyMap<number, Pick<StaffMember, "first_name" | "last_name" | "job_title">>;
+
+export function staffById(staff: readonly StaffMember[]): Map<number, StaffMember> {
+  return new Map(staff.map((s) => [s.id, s]));
+}
+
+/** The assigned worker's real name, or null. Never "Assigned (staff)". */
+export function assigneeName(order: Pick<WorkOrder, "assigned_staff_id">, staff: StaffLookup): string | null {
+  if (order.assigned_staff_id == null) return null;
+  const s = staff.get(order.assigned_staff_id);
+  return s ? personName(s.first_name, s.last_name) || null : null;
+}
+
+/**
+ * "Unit 1A · Maple Court"; "Common area · Maple Court" when the request has a
+ * property but no unit; "" when neither is readable (e.g. a pooled job).
+ */
+export function placeLabel(order: Pick<WorkOrder, "unit_name" | "property_name">): string {
+  const unit = order.unit_name?.trim();
+  const property = order.property_name?.trim();
+  if (unit && property) return `Unit ${unit} · ${property}`;
+  if (unit) return `Unit ${unit}`;
+  if (property) return `Common area · ${property}`;
+  return "";
+}
+
+/** Day form: "Today", "Yesterday", or "Sat 14 Nov" — the one shared day word (requestDayWord). */
+export function dayStamp(iso: string | null | undefined, now: Date = new Date()): string {
+  return requestDayWord(iso, now);
+}
+
+/**
+ * Who can be picked in "Assign to": staff whose login is an APPROVED worker
+ * account, plus staff with no login at all. Pending / rejected / suspended
+ * accounts (e.g. a worker still in the approval queue) and admin logins are
+ * left out. The current assignee always stays in the list. Without the
+ * accounts list (it failed to load) every staff record is offered.
+ */
+export function assignableStaff(
+  staff: readonly StaffMember[],
+  accounts: readonly Pick<data.UserAccountRow, "staff_id" | "email" | "role" | "account_status">[],
+  currentAssigneeId: number | null | undefined,
+): StaffMember[] {
+  if (accounts.length === 0) return [...staff];
+  return staff.filter((s) => {
+    if (s.id === currentAssigneeId) return true;
+    const email = s.email?.trim().toLowerCase();
+    const linked = accounts.filter(
+      (a) => a.staff_id === s.id || (email && a.email?.trim().toLowerCase() === email),
+    );
+    if (linked.length === 0) return true;
+    return linked.some((a) => a.role === "maintenance" && a.account_status === "approved");
+  });
+}
+
+/** Staff record behind a login: user_roles.staff_id, else the Staff row with the same email. */
+export function staffIdForAccount(
+  account: Pick<data.UserAccountRow, "staff_id" | "email">,
+  staff: readonly Pick<StaffMember, "id" | "email">[],
+): number | null {
+  if (account.staff_id != null) return account.staff_id;
+  const email = account.email?.trim().toLowerCase();
+  if (!email) return null;
+  return staff.find((s) => s.email?.trim().toLowerCase() === email)?.id ?? null;
+}
+
+/** "$42.00". */
+export function formatPrice(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+/**
+ * Cost value for the viewer (mirrors the price-table RLS):
+ * admin "Worker $42.00 · Landlord $55.00" (only parts that are set);
+ * worker "$42.00"; landlord "$55.00"; null when nothing is recorded.
+ */
+export function costLabelFor(
+  order: Pick<WorkOrder, "worker_price" | "landlord_price">,
+  cost: RequestSectionVisibility["cost"],
+): string | null {
+  if (cost === "worker") return order.worker_price != null ? formatPrice(order.worker_price) : null;
+  if (cost === "landlord") return order.landlord_price != null ? formatPrice(order.landlord_price) : null;
+  if (cost === "both") {
+    const parts = [
+      order.worker_price != null ? `Worker ${formatPrice(order.worker_price)}` : "",
+      order.landlord_price != null ? `Landlord ${formatPrice(order.landlord_price)}` : "",
+    ].filter(Boolean);
+    return parts.length ? parts.join(" · ") : null;
+  }
+  return null;
+}
+
+/** Who added a photo, by the uploader role stored on the row (lightbox caption). */
+export function photoAuthor(
+  photo: MaintenancePhoto,
+  names: { tenant: string; assignee: string | null },
+): string {
+  switch (photo.uploaded_by_role) {
+    case "tenant":
+      return names.tenant || "Tenant";
+    case "maintenance":
+      return names.assignee || "Maintenance";
+    case "landlord":
+      return "Landlord";
+    default:
+      return "Landlord Gopher";
+  }
+}
+
+const COMPLETION_PHOTO_ERROR = "Add at least one photo of the finished work before completing this job.";
+const STATUS_ERROR = "Couldn't change the status. Try again.";
+const SAVE_ERROR = "Couldn't save. Try again.";
+
+// ── Presentational view ────────────────────────────────────────────
+
+export interface RequestDetailViewProps {
+  role: RequestViewerRole;
+  order: WorkOrder;
+  photos: MaintenancePhoto[];
+  comments: MaintenanceComment[];
+  history: MaintenanceStatusEvent[];
+  staff: StaffMember[];
+  viewerStaffId?: number | null;
+  viewerTenantId?: number | null;
+  /** The viewer's auth user id: their own status changes read "You". */
+  viewerUserId?: string | null;
+  /** Auth user id → real name, for status changes (history `changed_by_user_id`). */
+  nameForUserId?: (userId: string) => string | null | undefined;
+  /** Staff id of the only admin login, for admin messages without an author_staff_id. */
+  soleAdminStaffId?: number | null;
+  busy?: boolean;
+  uploading?: boolean;
+  posting?: boolean;
+  /** Photos are fetched on their own: a failure shows in the Photos card only. */
+  photosError?: string | null;
+  onRetryPhotos?: () => void;
+  onBack: () => void;
+  onAssign?: () => void;
+  onChangeStatus?: (next: WorkOrderStatus) => void;
+  onEditVendor?: () => void;
+  onEditCost?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onAddPhotos?: (files: FileList) => void;
+  onSend?: (body: string, internal: boolean) => void | Promise<void>;
+  /** Admin: Reopen on the completed strip. */
+  onReopen?: () => void;
+  /** Worker: accept a job offered to the pool. */
+  onAcceptJob?: () => void;
+  /** Extra nodes (dialogs, banners) rendered inside the page. */
+  children?: ReactNode;
+}
+
+/**
+ * The loaded request page, data in → markup out (no fetching), so every role's
+ * frame can be rendered and tested from plain props.
+ */
+export function RequestDetailView({
+  role,
+  order,
+  photos,
+  comments,
+  history,
+  staff,
+  viewerStaffId = null,
+  viewerTenantId = null,
+  viewerUserId = null,
+  nameForUserId,
+  soleAdminStaffId = null,
+  busy = false,
+  uploading = false,
+  posting = false,
+  photosError = null,
+  onRetryPhotos,
+  onBack,
+  onAssign,
+  onChangeStatus,
+  onEditVendor,
+  onEditCost,
+  onEdit,
+  onDelete,
+  onAddPhotos,
+  onSend,
+  onReopen,
+  onAcceptJob,
+  children,
+}: RequestDetailViewProps) {
+  const visibility = sectionsForRole(role);
+  const back = backLinkFor(role);
+  const staffMap = useMemo(() => staffById(staff), [staff]);
+  const status = toRequestStatus(order);
+  const assignee = assigneeName(order, staffMap);
+  const assigneeStaff = order.assigned_staff_id != null ? staffMap.get(order.assigned_staff_id) : undefined;
+  const reporter = personName(order.tenant_first_name, order.tenant_last_name);
+  const number = requestNumberLabel(order);
+  const completed = status === "Completed";
+  const isWorker = role === "maintenance";
+
+  const entries = useMemo(
+    () =>
+      buildTimeline(
+        order,
+        history,
+        // Landlord (and the read-only viewer): status events only (spec §2.4;
+        // request messaging out of scope).
+        role === "landlord" || role === "viewer" ? [] : comments,
+        {
+          staffById: staffMap,
+          tenantName: reporter || undefined,
+          viewerStaffId,
+          viewerTenantId,
+          viewerUserId,
+          nameForUserId,
+          soleAdminStaffId,
+        },
+        role,
+      ),
+    [
+      order,
+      history,
+      comments,
+      staffMap,
+      reporter,
+      viewerStaffId,
+      viewerTenantId,
+      viewerUserId,
+      nameForUserId,
+      soleAdminStaffId,
+      role,
+    ],
+  );
+  // "Reported by" uses the same person as the timeline's first entry, so the
+  // page never names the reporter two different ways.
+  const reporterLabel = entries.find((e) => e.kind === "reported")?.actor.name ?? reporter;
+
+  const composer: RequestTimelineComposer | null =
+    visibility.composer && !completed && onSend
+      ? { showInternalToggle: visibility.internalToggle, posting, onSend }
+      : null;
+
+  const costLabel = costLabelFor(order, visibility.cost);
+  const actions = visibility.actionsPanel ? (
+    <RequestActionsPanel
+      role={role}
+      visibility={visibility}
+      status={status}
+      dbStatus={order.status}
+      busy={busy}
+      vendorLabel={visibility.vendor ? order.vendor_name?.trim() || null : undefined}
+      costLabel={costLabel}
+      onAssign={onAssign}
+      onChangeStatus={onChangeStatus}
+      onEditVendor={onEditVendor}
+      onEditCost={onEditCost}
+      onEdit={onEdit}
+      onDelete={onDelete}
+      onAcceptJob={onAcceptJob}
+    />
+  ) : null;
+
+  // Landlord keeps #101's portal crumb / mobileLabel in the chrome; other roles
+  // keep the unified phone back + desktop title treatment from this PR.
+  const shellTitle =
+    role === "landlord" ? (
+      landlordRequestShellTitle(number)
+    ) : (
+      <>
+        {/* Phone (Header / Phone, Type = Back): back icon + parent label. The number sits by the title below. */}
+        <span className="flex items-center gap-1 md:hidden">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label={`Back to ${back.label}`}
+            className="-ml-3 flex size-11 shrink-0 items-center justify-center rounded-sm text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          >
+            <ChevronLeft className="size-5" aria-hidden />
+          </button>
+          <span className="min-w-0 flex-1 truncate text-[17px] leading-[22px]">{back.label}</span>
+        </span>
+        <span className="hidden md:inline">{order.title}</span>
+        <span className="hidden pl-2 align-baseline text-sm font-normal tracking-normal text-muted-foreground md:inline">
+          {number}
+        </span>
+      </>
+    );
+
+  return (
+    <PageShell title={shellTitle} titleIsPageHeading={role !== "landlord"}>
+      {/* Phone content is p-4 (16px): pull the shell's 24px padding in by 8px. */}
+      <div className="flex flex-col gap-4 max-md:-mx-2 max-md:-mt-2 md:gap-6">
+        <RequestHeader
+          title={order.title}
+          requestNumber={number}
+          status={status}
+          nextStep={requestNextStep(order, { assigneeName: assignee, startedAt: inProgressSince(history) })}
+          priority={priorityLevel(order.priority)}
+          location={placeLabel(order)}
+          reportedBy={reporterLabel}
+          reportedWhen={dayStamp(order.created_at)}
+          assigneeName={assignee}
+          backLabel={back.label}
+          onBack={onBack}
+          phoneBackInHeader={role !== "landlord"}
+        />
+
+        <div className="flex flex-col gap-4 md:gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+          {actions ? (
+            // Tablet: before Details. Desktop: the right track.
+            <div className="hidden md:block lg:col-start-2 lg:row-start-1">{actions}</div>
+          ) : null}
+          <div className="flex min-w-0 flex-col gap-4 md:gap-6 lg:col-start-1 lg:row-start-1">
+            <RequestDetailsCard
+              order={order}
+              assignee={assignee}
+              assigneeRole={assigneeStaff?.job_title?.trim() || "Maintenance"}
+              status={status}
+              completed={completed}
+              landlordCost={!visibility.actionsPanel && visibility.cost ? costLabel : null}
+            />
+            <RequestPhotosCard
+              photos={photos}
+              max={MAX_MAINTENANCE_PHOTOS}
+              slotsLeft={photoSlotsLeft(photos, isWorker)}
+              canAdd={visibility.addPhotos}
+              uploading={uploading}
+              onAdd={visibility.addPhotos ? onAddPhotos : undefined}
+              uploaderName={(photo) => photoAuthor(photo, { tenant: reporter, assignee })}
+              loadError={photosError}
+              onRetry={onRetryPhotos}
+            />
+            <RequestTimeline
+              entries={entries}
+              formatWhen={formatActivityStamp}
+              composer={composer}
+              readOnlyNote={
+                visibility.composer && completed ? "This request is completed. Messages are closed." : undefined
+              }
+              onReopen={completed ? onReopen : undefined}
+              reopenBusy={busy}
+              composerOnPhone={false}
+            />
+          </div>
+          {actions ? <div className="md:hidden">{actions}</div> : null}
+        </div>
+
+        <PhoneActionBar
+          role={role}
+          visibility={visibility}
+          status={status}
+          dbStatus={order.status}
+          composer={composer}
+          busy={busy}
+          onAssign={onAssign}
+          onChangeStatus={onChangeStatus}
+          onAcceptJob={onAcceptJob}
+        />
+      </div>
+      {children}
+    </PageShell>
+  );
+}
+
+function ReadOnlyField({ label, value, className }: { label: string; value: ReactNode; className?: string }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-0.5", className)}>
+      <p className="text-[13px] font-medium leading-[18px] text-muted-foreground">{label}</p>
+      <div className="text-[15px] leading-[22px] text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function RequestDetailsCard({
+  order,
+  assignee,
+  assigneeRole,
+  status,
+  completed,
+  landlordCost,
+}: {
+  order: WorkOrder;
+  assignee: string | null;
+  assigneeRole: string;
+  status: RequestStatus;
+  completed: boolean;
+  /** Landlord: their price, shown in Details (no actions panel). */
+  landlordCost: string | null;
+}) {
+  return (
+    <section
+      aria-labelledby="request-details-heading"
+      className="flex flex-col gap-4 rounded-md border border-border bg-card p-4 md:p-5"
+    >
+      <h2 id="request-details-heading" className="text-[17px] font-semibold leading-[22px] text-foreground">
+        Details
+      </h2>
+      <ReadOnlyField label="Category" value={order.category || "Not set"} />
+      <ReadOnlyField
+        label="Description"
+        value={<p className="whitespace-pre-wrap break-words">{order.description?.trim() || "No description."}</p>}
+      />
+      <div className="flex flex-col gap-4 md:grid md:grid-cols-3 md:gap-6">
+        <ReadOnlyField
+          label="Entry"
+          value={order.permission_to_enter ? "OK to enter if absent" : "Arrange a time with the tenant"}
+        />
+        <ReadOnlyField label="Assigned to" value={assignee ? `${assignee} · ${assigneeRole}` : "Not assigned yet"} />
+        <ReadOnlyField
+          label="Scheduled"
+          // New = open with nobody assigned: never "scheduled", whatever scheduled_at holds (spec §1).
+          value={(status !== "New" && dayStamp(order.scheduled_at)) || "Not scheduled yet"}
+        />
+      </div>
+      {completed ? (
+        <ReadOnlyField
+          label="What fixed it"
+          value={<p className="whitespace-pre-wrap break-words">{order.resolution_notes?.trim() || "Not recorded"}</p>}
+        />
+      ) : null}
+      {landlordCost ? <ReadOnlyField label="Cost" value={landlordCost} /> : null}
+    </section>
+  );
+}
+
+/**
+ * Phone sticky bottom (spec §4): the message box (staff and tenant), then one
+ * full-width primary (admin and worker). Landlord: nothing sticky.
+ */
+function PhoneActionBar({
+  role,
+  visibility,
+  status,
+  dbStatus,
+  composer,
+  busy,
+  onAssign,
+  onChangeStatus,
+  onAcceptJob,
+}: {
+  role: RequestViewerRole;
+  visibility: RequestSectionVisibility;
+  status: RequestStatus;
+  /** Stored status: the Change status menu ticks this, not the display label. */
+  dbStatus: WorkOrderStatus;
+  /** Phone: the message box sits in this sticky bar, above the primary action. */
+  composer: RequestTimelineComposer | null;
+  busy: boolean;
+  onAssign?: () => void;
+  onChangeStatus?: (next: WorkOrderStatus) => void;
+  onAcceptJob?: () => void;
+}) {
+  let control: ReactNode = null;
+  if (visibility.changeStatus) {
+    control =
+      status === "New" && onAssign ? (
+        <Button size="touch" className="w-full" disabled={busy} onClick={onAssign}>
+          Assign and schedule
+        </Button>
+      ) : (
+        <RequestStatusMenu current={dbStatus} disabled={busy} onChangeStatus={onChangeStatus}>
+          <Button size="touch" className="w-full" disabled={busy}>
+            Change status
+            <ChevronDown aria-hidden />
+          </Button>
+        </RequestStatusMenu>
+      );
+  } else if (visibility.workerStatusActions && role === "maintenance") {
+    const primary = workerPrimaryAction(status);
+    if (status === "New" && onAcceptJob) {
+      control = (
+        <Button size="touch" className="w-full" disabled={busy} onClick={onAcceptJob}>
+          Accept job
+        </Button>
+      );
+    } else if (primary) {
+      control = (
+        <Button
+          size="touch"
+          className="w-full"
+          disabled={busy}
+          onClick={() => onChangeStatus?.(WORKER_ACTION_TARGET[primary])}
+        >
+          {WORKER_ACTION_LABEL[primary]}
+        </Button>
+      );
+    }
+  }
+  if (!control && !composer) return null;
+  return (
+    <div className="sticky bottom-0 z-20 -mx-4 -mb-6 flex flex-col gap-3 border-t border-border bg-background px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 md:hidden">
+      {composer ? <RequestComposer composer={composer} variant="bar" /> : null}
+      {control}
+    </div>
+  );
+}
+
+// ── Short dialogs ──────────────────────────────────────────────────
+
+function ShortDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  children,
+  primaryLabel,
+  primaryDisabled,
+  busy,
+  onPrimary,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  primaryLabel: string;
+  primaryDisabled?: boolean;
+  busy?: boolean;
+  onPrimary: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[400px] max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:max-w-none max-md:rounded-b-none">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!primaryDisabled && !busy) onPrimary();
+          }}
+        >
+          {children}
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="touch"
+              className="w-full md:h-7 md:w-auto md:px-2"
+              disabled={busy}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              size="touch"
+              className="w-full md:h-7 md:w-auto md:px-2"
+              disabled={primaryDisabled || busy}
+            >
+              {primaryLabel}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FieldHint({ children, tone = "muted" }: { children: ReactNode; tone?: "muted" | "error" }) {
+  return (
+    <p className={cn("text-xs leading-4", tone === "error" ? "text-destructive" : "text-muted-foreground")}>
+      {children}
+    </p>
+  );
+}
+
+type DialogKind = "assign" | "hold" | "complete" | "vendor" | "cost" | "edit" | null;
+
+// ── Container ──────────────────────────────────────────────────────
+
 export function RequestDetailPage({
   id,
   navigate,
+  viewerStaffId = null,
+  viewerTenantId = null,
+  viewerUserId = null,
 }: {
   id: number;
   navigate: (to: string) => void;
+  /** Viewer's own Staff id (admin / worker): their timeline entries read "You". */
+  viewerStaffId?: number | null;
+  /** Viewer's own Tenant id: their entries read "You". */
+  viewerTenantId?: number | null;
+  /** Viewer's own auth user id: their status changes read "You". */
+  viewerUserId?: string | null;
 }) {
   const app = useApp();
+  const role = viewerRoleFrom(app);
+  const isWorker = role === "maintenance";
+  const isAdmin = role === "admin";
+  const back = backLinkFor(role);
+
   const [order, setOrder] = useState<WorkOrder | null>(null);
   const [photos, setPhotos] = useState<MaintenancePhoto[]>([]);
   const [comments, setComments] = useState<MaintenanceComment[]>([]);
   const [history, setHistory] = useState<MaintenanceStatusEvent[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [photosError, setPhotosError] = useState<string | null>(null);
+  /** Admin only: auth user id → Staff / Tenant id (who changed a status). */
+  const [accounts, setAccounts] = useState<data.UserAccountRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [editOpen, setEditOpen] = useState(false);
-  const [commentBody, setCommentBody] = useState("");
-  const [commentVisibleToTenant, setCommentVisibleToTenant] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [posting, setPosting] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const [companion, setCompanion] = useState<CompanionKind>(null);
-  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [banner, setBanner] = useState<{ tone: RequestBannerTone; message: string } | null>(null);
+  const [dialog, setDialog] = useState<DialogKind>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  // Dialog fields.
+  const [assignStaffId, setAssignStaffId] = useState<string>("");
+  const [assignDate, setAssignDate] = useState("");
   const [holdReason, setHoldReason] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [vendorChoice, setVendorChoice] = useState("none");
+  const [workerPriceText, setWorkerPriceText] = useState("");
+  const [landlordPriceText, setLandlordPriceText] = useState("");
+  const [costError, setCostError] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editPriority, setEditPriority] = useState<WorkOrderPriority>("normal");
+  const [editDescription, setEditDescription] = useState("");
+  const [editEntry, setEditEntry] = useState(false);
+  const completionPhotoInput = useRef<HTMLInputElement>(null);
 
-  const listWorkOrders = app.listWorkOrders;
+  const getWorkOrder = app.getWorkOrder;
   const listPhotos = app.listMaintenancePhotos;
   const listComments = app.listMaintenanceComments;
   const listHistory = app.listMaintenanceStatusHistory;
-  const setError = app.setError;
-  const isLandlord = app.isLandlord;
+  const listStaff = app.listStaff;
+  const getJobLocation = app.getAvailableJobLocation;
 
-  // Still uses listWorkOrders (no single-id API); ignore stale results if id changes mid-flight.
-  useEffect(() => {
-    let cancelled = false;
-    const loadId = id;
-    (async () => {
-      setLoading(true);
-      setLoadError(null);
+  // One request by id (RLS-trimmed per role). A row the viewer may not read
+  // comes back null → "not available", not an error.
+  const loadSeq = useRef(0);
+  const load = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      const mine = ++loadSeq.current;
+      if (!opts.silent) {
+        setLoading(true);
+        setLoadError(false);
+      }
       try {
-        const list = await listWorkOrders();
-        if (cancelled) return;
-        const found = list.find((w) => w.id === loadId) ?? null;
+        let found = await getWorkOrder(id);
+        if (loadSeq.current !== mine) return;
+        if (found && isWorker && found.status === "open" && found.assigned_staff_id == null && !found.property_name) {
+          // Pooled job: Units/Properties stay closed until accepted; the RPC gives the address.
+          try {
+            const spot = await getJobLocation(found.id);
+            if (spot) {
+              found = {
+                ...found,
+                property_name: spot.property_name ?? spot.street_address ?? null,
+                unit_name: spot.unit_label ?? null,
+              };
+            }
+          } catch {
+            /* address is a nicety */
+          }
+          if (loadSeq.current !== mine) return;
+        }
         if (!found) {
           setOrder(null);
           setPhotos([]);
@@ -101,1368 +794,687 @@ export function RequestDetailPage({
           setHistory([]);
           return;
         }
-        const [p, c, h] = await Promise.all([
-          listPhotos(loadId),
-          listComments(loadId),
-          listHistory(loadId),
+        const [p, c, h, s, a] = await Promise.all([
+          // Photos fail on their own (the Photos card shows Retry).
+          listPhotos(id).then(
+            (rows) => ({ ok: true as const, rows }),
+            () => ({ ok: false as const, rows: [] as MaintenancePhoto[] }),
+          ),
+          listComments(id),
+          listHistory(id),
+          // Names are a nicety: never fail the page over them.
+          listStaff().catch(() => [] as StaffMember[]),
+          isAdmin ? data.listUserAccounts().catch(() => [] as data.UserAccountRow[]) : Promise.resolve([]),
         ]);
-        if (cancelled) return;
+        if (loadSeq.current !== mine) return;
         setOrder(found);
-        setPhotos(p);
-        setComments(
-          isLandlord ? c.filter((row) => row.visibility === "tenant_visible") : c,
-        );
+        setPhotos(p.rows);
+        setPhotosError(p.ok ? null : "We couldn't load the photos.");
+        setComments(c);
         setHistory(h);
-      } catch (err) {
-        if (cancelled) return;
-        const message = (err as Error).message;
-        setLoadError(message);
-        setError(message);
+        setStaff(s);
+        setAccounts(a);
+      } catch {
+        if (loadSeq.current !== mine) return;
+        if (opts.silent) setBanner({ tone: "error", message: "We couldn't refresh this request. Try again." });
+        else setLoadError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (loadSeq.current === mine && !opts.silent) setLoading(false);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    id,
-    reloadKey,
-    listWorkOrders,
-    listPhotos,
-    listComments,
-    listHistory,
-    setError,
-    isLandlord,
-  ]);
+    },
+    [id, isAdmin, isWorker, getJobLocation, getWorkOrder, listPhotos, listComments, listHistory, listStaff],
+  );
 
-  const isWorker = app.canEditWorkOrders && !app.isAdmin;
-  const backLabel = app.isTenant
-    ? "← Requests"
-    : isWorker
-      ? "← My jobs"
-      : "← Maintenance";
-
-  const status = order ? toRequestStatus(order) : null;
-  const nextStep = order ? requestNextStep(order) : undefined;
-  const priority = order ? priorityLevel(order.priority) : null;
-  const location = order
-    ? unitPropertyLabel(order.unit_name, order.property_name) ||
-      (app.isTenant ? "Your home" : "—")
-    : "";
-  // unitPropertyLabel returns "Your home" for empty — override for staff/landlord.
-  const locationDisplay =
-    order &&
-    !order.unit_name?.trim() &&
-    !order.property_name?.trim() &&
-    !app.isTenant
-      ? "—"
-      : location;
-  const reporter = order
-    ? [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ") ||
-      (app.isTenant ? "You" : "—")
-    : "";
-  const requestLabel = order
-    ? order.request_number
-      ? `Request #${order.request_number}`
-      : `Request #${order.id}`
-    : "Request";
-
-  const timeline = useMemo(() => {
-    type TimelineRow = {
-      who: string;
-      when: string;
-      body: string;
-      at: string;
-      visibility?: CommentVisibility;
-    };
-    if (!order) return [] as TimelineRow[];
-    const rows: TimelineRow[] = [];
-    if (order.description) {
-      rows.push({
-        who: app.isTenant ? "You" : reporter || "Reporter",
-        when: formatActivityStamp(order.created_at),
-        body: order.description,
-        at: order.created_at,
-      });
-    }
-    for (const ev of history) {
-      rows.push({
-        who: ev.changed_by_role ? roleLabel(ev.changed_by_role) : "System",
-        when: formatActivityStamp(ev.created_at),
-        body: ev.note?.trim() || `Status → ${ev.to_status}`,
-        at: ev.created_at,
-      });
-    }
-    for (const c of comments) {
-      rows.push({
-        who: commentAuthor(c, app.isTenant),
-        when: formatActivityStamp(c.created_at),
-        body: c.body,
-        at: c.created_at,
-        visibility: c.visibility,
-      });
-    }
-    return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
-  }, [order, history, comments, app.isTenant, reporter]);
-
-  async function runStatus(
-    next: WorkOrder["status"],
-    extra?: Parameters<typeof app.updateWorkOrder>[1],
-  ) {
-    if (!order) return;
-    setActionBusy(true);
+  const retryPhotos = useCallback(async () => {
     try {
-      await app.updateWorkOrder(
-        order.id,
-        { status: next, ...extra },
-        { previousStatus: order.status },
-      );
-      setCompanion(null);
-      setReloadKey((k) => k + 1);
+      const rows = await listPhotos(id);
+      setPhotos(rows);
+      setPhotosError(null);
+    } catch {
+      setPhotosError("We couldn't load the photos.");
+    }
+  }, [id, listPhotos]);
+
+  useEffect(() => {
+    void load();
+    return () => {
+      loadSeq.current += 1;
+    };
+  }, [load]);
+
+  const refresh = useCallback(() => void load({ silent: true }), [load]);
+  const dismissBanner = useCallback(() => setBanner(null), []);
+  const success = (message: string) => setBanner({ tone: "success", message });
+  const failure = (message: string) => setBanner({ tone: "error", message });
+
+  const staffMap = useMemo(() => staffById(staff), [staff]);
+  const goBack = () => navigate(back.to);
+
+  // The viewer's own Staff record. An admin login is usually not linked to a
+  // Staff row by id, so match it by email through the accounts list.
+  const viewerAccount = useMemo(
+    () => (viewerUserId ? accounts.find((a) => a.user_id === viewerUserId) ?? null : null),
+    [accounts, viewerUserId],
+  );
+  const myStaffId = viewerStaffId ?? (viewerAccount ? staffIdForAccount(viewerAccount, staff) : null);
+  // Admin messages saved without an author_staff_id: name them when there is one admin.
+  const soleAdminStaffId = useMemo(() => {
+    const admins = accounts.filter((a) => a.role === "admin" && a.account_status === "approved");
+    return admins.length === 1 ? staffIdForAccount(admins[0], staff) : null;
+  }, [accounts, staff]);
+
+  // Status changes carry the auth user id. The timeline shows the viewer's own
+  // as "You" (with their real initials); admins also resolve other staff and
+  // the reporting tenant through the accounts list.
+  const tenantIdOfOrder = order?.tenant_id ?? null;
+  const tenantNameOfOrder = order ? personName(order.tenant_first_name, order.tenant_last_name) : "";
+  const nameForUserId = useMemo(() => {
+    const byUser = new Map(accounts.map((a) => [a.user_id, a]));
+    const myName =
+      role === "tenant"
+        ? tenantNameOfOrder || null
+        : myStaffId != null
+          ? assigneeName({ assigned_staff_id: myStaffId }, staffMap)
+          : null;
+    return (userId: string): string | null => {
+      if (viewerUserId && userId === viewerUserId) return myName;
+      const account = byUser.get(userId);
+      if (!account) return null;
+      const staffId = staffIdForAccount(account, staff);
+      if (staffId != null) return assigneeName({ assigned_staff_id: staffId }, staffMap);
+      if (account.tenant_id != null && account.tenant_id === tenantIdOfOrder) return tenantNameOfOrder || null;
+      return null;
+    };
+  }, [accounts, viewerUserId, staff, staffMap, tenantIdOfOrder, tenantNameOfOrder, role, myStaffId]);
+
+  const unresolvedTitle = role === "landlord" ? landlordRequestShellTitle() : "Request";
+  const unresolvedHeading = role !== "landlord";
+
+  if (loading) {
+    return (
+      <PageShell title={unresolvedTitle} titleIsPageHeading={unresolvedHeading}>
+        <RequestLoadingState withActionsPanel={sectionsForRole(role).actionsPanel} />
+      </PageShell>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <PageShell title={unresolvedTitle} titleIsPageHeading={unresolvedHeading}>
+        <RequestErrorState backLabel={back.label} onBack={goBack} onRetry={() => void load()} />
+      </PageShell>
+    );
+  }
+
+  if (!order) {
+    const action = notAvailableActionFor(role);
+    return (
+      <PageShell title={unresolvedTitle} titleIsPageHeading={unresolvedHeading}>
+        <RequestNotAvailableState
+          backLabel={back.label}
+          onBack={goBack}
+          actionLabel={action.label}
+          onAction={() => navigate(action.to)}
+        />
+      </PageShell>
+    );
+  }
+
+  const current = order;
+  const location = placeLabel(current);
+  const dialogContext = [current.title, location].filter(Boolean).join(" · ");
+  const assignee = assigneeName(current, staffMap);
+  const workerPhotoCount = photos.filter((p) => p.uploaded_by_role === "maintenance").length;
+  const needsCompletionPhoto = isWorker && workerPhotoCount === 0;
+
+  async function applyStatus(
+    next: WorkOrderStatus,
+    extra: Parameters<typeof app.updateWorkOrder>[1],
+    message: string,
+  ) {
+    setBusy(true);
+    try {
+      await app.updateWorkOrder(current.id, { status: next, ...extra }, { previousStatus: current.status });
+      setDialog(null);
+      success(current.status === "closed" && next !== "closed" ? "Request reopened." : message);
+      refresh();
     } catch (err) {
-      setError((err as Error).message);
+      const raw = (err as Error)?.message ?? "";
+      failure(next === "closed" && /photo/i.test(raw) ? COMPLETION_PHOTO_ERROR : STATUS_ERROR);
     } finally {
-      setActionBusy(false);
+      setBusy(false);
     }
   }
 
-  function openComplete() {
-    setResolutionNotes(order?.resolution_notes?.trim() || "");
-    setCompanion("complete");
+  function openAssign() {
+    setAssignStaffId(current.assigned_staff_id != null ? String(current.assigned_staff_id) : "");
+    setAssignDate(current.scheduled_at?.slice(0, 10) || toIsoDate(new Date()));
+    setDialog("assign");
   }
 
   function openHold() {
-    setHoldReason(order?.hold_reason?.trim() || "");
-    setFollowUpDate(
-      order?.next_follow_up_date?.slice(0, 10) || toIsoDate(new Date()),
+    setHoldReason(current.hold_reason?.trim() || "");
+    setFollowUpDate(current.next_follow_up_date?.slice(0, 10) || "");
+    setDialog("hold");
+  }
+
+  function openComplete() {
+    setResolutionNotes(current.resolution_notes?.trim() || "");
+    setDialog("complete");
+  }
+
+  function changeStatus(next: WorkOrderStatus) {
+    if (busy) return;
+    switch (next) {
+      case "on_hold":
+        openHold();
+        return;
+      case "closed":
+        openComplete();
+        return;
+      case "scheduled":
+        if (current.assigned_staff_id == null || !current.scheduled_at) {
+          openAssign();
+          return;
+        }
+        void applyStatus("scheduled", {}, `${assignee ?? "Worker"} assigned for ${dayStamp(current.scheduled_at)}.`);
+        return;
+      case "open":
+        // "New" means not assigned yet (spec §1), so clear the assignee.
+        void applyStatus("open", { assigned_staff_id: null }, "Moved back to New.");
+        return;
+      case "in_progress":
+        void applyStatus("in_progress", {}, current.status === "on_hold" ? "Work resumed." : "Work started.");
+        return;
+    }
+  }
+
+  async function confirmAssign() {
+    const staffId = Number(assignStaffId);
+    if (!staffId || !assignDate) return;
+    const name = assigneeName({ assigned_staff_id: staffId }, staffMap) ?? "Worker";
+    await applyStatus(
+      "scheduled",
+      { assigned_staff_id: staffId, scheduled_at: assignDate },
+      `${name} assigned for ${dayStamp(assignDate)}.`,
     );
-    setCompanion("hold");
   }
 
-  async function confirmCompanion() {
-    if (companion === "complete") {
-      const notes = resolutionNotes.trim();
-      if (!notes) {
-        setError("Closing requires resolution notes.");
-        return;
+  async function confirmHold() {
+    const reason = holdReason.trim();
+    if (!reason || !followUpDate) return;
+    await applyStatus(
+      "on_hold",
+      { hold_reason: reason, next_follow_up_date: followUpDate },
+      `Put on hold until ${dayStamp(followUpDate)}.`,
+    );
+  }
+
+  async function confirmComplete() {
+    const notes = resolutionNotes.trim();
+    if (!notes || needsCompletionPhoto) return;
+    await applyStatus("closed", { resolution_notes: notes }, "Marked completed.");
+  }
+
+  async function addPhotos(files: FileList | File[]) {
+    const picked = takePhotoFiles(files, photoSlotsLeft(photos, isWorker));
+    if (picked.length === 0) return;
+    setUploading(true);
+    let added = 0;
+    try {
+      for (const file of picked) {
+        await app.uploadMaintenancePhoto(current.id, file);
+        added += 1;
       }
-      await runStatus("closed", { resolution_notes: notes });
-      return;
-    }
-    if (companion === "hold") {
-      const reason = holdReason.trim();
-      if (!reason) {
-        setError("On hold requires a reason.");
-        return;
-      }
-      if (!followUpDate) {
-        setError("On hold requires a follow-up date.");
-        return;
-      }
-      await runStatus("on_hold", {
-        hold_reason: reason,
-        next_follow_up_date: followUpDate,
-      });
+      success(added === 1 ? "Photo added." : `${added} photos added.`);
+    } catch {
+      failure("Couldn't add the photo. Try again.");
+    } finally {
+      setUploading(false);
+      if (added > 0) refresh();
     }
   }
 
-  async function postComment() {
-    if (!order || !commentBody.trim() || app.isLandlord) return;
+  async function send(body: string, internal: boolean) {
     setPosting(true);
     try {
-      const visibility: CommentVisibility = app.isTenant
-        ? "tenant_visible"
-        : commentVisibleToTenant
-          ? "tenant_visible"
-          : "internal";
-      await app.addMaintenanceComment(order.id, commentBody.trim(), visibility);
-      setCommentBody("");
-      if (!app.isTenant) setCommentVisibleToTenant(false);
-      setReloadKey((k) => k + 1);
+      const staffViewer = role === "admin" || role === "maintenance";
+      await app.addMaintenanceComment(current.id, body, staffViewer && internal ? "internal" : "tenant_visible");
+      success("Message sent.");
+      refresh();
     } catch (err) {
-      setError((err as Error).message);
+      failure("Couldn't send your message. Try again.");
+      // Rethrow so the composer keeps the typed text.
+      throw err;
     } finally {
       setPosting(false);
     }
   }
 
-  async function onAddPhotos(files: FileList | null) {
-    if (!order || app.isLandlord || !files?.length) return;
-    const picked = takePhotoFiles(files, photoSlotsLeft(photos, isWorker));
-    if (picked.length === 0) return;
-    setPhotoBusy(true);
+  function openVendor() {
+    setVendorChoice(current.vendor_id != null ? String(current.vendor_id) : "none");
+    setDialog("vendor");
+  }
+
+  async function saveVendor() {
+    setBusy(true);
     try {
-      for (const file of picked) {
-        await app.uploadMaintenancePhoto(order.id, file);
-      }
-      setReloadKey((k) => k + 1);
-    } catch (err) {
-      setError((err as Error).message);
+      await app.updateWorkOrder(current.id, { vendor_id: vendorChoice === "none" ? null : Number(vendorChoice) });
+      setDialog(null);
+      success("Vendor updated.");
+      refresh();
+    } catch {
+      failure(SAVE_ERROR);
     } finally {
-      setPhotoBusy(false);
+      setBusy(false);
     }
   }
 
-  if (app.isLandlord) {
-    return (
-      <LandlordRequestDetail
-        loading={loading}
-        loadError={loadError}
-        order={order}
-        photos={photos}
-        comments={comments}
-        history={history}
-        onRetry={() => setReloadKey((k) => k + 1)}
-        navigate={navigate}
-      />
-    );
+  function openCost() {
+    setWorkerPriceText(current.worker_price != null ? String(current.worker_price) : "");
+    setLandlordPriceText(current.landlord_price != null ? String(current.landlord_price) : "");
+    setCostError(null);
+    setDialog("cost");
   }
 
-  if (loading) {
-    return (
-      <PageShell title="Request" meta="Loading…">
-        <div className="space-y-3" aria-busy="true">
-          <SkeletonRow />
-          <SkeletonRow />
-        </div>
-      </PageShell>
-    );
+  async function saveCost() {
+    let patch: ReturnType<typeof changedPriceFields>;
+    try {
+      patch = changedPriceFields({ workerPrice: workerPriceText, landlordPrice: landlordPriceText }, current);
+    } catch (err) {
+      setCostError((err as Error).message);
+      return;
+    }
+    if (Object.keys(patch).length === 0) {
+      setDialog(null);
+      return;
+    }
+    setBusy(true);
+    try {
+      await app.updateWorkOrder(current.id, patch);
+      setDialog(null);
+      success("Cost saved.");
+      refresh();
+    } catch {
+      failure(SAVE_ERROR);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  if (loadError) {
-    return (
-      <PageShell title="Request" meta="Couldn’t load">
-        <ErrorRetry message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
-      </PageShell>
-    );
+  function openEdit() {
+    setEditTitle(current.title);
+    setEditCategory(current.category || "");
+    setEditPriority(current.priority);
+    setEditDescription(current.description ?? "");
+    setEditEntry(current.permission_to_enter);
+    setDialog("edit");
   }
 
-  if (!order) {
-    return (
-      <PageShell title="Request" meta="Not available">
-        <div className="rounded-md border border-border bg-card p-6">
-          <p className="text-sm font-medium text-foreground">This request isn’t available</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            It may have been removed, or you don’t have access.
-          </p>
-          <Button className="mt-4" variant="secondary" onClick={() => navigate("/maintenance")}>
-            Back to list
-          </Button>
-        </div>
-      </PageShell>
-    );
+  async function saveEdit() {
+    const title = editTitle.trim();
+    if (!title) return;
+    setBusy(true);
+    try {
+      await app.updateWorkOrder(current.id, {
+        title,
+        category: editCategory || current.category,
+        priority: editPriority,
+        description: editDescription,
+        permission_to_enter: editEntry,
+      });
+      setDialog(null);
+      success("Details saved.");
+      refresh();
+    } catch {
+      failure(SAVE_ERROR);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // Tenant full-page detail — text + chips panel (Figma Requests detail).
-  if (app.isTenant) {
-    return (
-      <PageShell
-        title={requestLabel}
-        meta={[order.title, order.unit_name ? `Unit ${order.unit_name}` : null, order.property_name]
-          .filter(Boolean)
-          .join(" · ")}
-        width="max-w-3xl"
+  async function acceptJob() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await app.acceptMaintenanceRequest(current.id);
+      success("Job accepted.");
+      // Keep `busy` until the reload lands: otherwise Accept job is clickable
+      // again on the stale (still pooled) row and a second accept fails.
+      await load({ silent: true });
+    } catch (err) {
+      const raw = (err as Error)?.message ?? "";
+      failure(/taken/i.test(raw) ? "Someone else has already taken this job." : "Couldn't accept the job. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function reopen() {
+    if (busy) return;
+    void applyStatus(current.assigned_staff_id != null ? "scheduled" : "open", {}, "Request reopened.");
+  }
+
+  async function confirmDelete() {
+    setBusy(true);
+    try {
+      await app.deleteWorkOrder(current.id);
+      app.setNotice("Request deleted.");
+      navigate("/maintenance");
+    } catch {
+      failure("Couldn't delete the request. Try again.");
+      setBusy(false);
+    }
+  }
+
+  const visibility = sectionsForRole(role);
+  const closeDialog = (open: boolean) => {
+    if (!open) setDialog(null);
+  };
+  const vendors: Vendor[] = app.vendors;
+
+  return (
+    <RequestDetailView
+      role={role}
+      order={current}
+      photos={photos}
+      comments={comments}
+      history={history}
+      staff={staff}
+      viewerStaffId={myStaffId}
+      viewerTenantId={viewerTenantId}
+      viewerUserId={viewerUserId}
+      soleAdminStaffId={soleAdminStaffId}
+      busy={busy}
+      uploading={uploading}
+      posting={posting}
+      onBack={goBack}
+      onAssign={visibility.changeStatus && app.canAcceptAndSchedule ? openAssign : undefined}
+      onChangeStatus={visibility.changeStatus || visibility.workerStatusActions ? changeStatus : undefined}
+      onEditVendor={visibility.costVendorEditable ? openVendor : undefined}
+      onEditCost={visibility.costVendorEditable ? openCost : undefined}
+      onEdit={visibility.editAndDelete ? openEdit : undefined}
+      onDelete={visibility.editAndDelete ? () => setDeleteOpen(true) : undefined}
+      onAddPhotos={visibility.addPhotos ? (files) => void addPhotos(files) : undefined}
+      onSend={visibility.composer ? send : undefined}
+      onReopen={visibility.changeStatus ? reopen : undefined}
+      onAcceptJob={
+        isWorker && current.status === "open" && current.assigned_staff_id == null ? () => void acceptJob() : undefined
+      }
+      nameForUserId={nameForUserId}
+      photosError={photosError}
+      onRetryPhotos={() => void retryPhotos()}
+    >
+
+      <ShortDialog
+        open={dialog === "assign"}
+        onOpenChange={closeDialog}
+        title="Assign and schedule"
+        description={dialogContext}
+        primaryLabel="Assign"
+        primaryDisabled={!assignStaffId || !assignDate}
+        busy={busy}
+        onPrimary={() => void confirmAssign()}
       >
-        <button
-          type="button"
-          onClick={() => navigate("/maintenance")}
-          className="text-[13px] font-medium text-brand-text hover:underline"
-        >
-          ← Requests
-        </button>
-        <div className="mt-4">
-          <TenantRequestDetailPanel
-            order={order}
-            navigate={navigate}
-            extras={{ photos, comments, history }}
+        <div className="grid gap-1.5">
+          <Label htmlFor="assign-staff">Assign to</Label>
+          <Select value={assignStaffId} onValueChange={setAssignStaffId}>
+            <SelectTrigger id="assign-staff" className="h-11 md:h-8">
+              <SelectValue placeholder="Choose a person" />
+            </SelectTrigger>
+            <SelectContent>
+              {assignableStaff(staff, accounts, current.assigned_staff_id).map((s) => (
+                <SelectItem key={s.id} value={String(s.id)}>
+                  {personName(s.first_name, s.last_name)} · {s.job_title?.trim() || "Maintenance"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="assign-date">Date</Label>
+          <Input
+            id="assign-date"
+            type="date"
+            className="h-11 md:h-8"
+            value={assignDate}
+            onChange={(e) => setAssignDate(e.target.value)}
+          />
+          <FieldHint>The tenant is told who is coming and when.</FieldHint>
+        </div>
+      </ShortDialog>
+
+      <ShortDialog
+        open={dialog === "hold"}
+        onOpenChange={closeDialog}
+        title="Put on hold"
+        description="The tenant sees the reason and the follow-up date."
+        primaryLabel="Put on hold"
+        primaryDisabled={!holdReason.trim() || !followUpDate}
+        busy={busy}
+        onPrimary={() => void confirmHold()}
+      >
+        <div className="grid gap-1.5">
+          <Label htmlFor="hold-reason">Reason</Label>
+          <Input
+            id="hold-reason"
+            className="h-11 md:h-8"
+            value={holdReason}
+            onChange={(e) => setHoldReason(e.target.value)}
+            placeholder="e.g. Waiting for part"
           />
         </div>
-        <aside
-          className="mt-6 rounded-sm bg-warning-tint px-5 py-4 text-sm text-warning"
-          role="note"
-        >
-          Immediate danger? Contact local emergency services. Do not wait for a portal
-          response.
-        </aside>
-      </PageShell>
-    );
-  }
+        <div className="grid gap-1.5">
+          <Label htmlFor="hold-follow-up">Follow-up date</Label>
+          <Input
+            id="hold-follow-up"
+            type="date"
+            className="h-11 md:h-8"
+            value={followUpDate}
+            onChange={(e) => setFollowUpDate(e.target.value)}
+          />
+        </div>
+      </ShortDialog>
 
-  const primaryAdminAction =
-    status === "New"
-      ? "Assign and schedule"
-      : status === "In progress"
-        ? "Complete"
-        : status === "Assigned"
-          ? "Start work"
-          : null;
-
-  return (
-    <PageShell
-      title={requestLabel}
-      meta={[order.title, order.unit_name ? `Unit ${order.unit_name}` : null, order.property_name]
-        .filter(Boolean)
-        .join(" · ")}
-      actions={
-        app.isAdmin && primaryAdminAction ? (
-          <Button
-            variant="brand"
-            size="header"
-            disabled={actionBusy}
-            onClick={() => {
-              if (primaryAdminAction === "Assign and schedule") {
-                setEditOpen(true);
-              } else if (primaryAdminAction === "Complete") {
-                openComplete();
-              } else if (primaryAdminAction === "Start work") {
-                void runStatus("in_progress");
-              }
-            }}
-          >
-            {primaryAdminAction}
-          </Button>
-        ) : null
-      }
-      width="max-w-7xl"
-    >
-      <button
-        type="button"
-        onClick={() => navigate("/maintenance")}
-        className="text-[13px] font-medium text-brand-text hover:underline"
+      <ShortDialog
+        open={dialog === "complete"}
+        onOpenChange={closeDialog}
+        title="Mark completed"
+        description={dialogContext}
+        primaryLabel="Mark completed"
+        primaryDisabled={!resolutionNotes.trim() || needsCompletionPhoto || uploading}
+        busy={busy}
+        onPrimary={() => void confirmComplete()}
       >
-        {backLabel}
-      </button>
-
-      <div className="mt-4 flex flex-col gap-6 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            {status ? <StatusChip status={status} nextStep={nextStep} /> : null}
-            {priority ? <PriorityChip level={priority} /> : null}
-          </div>
-
-          <section className="rounded-md border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold text-foreground">Details</h2>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Location" value={locationDisplay || "—"} />
-              <Field
-                label={app.isTenant ? "Reported" : "Reported by"}
-                value={`${app.isTenant ? "You" : reporter || "—"} · ${formatActivityStamp(order.created_at)}`}
-              />
-              <Field label="Category" value={order.category || "—"} />
-              {(status === "Assigned" || status === "In progress" || app.isTenant) && (
-                <Field
-                  label="Assigned"
-                  value={
-                    // Stub: listWorkOrders does not join Staff names yet.
-                    order.assigned_staff_id ? "Assigned (staff)" : "Not yet assigned"
-                  }
-                />
-              )}
-              <Field
-                label="Scheduled"
-                value={
-                  order.scheduled_at
-                    ? formatDate(order.scheduled_at, {
-                        weekday: "short",
-                        day: "numeric",
-                        month: "short",
-                      })
-                    : "—"
-                }
-              />
-            </div>
-            {order.description ? (
-              <div className="mt-4">
-                <p className="text-xs font-medium text-muted-foreground">Description</p>
-                <p className="mt-1 text-sm text-foreground">{order.description}</p>
-              </div>
-            ) : null}
-          </section>
-
-          <section className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              {!app.isLandlord && photoSlotsLeft(photos, isWorker) > 0 ? (
-                <label className="inline-flex">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="sr-only"
-                    disabled={photoBusy}
-                    onChange={(e) => {
-                      void onAddPhotos(e.target.files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <span className="inline-flex h-11 cursor-pointer items-center justify-center rounded-sm border border-border bg-secondary px-4 text-sm font-medium shadow-edge">
-                    {photoBusy ? "Uploading…" : "Add photos"}
-                  </span>
-                </label>
-              ) : null}
-              <span className="text-xs text-muted-foreground">
-                {photos.length} {photos.length === 1 ? "photo" : "photos"}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {photos.map((p) =>
-                p.url ? (
-                  <a
-                    key={p.id}
-                    href={p.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="size-[72px] overflow-hidden rounded-md bg-muted"
-                  >
-                    <img
-                      src={p.url}
-                      alt={p.caption || "Photo"}
-                      className="size-full object-cover"
-                    />
-                  </a>
-                ) : (
-                  <div
-                    key={p.id}
-                    className="flex size-[72px] items-center justify-center rounded-md bg-muted text-[10px] text-muted-foreground"
-                  >
-                    —
-                  </div>
-                ),
-              )}
-              {photos.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No photos yet.</p>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="rounded-md border border-border bg-card p-4">
-            <h2 className="text-sm font-semibold text-foreground">Timeline</h2>
-            {timeline.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">No activity yet.</p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {timeline.map((row, i) => (
-                  <li key={`${row.at}-${i}`}>
-                    <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-                      <span>
-                        {row.who} · {row.when}
-                      </span>
-                      {!app.isTenant && row.visibility ? (
-                        <Badge variant="outline">
-                          {row.visibility === "internal"
-                            ? "Internal"
-                            : "Tenant visible"}
-                        </Badge>
-                      ) : null}
-                    </p>
-                    <p className="text-[13px] text-foreground">{row.body}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {!app.isLandlord ? (
-              <div className="mt-4 space-y-2 border-t border-border pt-3">
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={commentBody}
-                    onChange={(e) => setCommentBody(e.target.value)}
-                    placeholder="Send a message…"
-                    className="h-8 flex-1"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        void postComment();
-                      }
-                    }}
-                  />
-                  <Button
-                    size="header"
-                    disabled={posting || !commentBody.trim()}
-                    onClick={() => void postComment()}
-                  >
-                    Send
-                  </Button>
-                </div>
-                {!app.isTenant ? (
-                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <input
-                      type="checkbox"
-                      className="size-4"
-                      checked={commentVisibleToTenant}
-                      onChange={(e) => setCommentVisibleToTenant(e.target.checked)}
-                    />
-                    Visible to tenant
-                  </label>
-                ) : null}
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Read-only — tenant-visible messages only.
-              </p>
-            )}
-          </section>
-        </div>
-
-        {(app.isAdmin || isWorker) && (
-          <aside className="w-full shrink-0 space-y-3 rounded-md border border-border bg-card p-4 lg:w-[280px]">
-            <h2 className="text-sm font-semibold text-foreground">Actions</h2>
-            {app.isAdmin && (
-              <>
-                <Button
-                  className="w-full"
-                  disabled={actionBusy}
-                  onClick={() => setEditOpen(true)}
-                >
-                  {status === "New" ? "Assign and schedule" : "Edit / assign"}
-                </Button>
-                <Button
-                  className="w-full"
-                  variant="secondary"
-                  disabled={actionBusy}
-                  onClick={() => setEditOpen(true)}
-                >
-                  Change status
-                </Button>
-                <Button
-                  className="w-full"
-                  variant="secondary"
-                  disabled={actionBusy}
-                  onClick={() => setEditOpen(true)}
-                >
-                  Vendor
-                </Button>
-                <Button
-                  className="w-full"
-                  variant="secondary"
-                  disabled={actionBusy}
-                  onClick={() => setEditOpen(true)}
-                >
-                  Cost
-                </Button>
-                <Button
-                  className="w-full"
-                  variant="ghost"
-                  disabled={actionBusy}
-                  onClick={() => setEditOpen(true)}
-                >
-                  Edit details
-                </Button>
-                {/* Delete stays behind edit dialog confirm — no one-click destroy. */}
-              </>
-            )}
-            {isWorker && (
-              <>
-                {(status === "Assigned" || status === "New") && (
-                  <Button
-                    className="h-11 w-full"
-                    disabled={actionBusy}
-                    onClick={() => void runStatus("in_progress")}
-                  >
-                    Start work
-                  </Button>
-                )}
-                {status === "In progress" && (
-                  <Button
-                    className="h-11 w-full"
-                    disabled={actionBusy}
-                    onClick={openComplete}
-                  >
-                    Complete
-                  </Button>
-                )}
-                {status === "On hold" && (
-                  <Button
-                    className="h-11 w-full"
-                    disabled={actionBusy}
-                    onClick={() => void runStatus("in_progress")}
-                  >
-                    Resume
-                  </Button>
-                )}
-                {status !== "On hold" && status !== "Completed" && (
-                  <Button
-                    className="h-11 w-full"
-                    variant="secondary"
-                    disabled={actionBusy}
-                    onClick={openHold}
-                  >
-                    Put on hold
-                  </Button>
-                )}
-                <p className="text-[11px] text-muted-foreground">
-                  Primary advances: Start work → Complete
-                </p>
-              </>
-            )}
-          </aside>
-        )}
-      </div>
-
-      <WorkOrderDialog
-        open={editOpen}
-        onOpenChange={(o) => {
-          setEditOpen(o);
-          // Single refresh path on close — picks up dialog comments/photos
-          // (those don't call onSaved) without double-loading after Save.
-          if (!o) setReloadKey((k) => k + 1);
-        }}
-        workOrder={order}
-      />
-
-      <Dialog
-        open={companion != null}
-        onOpenChange={(o) => {
-          if (!o) setCompanion(null);
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {companion === "complete" ? "Complete request" : "Put on hold"}
-            </DialogTitle>
-          </DialogHeader>
-          {companion === "complete" ? (
-            <div className="grid gap-2">
-              <Label htmlFor="resolution-notes">Resolution notes</Label>
-              <Textarea
-                id="resolution-notes"
-                value={resolutionNotes}
-                onChange={(e) => setResolutionNotes(e.target.value)}
-                rows={3}
-                placeholder="What fixed it?"
-              />
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="hold-reason">Hold reason</Label>
-                <Input
-                  id="hold-reason"
-                  value={holdReason}
-                  onChange={(e) => setHoldReason(e.target.value)}
-                  placeholder="Waiting on parts…"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="follow-up-date">Follow-up date</Label>
-                <Input
-                  id="follow-up-date"
-                  type="date"
-                  value={followUpDate}
-                  onChange={(e) => setFollowUpDate(e.target.value)}
-                />
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setCompanion(null)} disabled={actionBusy}>
-              Cancel
-            </Button>
+        {needsCompletionPhoto ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-sm bg-muted px-3 py-2.5">
+            <p className="text-sm leading-5 text-foreground">Add a photo of the finished work first.</p>
+            <input
+              ref={completionPhotoInput}
+              type="file"
+              accept="image/*"
+              multiple
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden
+              onChange={(e) => {
+                if (e.target.files?.length) void addPhotos(Array.from(e.target.files));
+                e.target.value = "";
+              }}
+            />
             <Button
-              disabled={
-                actionBusy ||
-                (companion === "complete"
-                  ? !resolutionNotes.trim()
-                  : !holdReason.trim() || !followUpDate)
-              }
-              onClick={() => void confirmCompanion()}
-            >
-              {companion === "complete" ? "Complete" : "Put on hold"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </PageShell>
-  );
-}
-
-/**
- * Landlord request detail (Figma LRQ 2048:4352 desktop, 2048:4464 completed,
- * 2048:4581 phone, plus loading 2048:7074 and not-available 2048:7148).
- *
- * Read-only. The timeline is the public status trail plus tenant_visible
- * comments. The landlord–staff thread and its composer stay off this screen.
- */
-export function LandlordRequestDetail({
-  loading,
-  loadError,
-  order,
-  photos,
-  comments,
-  history,
-  onRetry,
-  navigate,
-}: {
-  loading: boolean;
-  loadError: string | null;
-  order: WorkOrder | null;
-  photos: MaintenancePhoto[];
-  comments: MaintenanceComment[];
-  history: MaintenanceStatusEvent[];
-  onRetry: () => void;
-  navigate: (to: string) => void;
-}) {
-  const requestNumber = order ? requestNumberLabel(order) : undefined;
-
-  if (loading) {
-    return (
-      <LandlordRequestShell requestNumber={requestNumber}>
-        <BackToMaintenance navigate={navigate} />
-        <div className="flex flex-col gap-3" aria-busy="true">
-          <Bone className="h-3 w-24" />
-          <Bone className="h-8 w-full max-w-md md:h-9" />
-          <Bone className="h-6 w-28" />
-          <Bone className="h-3 w-full max-w-sm" />
-        </div>
-        <div className="rounded-md border border-border bg-card p-4 md:p-6">
-          <Bone className="h-4 w-28" />
-          <div className="mt-4 space-y-4">
-            {Array.from({ length: 7 }, (_, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-[5.75rem_minmax(0,1fr)] gap-3 md:grid-cols-[9.25rem_minmax(0,1fr)]"
-              >
-                <Bone className="h-2.5 w-16" />
-                <Bone className="h-2.5 max-w-xs" />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-md border border-border bg-card p-4 md:p-6">
-          <Bone className="h-4 w-24" />
-          <div className="mt-4 flex gap-3">
-            <Bone className="size-24 md:size-[7.5rem]" />
-            <Bone className="size-24 md:size-[7.5rem]" />
-          </div>
-        </div>
-      </LandlordRequestShell>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <LandlordRequestShell>
-        <BackToMaintenance navigate={navigate} />
-        <section className="rounded-md border border-border bg-card p-5 md:p-8" role="alert">
-          <h2 className="lg-heading text-foreground">Couldn’t load this request</h2>
-          <p className="mt-2 lg-body text-muted-foreground">{loadError}</p>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <Button className="h-11 w-full sm:w-auto" onClick={onRetry}>
-              Retry
-            </Button>
-            <Button
+              type="button"
               variant="secondary"
-              className="h-11 w-full sm:w-auto"
-              onClick={() => navigate("/maintenance")}
+              size="touch"
+              className="md:h-7 md:px-2"
+              disabled={uploading}
+              onClick={() => completionPhotoInput.current?.click()}
             >
-              Back to Maintenance
+              {uploading ? "Uploading…" : "Add photo"}
             </Button>
-          </div>
-        </section>
-      </LandlordRequestShell>
-    );
-  }
-
-  if (!order) {
-    return (
-      <LandlordRequestShell>
-        <BackToMaintenance navigate={navigate} />
-        <section className="rounded-md border border-border bg-card p-5 md:p-8">
-          <div
-            className="flex size-12 items-center justify-center rounded-xl bg-muted lg-section text-muted-foreground"
-            aria-hidden
-          >
-            ?
-          </div>
-          <h2 className="mt-4 lg-heading text-foreground">This request isn’t available</h2>
-          <p className="mt-2 max-w-xl lg-body text-muted-foreground">
-            It may have been removed, or it’s no longer linked to one of your properties. If you
-            think this is a mistake, message Landlord Gopher.
-          </p>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-            <Button className="h-11 w-full sm:w-auto" onClick={() => navigate("/maintenance")}>
-              Back to Maintenance
-            </Button>
-            <Button
-              variant="secondary"
-              className="h-11 w-full sm:w-auto"
-              onClick={() => navigate("/messages")}
-            >
-              Message Landlord Gopher
-            </Button>
-          </div>
-        </section>
-      </LandlordRequestShell>
-    );
-  }
-
-  const status = toRequestStatus(order);
-  const reporter = personName(order.tenant_first_name, order.tenant_last_name);
-  const caption = landlordStatusCaption(order);
-  const priority = priorityLevel(order.priority);
-  const completed = status === "Completed";
-  const priceLine = costLine(order);
-  const showCost = completed && priceLine.length > 0;
-  const completedWhen = order.completed_at ? formatDocumentDate(order.completed_at) : "";
-  const timeline = landlordTimeline(order, history, comments, reporter);
-  const rows = detailRows(order, reporter, completed);
-
-  return (
-    <LandlordRequestShell requestNumber={requestNumber}>
-      <div className="flex flex-col gap-3">
-        <BackToMaintenance navigate={navigate} />
-        <div className="flex flex-col gap-2">
-          <LandlordPageIntro eyebrow={requestNumber ?? "Request"} title={order.title} />
-          <div className="flex flex-col items-start gap-2 md:flex-row md:gap-4">
-            <div className="flex min-w-0 flex-col items-start gap-1">
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium",
-                  HEADER_CHIP[status],
-                )}
-              >
-                {status}
-              </span>
-              {caption ? <p className="lg-caption text-muted-foreground">{caption}</p> : null}
-            </div>
-            {priority ? (
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                  priority === "Emergency"
-                    ? "bg-destructive-tint text-destructive"
-                    : "bg-warning-tint text-warning",
-                )}
-              >
-                {priority === "Emergency" ? "Emergency" : "High priority"}
-              </span>
-            ) : null}
-          </div>
-          <p className="lg-body text-muted-foreground">{contextLine(order, reporter)}</p>
-        </div>
-      </div>
-
-      <section className="rounded-md border border-border bg-card p-4 md:p-6">
-        <LandlordPropertyHeading name="Details" />
-        {showCost ? (
-          <div className="mt-4 rounded-sm bg-success-tint px-4 py-3">
-            <p className="lg-label uppercase text-muted-foreground">
-              {completedWhen ? `Cost · Completed ${completedWhen}` : "Cost · Completed"}
-            </p>
-            <p className="lg-section text-foreground">{priceLine}</p>
           </div>
         ) : null}
-        <div className="mt-4 space-y-3">
-          {rows.map((row) => (
-            <div
-              key={row.label}
-              className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline gap-x-3 md:grid-cols-[9.25rem_minmax(0,1fr)]"
-            >
-              <p className="lg-caption text-muted-foreground">{row.label}</p>
-              <p className="lg-body min-w-0 text-foreground">{row.value}</p>
-            </div>
-          ))}
+        <div className="grid gap-1.5">
+          <Label htmlFor="resolution-notes">What fixed it?</Label>
+          <Textarea
+            id="resolution-notes"
+            rows={3}
+            value={resolutionNotes}
+            onChange={(e) => setResolutionNotes(e.target.value)}
+          />
+          <FieldHint>Shown to the tenant and the landlord.</FieldHint>
         </div>
-      </section>
+      </ShortDialog>
 
-      <section className="rounded-md border border-border bg-card p-4 md:p-6">
-        <LandlordPropertyHeading name={`Photos · ${photos.length}`} />
-        {photos.length === 0 ? (
-          <p className="mt-4 lg-body text-muted-foreground">No photos yet.</p>
-        ) : (
-          <>
-            <ul className="mt-4 flex flex-wrap gap-3">
-              {photos.map((photo, index) => (
-                <li key={photo.id}>
-                  {photo.url ? (
-                    <a
-                      href={photo.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block size-24 overflow-hidden rounded-sm border border-border bg-muted md:size-[7.5rem]"
-                    >
-                      <img
-                        src={photo.url}
-                        alt={photo.caption?.trim() || `Photo ${index + 1}`}
-                        className="size-full object-cover"
-                      />
-                    </a>
-                  ) : (
-                    <div className="flex size-24 items-center justify-center rounded-sm border border-border bg-muted lg-caption text-muted-foreground md:size-[7.5rem]">
-                      Photo {index + 1}
-                    </div>
-                  )}
-                </li>
+      <ShortDialog
+        open={dialog === "vendor"}
+        onOpenChange={closeDialog}
+        title="Vendor"
+        primaryLabel="Save"
+        busy={busy}
+        onPrimary={() => void saveVendor()}
+      >
+        <div className="grid gap-1.5">
+          <Label htmlFor="vendor-choice">Vendor</Label>
+          <Select value={vendorChoice} onValueChange={setVendorChoice}>
+            <SelectTrigger id="vendor-choice" className="h-11 md:h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">None</SelectItem>
+              {vendors.map((v) => (
+                <SelectItem key={v.id} value={String(v.id)}>
+                  {v.name}
+                </SelectItem>
               ))}
-            </ul>
-            {photos.some((photo) => photo.url) ? (
-              <p className="mt-3 lg-caption text-muted-foreground">Tap a photo to see it full size.</p>
-            ) : null}
-          </>
-        )}
-      </section>
+            </SelectContent>
+          </Select>
+        </div>
+      </ShortDialog>
 
-      <section className="rounded-md border border-border bg-card p-4 md:p-6">
-        <LandlordPropertyHeading name="Status timeline" />
-        {timeline.length === 0 ? (
-          <p className="mt-4 lg-body text-muted-foreground">No updates on this request yet.</p>
-        ) : (
-          <ol className="mt-4">
-            {timeline.map((item, index) => {
-              const last = index === timeline.length - 1;
-              return (
-                <li key={item.key} className="relative flex gap-4">
-                  {last ? null : (
-                    <span className="absolute bottom-0 left-[5px] top-3 w-0.5 bg-border" aria-hidden />
-                  )}
-                  <span
-                    className={cn(
-                      "relative z-10 mt-1.5 size-3 shrink-0 rounded-full",
-                      last ? "bg-brand" : "bg-muted-foreground",
-                    )}
-                    aria-hidden
-                  />
-                  <div className={cn("min-w-0", last ? "" : "pb-4")}>
-                    {item.status ? (
-                      <Badge variant={timelineBadgeVariant(item.status)}>{item.status}</Badge>
-                    ) : null}
-                    <p className={cn("lg-body-medium text-foreground", item.status ? "mt-1.5" : "")}>
-                      {item.body}
-                    </p>
-                    <p className="lg-caption text-muted-foreground">{item.when}</p>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
-    </LandlordRequestShell>
+      <ShortDialog
+        open={dialog === "cost"}
+        onOpenChange={closeDialog}
+        title="Cost"
+        description="The worker never sees the landlord price, and the landlord never sees the worker price."
+        primaryLabel="Save"
+        busy={busy}
+        onPrimary={() => void saveCost()}
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="cost-worker">Worker price</Label>
+            <Input
+              id="cost-worker"
+              inputMode="decimal"
+              className={cn("h-11 md:h-8", costError && "border-destructive")}
+              value={workerPriceText}
+              onChange={(e) => {
+                setWorkerPriceText(e.target.value);
+                setCostError(null);
+              }}
+              placeholder="0.00"
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="cost-landlord">Landlord price</Label>
+            <Input
+              id="cost-landlord"
+              inputMode="decimal"
+              className={cn("h-11 md:h-8", costError && "border-destructive")}
+              value={landlordPriceText}
+              onChange={(e) => {
+                setLandlordPriceText(e.target.value);
+                setCostError(null);
+              }}
+              placeholder="0.00"
+            />
+          </div>
+        </div>
+        {costError ? <FieldHint tone="error">{costError}</FieldHint> : null}
+      </ShortDialog>
+
+      <ShortDialog
+        open={dialog === "edit"}
+        onOpenChange={closeDialog}
+        title="Edit details"
+        primaryLabel="Save"
+        primaryDisabled={!editTitle.trim()}
+        busy={busy}
+        onPrimary={() => void saveEdit()}
+      >
+        <div className="grid gap-1.5">
+          <Label htmlFor="edit-title">What's the problem?</Label>
+          <Input
+            id="edit-title"
+            className={cn("h-11 md:h-8", !editTitle.trim() && "border-destructive")}
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+          />
+          {!editTitle.trim() ? <FieldHint tone="error">Enter a title.</FieldHint> : null}
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="edit-category">Category</Label>
+            <Select value={editCategory} onValueChange={setEditCategory}>
+              <SelectTrigger id="edit-category" className="h-11 md:h-8">
+                <SelectValue placeholder="Choose a category" />
+              </SelectTrigger>
+              <SelectContent>
+                {MAINTENANCE_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="edit-priority">Priority</Label>
+            <Select value={editPriority} onValueChange={(v) => setEditPriority(v as WorkOrderPriority)}>
+              <SelectTrigger id="edit-priority" className="h-11 md:h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PRIORITY_OPTIONS.map((p) => (
+                  <SelectItem key={p.value} value={p.value}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="edit-description">Description</Label>
+          <Textarea
+            id="edit-description"
+            rows={3}
+            value={editDescription}
+            onChange={(e) => setEditDescription(e.target.value)}
+          />
+        </div>
+        <label className="flex min-h-11 items-center gap-2 text-sm leading-5 text-foreground md:min-h-7">
+          <input
+            type="checkbox"
+            className="size-4 accent-primary"
+            checked={editEntry}
+            onChange={(e) => setEditEntry(e.target.checked)}
+          />
+          OK to enter if absent
+        </label>
+      </ShortDialog>
+
+      <ConfirmDelete
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this request?"
+        description={`This removes “${current.title}” (${requestNumberLabel(current)}) with its photos and timeline. This can’t be undone.`}
+        confirmLabel="Delete request"
+        onConfirm={() => void confirmDelete()}
+      />
+
+      {banner ? <RequestBanner tone={banner.tone} message={banner.message} onDismiss={dismissBanner} /> : null}
+    </RequestDetailView>
   );
-}
-
-function LandlordRequestShell({
-  requestNumber,
-  children,
-}: {
-  requestNumber?: string;
-  children: ReactNode;
-}) {
-  const crumb = requestNumber
-    ? `Landlord portal / Maintenance / ${requestNumber}`
-    : "Landlord portal / Maintenance";
-  return (
-    <PageShell
-      title={<LandlordPortalTitle crumb={crumb} mobileLabel={requestNumber ?? "Maintenance"} />}
-      width="max-w-[45rem]"
-      titleIsPageHeading={false}
-    >
-      <div className="flex flex-col gap-5">{children}</div>
-    </PageShell>
-  );
-}
-
-function BackToMaintenance({ navigate }: { navigate: (to: string) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => navigate("/maintenance")}
-      className="-ml-2 inline-flex h-11 items-center rounded-sm px-2 text-sm font-medium text-brand-text hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/40"
-    >
-      ‹ Maintenance
-    </button>
-  );
-}
-
-function Bone({ className }: { className?: string }) {
-  return <div className={cn("rounded-xs bg-muted motion-safe:animate-pulse", className)} aria-hidden />;
-}
-
-const HEADER_CHIP: Record<RequestStatus, string> = {
-  New: "bg-info-tint text-info",
-  Assigned: "bg-brand-tint text-brand-text",
-  "In progress": "bg-warning-tint text-warning",
-  "On hold": "bg-muted text-muted-foreground shadow-edge",
-  Completed: "bg-success-tint text-success",
-};
-
-function timelineBadgeVariant(
-  status: RequestStatus,
-): "info" | "brand" | "warning" | "success" | "neutral" {
-  switch (status) {
-    case "Assigned":
-      return "brand";
-    case "In progress":
-      return "warning";
-    case "On hold":
-      return "neutral";
-    case "Completed":
-      return "success";
-    default:
-      return "info";
-  }
-}
-
-type LandlordTimelineItem = {
-  key: string;
-  at: string;
-  seq: number;
-  status?: RequestStatus;
-  body: string;
-  when: string;
-};
-
-function landlordTimeline(
-  order: WorkOrder,
-  history: MaintenanceStatusEvent[],
-  comments: MaintenanceComment[],
-  reporter: string,
-): LandlordTimelineItem[] {
-  const items: LandlordTimelineItem[] = [
-    {
-      key: "reported",
-      at: order.created_at,
-      seq: 0,
-      status: "New",
-      body: reporter ? `${reporter} reported this` : "Request reported",
-      when: timelineWhen(order.created_at),
-    },
-  ];
-
-  const latestScheduledId = latestScheduledEventId(history);
-  for (const ev of history) {
-    if (ev.from_status == null || ev.note?.trim().toLowerCase() === "created") continue;
-    const db = workOrderStatusFromDb(ev.to_status);
-    const actor = roleLabel(ev.changed_by_role || "") || "Landlord Gopher";
-    const stamp = timelineWhen(ev.created_at);
-    const note = ev.note?.trim() ?? "";
-    items.push({
-      key: `status-${ev.id}`,
-      at: ev.created_at,
-      seq: 1,
-      status: historyBadge(db),
-      body: historyBody(db, order, actor, {
-        note,
-        attachSchedule: db === "scheduled" && ev.id === latestScheduledId,
-      }),
-      when: db === "scheduled" ? `${actor} · ${stamp}` : stamp,
-    });
-  }
-
-  for (const comment of comments) {
-    if (comment.visibility !== "tenant_visible") continue;
-    items.push({
-      key: `comment-${comment.id}`,
-      at: comment.created_at,
-      seq: 2,
-      body: comment.body,
-      when: `${commentWho(comment, reporter)} · ${timelineWhen(comment.created_at)}`,
-    });
-  }
-
-  return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.seq - b.seq));
-}
-
-/** Latest scheduled transition wins when timestamps tie. */
-function latestScheduledEventId(history: MaintenanceStatusEvent[]): number | null {
-  let latest: MaintenanceStatusEvent | null = null;
-  for (const ev of history) {
-    if (ev.from_status == null || ev.note?.trim().toLowerCase() === "created") continue;
-    if (workOrderStatusFromDb(ev.to_status) !== "scheduled") continue;
-    if (
-      !latest ||
-      ev.created_at > latest.created_at ||
-      (ev.created_at === latest.created_at && ev.id > latest.id)
-    ) {
-      latest = ev;
-    }
-  }
-  return latest?.id ?? null;
-}
-
-function historyBadge(db: WorkOrderStatus): RequestStatus {
-  switch (db) {
-    case "closed":
-      return "Completed";
-    case "on_hold":
-      return "On hold";
-    case "in_progress":
-      return "In progress";
-    case "scheduled":
-      return "Assigned";
-    default:
-      return "New";
-  }
-}
-
-function historyBody(
-  db: WorkOrderStatus,
-  order: WorkOrder,
-  actor: string,
-  event: { note: string; attachSchedule: boolean },
-): string {
-  // A stored note is the row. Live order fields must not rewrite earlier visits.
-  if (event.note) return event.note;
-  const vendor = order.vendor_name?.trim() ?? "";
-  switch (db) {
-    case "scheduled": {
-      if (!event.attachSchedule) return "Scheduled";
-      const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
-      if (when) return `Visit scheduled for ${when}`;
-      return vendor ? `${actor} assigned ${vendor}` : "Scheduled";
-    }
-    case "in_progress":
-      return vendor ? `${vendor} started work` : "Work started";
-    case "on_hold":
-      return order.hold_reason?.trim() || "Put on hold";
-    case "closed": {
-      const parts = [
-        order.resolution_notes?.trim(),
-        order.landlord_price != null ? formatLandlordPrice(order.landlord_price) : "",
-        vendor,
-      ].filter(Boolean);
-      return parts.length ? parts.join(" · ") : "Completed";
-    }
-    default:
-      if (vendor) return `${actor} assigned ${vendor}`;
-      if (order.assigned_staff_id) return `${actor} assigned this request`;
-      return "Opened again";
-  }
-}
-
-function detailRows(
-  order: WorkOrder,
-  reporter: string,
-  completed: boolean,
-): { label: string; value: string }[] {
-  const where = placeLine(order) || "—";
-  const rows: { label: string; value: string }[] = [
-    { label: "Category", value: order.category?.trim() || "—" },
-    { label: "Where", value: where },
-    { label: "Description", value: order.description?.trim() || "—" },
-    { label: "Priority", value: priorityWord(order.priority) },
-  ];
-  if (!completed) rows.push({ label: "Entry", value: entryValue(order) });
-  rows.push({ label: "Assigned to", value: assignedValue(order) });
-  if (completed) {
-    rows.push({
-      label: "Completed",
-      value: order.completed_at ? formatDocumentDate(order.completed_at) || "—" : "—",
-    });
-    const price = costLine(order);
-    if (price) rows.push({ label: "Cost", value: price });
-  } else {
-    rows.push({
-      label: "Scheduled",
-      value: order.scheduled_at ? stableDocumentDate(order.scheduled_at) || "—" : "—",
-    });
-  }
-  rows.push({ label: "Reported by", value: reportedValue(reporter, order.created_at) });
-  return rows;
-}
-
-function landlordStatusCaption(order: WorkOrder): string | undefined {
-  const status = toRequestStatus(order);
-  const vendor = order.vendor_name?.trim() ?? "";
-  if (status === "New") return "Needs assignment";
-  if (status === "Assigned") {
-    const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
-    if (vendor && when) return `${vendor} · visit ${when}`;
-    if (vendor) return vendor;
-    if (when) return `Visit ${when}`;
-    if (order.assigned_staff_id) return "Assigned to maintenance";
-    return "Assigned";
-  }
-  if (status === "In progress") return "Work in progress";
-  if (status === "On hold") return requestNextStep(order);
-  const when = order.completed_at ? formatDocumentDate(order.completed_at) : "";
-  const tail = costLine(order);
-  if (when && tail) return `Completed ${when} · ${tail}`;
-  if (when) return `Completed ${when}`;
-  if (tail) return tail;
-  return "Completed";
-}
-
-function requestNumberLabel(order: WorkOrder): string {
-  const raw = order.request_number?.trim();
-  if (!raw) return `#${order.id}`;
-  return raw.startsWith("#") ? raw : `#${raw}`;
-}
-
-function personName(first?: string | null, last?: string | null): string {
-  return [first, last].filter(Boolean).join(" ").trim();
-}
-
-/** Vendor name when the request has one. Staff display names are not on the work order. */
-function assigneeLabel(order: WorkOrder): string {
-  const vendor = order.vendor_name?.trim();
-  if (vendor) return vendor;
-  if (order.assigned_staff_id) return "Maintenance";
-  return "";
-}
-
-function assignedValue(order: WorkOrder): string {
-  return assigneeLabel(order) || "Not yet assigned";
-}
-
-function entryValue(order: WorkOrder): string {
-  if (!order.permission_to_enter) return "Please schedule first";
-  const first = order.tenant_first_name?.trim();
-  if (first) return `OK to enter if ${first} isn’t home`;
-  return "OK to enter if no one is home";
-}
-
-function placeLine(order: WorkOrder): string {
-  if (!order.unit_name?.trim() && !order.property_name?.trim()) return "";
-  const place = unitPropertyLabel(order.unit_name, order.property_name);
-  return place === "Your home" ? "" : place;
-}
-
-function contextLine(order: WorkOrder, reporter: string): string {
-  const place = placeLine(order);
-  const when = formatDocumentDate(order.created_at);
-  const reported = reporter
-    ? when
-      ? `Reported by ${reporter}, ${when}`
-      : `Reported by ${reporter}`
-    : "";
-  return [place, reported].filter(Boolean).join(" · ") || "—";
-}
-
-function reportedValue(reporter: string, iso: string): string {
-  const when = detailWhen(iso);
-  if (reporter && when) return `${reporter} · ${when}`;
-  return reporter || when || "—";
-}
-
-function costLine(order: WorkOrder): string {
-  const price = order.landlord_price != null ? formatLandlordPrice(order.landlord_price) : "";
-  const vendor = order.vendor_name?.trim() ?? "";
-  return [price, vendor].filter(Boolean).join(" · ");
-}
-
-function priorityWord(priority: WorkOrder["priority"]): string {
-  switch (priority) {
-    case "low":
-      return "Low";
-    case "high":
-      return "High";
-    case "urgent":
-      return "Urgent";
-    default:
-      return "Normal";
-  }
-}
-
-function formatLandlordPrice(amount: number): string {
-  const cents = Math.round(Math.abs(amount) * 100) % 100;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: cents === 0 ? 0 : 2,
-    maximumFractionDigits: cents === 0 ? 0 : 2,
-  }).format(amount);
-}
-
-const NOON_UTC_DATE = /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.\d+)?(?:Z|\+00:00)$/;
-
-/**
- * Date-only writes are stored as noon UTC. Keep the calendar day from the
- * ISO prefix, same as formatActivityStamp, so the day does not shift by zone.
- */
-function dateOnlyKey(iso: string): string | null {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE.test(iso)) return iso.slice(0, 10);
-  return null;
-}
-
-function stableDocumentDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const day = dateOnlyKey(iso);
-  return formatDocumentDate(day ?? iso);
-}
-
-function hasClock(iso: string): boolean {
-  return dateOnlyKey(iso) == null;
-}
-
-function clockLabel(iso: string): string {
-  if (!hasClock(iso)) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d
-    .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-    .replace(" AM", " am")
-    .replace(" PM", " pm");
-}
-
-function isTodayIso(iso: string): boolean {
-  const day = dateOnlyKey(iso);
-  const d = day ? new Date(`${day}T00:00:00`) : new Date(iso);
-  if (Number.isNaN(d.getTime())) return false;
-  const now = new Date();
-  return (
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate()
-  );
-}
-
-function timelineWhen(iso: string): string {
-  const time = clockLabel(iso);
-  if (isTodayIso(iso)) return time ? `Today ${time}` : "Today";
-  const day = dateOnlyKey(iso);
-  const date = formatDocumentDate(day ?? iso);
-  if (time && date) return `${date} · ${time}`;
-  return date || time;
-}
-
-function detailWhen(iso: string): string {
-  const day = dateOnlyKey(iso);
-  const date = formatDocumentDate(day ?? iso);
-  const time = clockLabel(iso);
-  if (date && time) return `${date}, ${time}`;
-  return date || time;
-}
-
-function commentWho(comment: MaintenanceComment, reporter: string): string {
-  if (comment.author_role === "tenant") return reporter || "Tenant";
-  if (comment.author_role === "landlord") return "You";
-  return roleLabel(comment.author_role || "") || "Landlord Gopher";
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm text-foreground">{value}</p>
-    </div>
-  );
-}
-
-function roleLabel(role: string): string {
-  switch (role) {
-    case "admin":
-      return "Admin";
-    case "maintenance":
-      return "Maintenance";
-    case "tenant":
-      return "Tenant";
-    case "landlord":
-      return "Landlord";
-    case "system":
-      return "System";
-    default:
-      return role;
-  }
-}
-
-function commentAuthor(
-  c: MaintenanceComment,
-  isTenantViewer: boolean,
-): string {
-  if (c.author_role === "tenant") return isTenantViewer ? "You" : "Tenant";
-  if (c.author_role === "admin") return "Admin";
-  if (c.author_role === "maintenance") return "Maintenance";
-  return c.author_role || "Staff";
 }

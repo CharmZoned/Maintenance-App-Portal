@@ -634,7 +634,7 @@ function createCtx(sources: AdminDashboardSources, now: Date): Ctx {
 
 const PRIORITY_PREFIX: Partial<Record<WorkOrder["priority"], string>> = {
   urgent: "Emergency",
-  high: "High priority",
+  high: "High",
 };
 
 /** The one thing that moves a request forward, in the imperative. */
@@ -648,7 +648,7 @@ function nextStepFor(wo: WorkOrder): string {
     case "In progress":
       return "Complete the work";
     case "Completed":
-      return "Closed";
+      return "Done";
     default:
       return wo.scheduled_at ? "Attend scheduled visit" : "Schedule a visit";
   }

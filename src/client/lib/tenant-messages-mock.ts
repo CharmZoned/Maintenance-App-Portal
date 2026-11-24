@@ -274,7 +274,7 @@ export const TENANT_MESSAGES_MOCK: TenantMessagesMockBundle = {
       id: MOCK_THREAD_IDS.brokenHeater,
       kind: "request",
       title: "WO-1799 · Broken heater",
-      preview: "Closed · Replaced thermostat.",
+      preview: "Completed · Replaced thermostat.",
       timeLabel: "Mon 10 Nov",
       unread: false,
       openRequestPath: "/maintenance",
@@ -294,7 +294,7 @@ export const TENANT_MESSAGES_MOCK: TenantMessagesMockBundle = {
         {
           id: "m-1799-2",
           sender: "Sam Fixit · Maintenance",
-          body: "Closed · Replaced thermostat.",
+          body: "Completed · Replaced thermostat.",
           timeLabel: "Mon 10 Nov · 2:40 pm",
           side: "incoming",
         },

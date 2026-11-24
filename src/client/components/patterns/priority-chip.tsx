@@ -1,7 +1,9 @@
+import { CircleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { PriorityLevel } from "@/lib/request-status";
 
-/** Priority badge — Emergency / High only (Figma Patterns). */
-export type PriorityLevel = "Emergency" | "High";
+/** Priority badge — Emergency / High only (Figma Patterns). Map DB values with `priorityLevel()`. */
+export type { PriorityLevel };
 
 export function PriorityChip({
   level,
@@ -13,11 +15,12 @@ export function PriorityChip({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-sm px-2 py-0.5 text-xs font-medium",
+        "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium",
         level === "Emergency" ? "bg-destructive-tint text-destructive" : "bg-warning-tint text-warning",
         className,
       )}
     >
+      {level === "Emergency" ? <CircleAlert className="size-3 shrink-0" aria-hidden /> : null}
       {level}
     </span>
   );

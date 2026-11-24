@@ -1,19 +1,17 @@
 import type { WorkOrderStatus } from "@/types";
+import { PRIORITY_OPTIONS, statusOptions } from "@/lib/request-status";
 
-export const PRIORITIES = [
-  { value: "low", label: "Low" },
-  { value: "normal", label: "Normal" },
-  { value: "high", label: "High" },
-  { value: "urgent", label: "Urgent" },
-] as const;
+/**
+ * Status and priority LABELS come from `@/lib/request-status` (the one shared
+ * mapping). This module keeps photo / price helpers and the picker option lists
+ * built from that mapping. Stored values are unchanged.
+ */
 
-export const ADMIN_STATUSES: { value: WorkOrderStatus; label: string }[] = [
-  { value: "open", label: "Open" },
-  { value: "scheduled", label: "Scheduled" },
-  { value: "in_progress", label: "In progress" },
-  { value: "on_hold", label: "On hold" },
-  { value: "closed", label: "Closed" },
-];
+/** Priority picker options — DB 'urgent' reads "Emergency" (never "Urgent"). */
+export const PRIORITIES = PRIORITY_OPTIONS;
+
+/** Admin status picker: all five stored values, shared labels (New … Completed). */
+export const ADMIN_STATUSES: { value: WorkOrderStatus; label: string }[] = statusOptions();
 
 /** Cap shared by create / edit / media upload file pickers (matches DB trigger). */
 export const MAX_MAINTENANCE_PHOTOS = 5;
@@ -74,15 +72,6 @@ export function takePhotoFiles(
 /** Staff status dropdown — include In progress when work can start (assigned or already past Open). */
 export function staffStatusOptions(canStartWork: boolean): { value: WorkOrderStatus; label: string }[] {
   return canStartWork
-    ? [
-        { value: "open", label: "Open" },
-        { value: "in_progress", label: "In progress" },
-        { value: "on_hold", label: "On hold" },
-        { value: "closed", label: "Closed" },
-      ]
-    : [
-        { value: "open", label: "Open" },
-        { value: "on_hold", label: "On hold" },
-        { value: "closed", label: "Closed" },
-      ];
+    ? statusOptions(["open", "in_progress", "on_hold", "closed"])
+    : statusOptions(["open", "on_hold", "closed"]);
 }

@@ -403,7 +403,8 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
               {(
                 [
                   ["normal", "Normal"],
-                  ["urgent", "Urgent"],
+                  // Stores DB 'high', so it reads "High" like everywhere else.
+                  ["urgent", "High"],
                   ["emergency", "Emergency"],
                 ] as const
               ).map(([value, label]) => (

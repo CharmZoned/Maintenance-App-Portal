@@ -37,7 +37,8 @@ type LoadState = "loading" | "ready" | "error";
 /**
  * Messages route entry.
  * Tenants: office DMs + request comment threads.
- * Staff/landlord/worker: same sources (landlord cannot post on request threads).
+ * Staff/worker: office DMs + request comment threads.
+ * Landlord: office DM only (no request threads; request links open the request page).
  */
 export function MessagesPage({
   search = "",
@@ -67,6 +68,11 @@ export function MessagesPage({
 /**
  * Figma 05 Messages — staff/landlord/worker list + thread.
  * Request threads → MaintenanceRequestComments; direct → OfficeMessages.
+ *
+ * Landlords get their office conversation only: request messaging with the
+ * landlord is out of scope (SOW), so no request (tenant) threads are listed
+ * for them and old `?thread=wo:<id>` / `?request=<id>` links go straight to
+ * that request's page, which carries its status updates.
  */
 function StaffMessagesPage({
   search = "",
@@ -121,7 +127,8 @@ function StaffMessagesPage({
     try {
       const [{ data: auth }, list, office] = await Promise.all([
         supabase.auth.getUser(),
-        listWorkOrders(),
+        // Landlords get no request threads (SOW), so they skip the request download.
+        isLandlord ? Promise.resolve([] as WorkOrder[]) : listWorkOrders(),
         listOfficeThreads(),
       ]);
       setCurrentUserId(auth.user?.id ?? null);
@@ -151,7 +158,7 @@ function StaffMessagesPage({
       setState("error");
       setError((err as Error).message);
     }
-  }, [listWorkOrders, listOfficeThreads, listUserAccounts, setError, isAdmin]);
+  }, [listWorkOrders, listOfficeThreads, listUserAccounts, setError, isAdmin, isLandlord]);
 
   useEffect(() => {
     void load();
@@ -226,6 +233,13 @@ function StaffMessagesPage({
     }
 
     if (link.kind === "request") {
+      if (isLandlord) {
+        // No landlord request threads: the request page carries its updates.
+        const to = `/maintenance/${link.requestId}`;
+        if (replace) replace(to);
+        else navigate(to);
+        return;
+      }
       setSelectedId(link.threadId);
       setOpenedIds((prev) => {
         if (prev.has(link.threadId)) return prev;
@@ -245,7 +259,7 @@ function StaffMessagesPage({
       setSelectedId(null);
       setMobileThread(false);
     }
-  }, [search, threads, state, accountTitles, currentUserId, isAdmin]);
+  }, [search, threads, state, accountTitles, currentUserId, isAdmin, isLandlord, replace, navigate]);
 
   const selected: MessageThread | undefined =
     threads.find((t) => t.id === selectedId) ??
@@ -483,7 +497,7 @@ function StaffMessagesPage({
           <button
             type="button"
             className="shrink-0 text-[13px] font-medium text-brand-text hover:underline"
-            onClick={() => navigate(`/maintenance?wo=${selectedRequestId}`)}
+            onClick={() => navigate(`/maintenance/${selectedRequestId}`)}
           >
             Open request
           </button>

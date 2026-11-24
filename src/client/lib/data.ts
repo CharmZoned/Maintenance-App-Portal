@@ -1434,6 +1434,19 @@ export async function listWorkOrders(params?: {
   return hydrateWorkOrderRows(rows ?? [], Boolean(params?.skip_staff_notes));
 }
 
+/**
+ * One request by id, with the same columns and joins as listWorkOrders. RLS
+ * still applies: a row the viewer may not read comes back as null (the request
+ * page shows "not available"), never as an error.
+ */
+export async function getWorkOrder(id: number): Promise<WorkOrder | null> {
+  const { data: row, error } = await supabase.from("MaintenanceRequests").select("*").eq("id", id).maybeSingle();
+  if (error) throwSb(error);
+  if (!row) return null;
+  const [order] = await hydrateWorkOrderRows([row], false);
+  return order ?? null;
+}
+
 type MaintenanceRequestRow = Tables<"MaintenanceRequests">;
 
 /** Joins the names, notes and prices a `WorkOrder` carries onto raw request rows. */
@@ -1913,6 +1926,39 @@ export async function listMaintenancePhotos(requestId: number): Promise<Maintena
   }));
 }
 
+/**
+ * First photo (oldest) per request, for list thumbnails: ONE batched query on
+ * MaintenanceRequestPhotos plus one batch sign of only those first paths.
+ * Requests without a readable photo map to null. RLS trims rows per role.
+ */
+export async function listFirstMaintenancePhotos(
+  requestIds: readonly number[],
+): Promise<Map<number, string | null>> {
+  const ids = Array.from(new Set(requestIds));
+  const out = new Map<number, string | null>(ids.map((id) => [id, null]));
+  if (ids.length === 0) return out;
+  const { data, error } = await supabase
+    .from("MaintenanceRequestPhotos")
+    .select("maintenance_request_id, storage_path, created_at, id")
+    .in("maintenance_request_id", ids)
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throwSb(error);
+  const firstPath = new Map<number, string>();
+  for (const row of data ?? []) {
+    if (!firstPath.has(row.maintenance_request_id)) firstPath.set(row.maintenance_request_id, row.storage_path);
+  }
+  if (firstPath.size === 0) return out;
+  const paths = Array.from(firstPath.values());
+  const { data: signedList } = await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, 3600);
+  const urlByPath = new Map<string, string>();
+  for (const entry of signedList ?? []) {
+    if (entry.path && entry.signedUrl) urlByPath.set(entry.path, entry.signedUrl);
+  }
+  for (const [requestId, path] of firstPath) out.set(requestId, urlByPath.get(path) ?? null);
+  return out;
+}
+
 export async function uploadMaintenancePhoto(
   requestId: number,
   file: File,
@@ -2083,9 +2129,91 @@ export async function listMaintenanceStatusHistory(
     from_status: row.from_status,
     to_status: row.to_status,
     changed_by_role: row.changed_by_role,
+    changed_by_user_id: row.changed_by_user_id ?? null,
     note: row.note,
     created_at: row.created_at,
   }));
+}
+
+/**
+ * When each request last moved to In progress (the start of its current
+ * in-progress spell, as inProgressSince computes from full history), from ONE
+ * status-history query for all the ids (list rows: "Started today"). Only
+ * in-progress transitions are fetched, newest first, so a row cap can never
+ * drop the latest start. Requests with no such row map to null. RLS trims the
+ * history to what the viewer may read.
+ */
+export async function listInProgressSince(
+  requestIds: readonly number[],
+): Promise<Map<number, string | null>> {
+  const ids = Array.from(new Set(requestIds));
+  const out = new Map<number, string | null>(ids.map((id) => [id, null]));
+  if (ids.length === 0) return out;
+  const { data, error } = await supabase
+    .from("MaintenanceRequestStatusHistory")
+    .select("maintenance_request_id, to_status, created_at")
+    .in("maintenance_request_id", ids)
+    // `_` matches any one character: "in_progress" and "In Progress" alike.
+    .ilike("to_status", "in_progress")
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+  if (error) throwSb(error);
+  for (const row of data ?? []) {
+    // Newest first: the first row per request is its latest move to In progress.
+    if (out.get(row.maintenance_request_id) != null) continue;
+    if (workOrderStatusFromDb(row.to_status) !== "in_progress") continue;
+    out.set(row.maintenance_request_id, row.created_at);
+  }
+  return out;
+}
+
+// ── Worker job pool (RPCs from 20261118190000_worker_job_pool.sql) ──
+
+/** Worker: take a job offered to the pool. The RPC assigns it and sets status Scheduled. */
+export async function acceptMaintenanceRequest(requestId: number): Promise<void> {
+  const { error } = await supabase.rpc("accept_maintenance_request", { p_request_id: requestId });
+  if (error) throwSb(error);
+}
+
+export interface AvailableJobLocation {
+  maintenance_request_id: number;
+  unit_label: string | null;
+  property_name: string | null;
+  street_address: string | null;
+}
+
+/** Worker: address fields for the pooled jobs they may accept (Units/Properties stay closed until then). */
+export async function listAvailableJobLocations(): Promise<AvailableJobLocation[]> {
+  const { data, error } = await supabase.rpc("list_available_job_locations");
+  if (error) throwSb(error);
+  return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    maintenance_request_id: Number(row.maintenance_request_id),
+    unit_label: (row.unit_label as string | null) ?? null,
+    property_name: (row.property_name as string | null) ?? null,
+    street_address: (row.street_address as string | null) ?? null,
+  }));
+}
+
+/**
+ * Worker: the address of ONE pooled job. The RPC returns a table, so the id is
+ * filtered server-side; the client check keeps it correct if a backend ignores
+ * the filter. Null when the job is not in the viewer's pool.
+ */
+export async function getAvailableJobLocation(requestId: number): Promise<AvailableJobLocation | null> {
+  const { data, error } = await supabase
+    .rpc("list_available_job_locations")
+    .eq("maintenance_request_id", requestId);
+  if (error) throwSb(error);
+  const row = ((data ?? []) as Record<string, unknown>[]).find(
+    (r) => Number(r.maintenance_request_id) === requestId,
+  );
+  if (!row) return null;
+  return {
+    maintenance_request_id: Number(row.maintenance_request_id),
+    unit_label: (row.unit_label as string | null) ?? null,
+    property_name: (row.property_name as string | null) ?? null,
+    street_address: (row.street_address as string | null) ?? null,
+  };
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────

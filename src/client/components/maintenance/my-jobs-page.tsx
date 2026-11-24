@@ -1,107 +1,181 @@
 import { useEffect, useMemo, useState } from "react";
 import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
-import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
-import { useDeepLinkOpen } from "@/hooks/use-deep-link-open";
-import { formatDate } from "@/lib/utils";
+import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
 import { PageShell } from "@/components/page-shell";
+import { EmptyState, ErrorRetry } from "@/components/patterns";
 import {
-  EmptyState,
-  ErrorRetry,
-  SkeletonRow,
-  StatusChip,
-  type RequestStatus,
-} from "@/components/patterns";
-import { WorkOrderDialog } from "./work-order-dialog";
-import {
-  formatRelativeWhen,
-  formatScheduleWhen,
+  JOB_SECTIONS,
   jobSectionFor,
   parseWhenDate,
+  REQUEST_STATUSES,
+  requestNextStep,
   toRequestStatus,
   type JobSection,
-} from "./request-status";
+} from "@/lib/request-status";
 import type { WorkOrder } from "@/types";
+import {
+  RequestListSkeleton,
+  RequestListTable,
+  RequestSortMenu,
+  scheduledDayFor,
+  useRequestThumbnails,
+  type RequestListItem,
+} from "./request-list-row";
+import {
+  readStoredSort,
+  sortRecommended,
+  sortRequests,
+  writeStoredSort,
+  type RequestSort,
+} from "./request-list-sort";
 
-function compactContext(order: WorkOrder): string {
-  const parts: string[] = [];
-  if (order.property_name) parts.push(order.property_name);
-  if (order.unit_name) parts.push(`Unit ${order.unit_name}`);
-  if (order.priority === "urgent") parts.push("Emergency");
-  if (order.status === "on_hold") {
-    if (order.hold_reason) parts.push(order.hold_reason);
-    if (order.next_follow_up_date) {
-      parts.push(`follow-up ${formatDate(order.next_follow_up_date, { weekday: "short" })}`);
-    }
-  } else if (order.scheduled_at) {
-    // Past-day schedules stay under Today — label Overdue, not "Yesterday".
-    parts.push(formatScheduleWhen(order.scheduled_at));
-  } else if (order.status === "closed" && order.completed_at) {
-    parts.push(`Completed ${formatRelativeWhen(order.completed_at).toLowerCase()}`);
-  }
-  return parts.filter(Boolean).join(" · ") || "—";
+/**
+ * Maintenance worker home: Figma Worker / U7 My jobs (spec §6, worker column).
+ *
+ * Sections Today / Upcoming / Job offers / On hold / Recently completed, each a
+ * card built from the shared RequestListTable (so every section's columns line
+ * up). One tap on a row opens the ONE request page (/maintenance/:id), where the
+ * worker has Start work / Put on hold / Mark completed. The old "Edit work
+ * order" dialog is no longer used for workers. `?wo=<id>` deep links (calendar,
+ * notifications, messages) redirect to the same page.
+ */
+
+export interface MyJobsPageProps extends DeepLinkProps {
+  /** Push navigation (row tap → request page). */
+  navigate?: (to: string) => void;
 }
 
-function CompactJobRow({
-  order,
-  onClick,
-}: {
-  order: WorkOrder;
-  onClick: () => void;
-}) {
-  const status: RequestStatus = toRequestStatus(order);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex min-h-[52px] w-full items-center gap-2 rounded-md border border-border bg-card px-3 py-2.5 text-left hover:bg-muted/60"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-foreground">{order.title}</div>
-        <div className="truncate text-[11px] text-muted-foreground">{compactContext(order)}</div>
-      </div>
-      <StatusChip status={status} className="shrink-0 [&_span]:text-[11px] [&_span]:py-[3px]" />
-    </button>
+export type JobSortKey = "scheduled" | "title" | "status" | "priority";
+export interface JobSort {
+  key: JobSortKey;
+  dir: "asc" | "desc";
+}
+
+const SORT_STORAGE_KEY = "my-jobs.sort.v2";
+
+/** Request page path for a job (numeric id, never the request number). */
+export function jobPath(order: Pick<WorkOrder, "id">): string {
+  return `/maintenance/${order.id}`;
+}
+
+/** `Maple Court · Unit 1A · Tina Renter · OK to enter if absent` */
+export function jobContextLine(order: WorkOrder): string {
+  const parts: string[] = [];
+  if (order.property_name?.trim()) parts.push(order.property_name.trim());
+  if (order.unit_name?.trim()) parts.push(`Unit ${order.unit_name.trim()}`);
+  else if (order.property_name?.trim()) parts.push("Common area");
+  const tenant = [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ").trim();
+  if (tenant) parts.push(tenant);
+  if (order.permission_to_enter) parts.push("OK to enter if absent");
+  return parts.join(" · ");
+}
+
+/** Next step beside the chip. The worker is always the assignee, so no name. */
+export function jobNextStep(order: WorkOrder): string | undefined {
+  return requestNextStep(order, { omitAssignee: true });
+}
+
+/** Scheduled day for the date column ("Today", "Tue 17 Nov"), or "" (never for an unaccepted offer). */
+export function jobScheduledLabel(order: WorkOrder): string {
+  return scheduledDayFor(order);
+}
+
+const PRIORITY_RANK: Record<WorkOrder["priority"], number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+
+function timeOf(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  return parseWhenDate(iso)?.getTime() ?? null;
+}
+
+/** Sort rows within a section. Unscheduled jobs sort after scheduled ones either way. */
+export function sortJobs(orders: readonly WorkOrder[], sort: JobSort): WorkOrder[] {
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return [...orders].sort((a, b) => {
+    let diff = 0;
+    switch (sort.key) {
+      case "scheduled": {
+        const ta = timeOf(a.scheduled_at);
+        const tb = timeOf(b.scheduled_at);
+        if (ta == null && tb != null) return 1;
+        if (tb == null && ta != null) return -1;
+        diff = (ta ?? 0) - (tb ?? 0);
+        break;
+      }
+      case "title":
+        diff = a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+        break;
+      case "status":
+        diff = REQUEST_STATUSES.indexOf(toRequestStatus(a)) - REQUEST_STATUSES.indexOf(toRequestStatus(b));
+        break;
+      case "priority":
+        diff = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+        break;
+    }
+    if (diff !== 0) return diff * sign;
+    return a.id - b.id;
+  });
+}
+
+/** Group into the My jobs sections, in display order; empty sections are dropped. */
+export function groupJobsWith(
+  orders: readonly WorkOrder[],
+  sortSection: (items: readonly WorkOrder[]) => WorkOrder[],
+  now: Date,
+): { label: JobSection; items: WorkOrder[] }[] {
+  const groups = new Map<JobSection, WorkOrder[]>(JOB_SECTIONS.map((label) => [label, []]));
+  for (const o of orders) groups.get(jobSectionFor(o, now))!.push(o);
+  // Only the five most recently completed jobs (by completion, not creation).
+  groups.set(
+    "Recently completed",
+    [...groups.get("Recently completed")!]
+      .sort((a, b) => (timeOf(b.completed_at ?? b.created_at) ?? 0) - (timeOf(a.completed_at ?? a.created_at) ?? 0))
+      .slice(0, 5),
+  );
+  return JOB_SECTIONS.map((label) => ({ label, items: sortSection(groups.get(label)!) })).filter(
+    (g) => g.items.length > 0,
   );
 }
 
-/**
- * Maintenance worker home — Figma Worker / U7 My jobs.
- * Groups assigned jobs into Today / Upcoming / On hold / Recently completed.
- */
-export function MyJobsPage({ search = "", replace }: DeepLinkProps = {}) {
+export function groupJobs(
+  orders: readonly WorkOrder[],
+  sort: JobSort,
+  now: Date,
+): { label: JobSection; items: WorkOrder[] }[] {
+  return groupJobsWith(orders, (items) => sortJobs(items, sort), now);
+}
+
+// ── Loading ────────────────────────────────────────────────────────
+
+function JobsLoading() {
+  return (
+    <div className="flex flex-col gap-3" aria-busy="true" aria-label="Loading jobs">
+      <div className="h-[22px] w-24 rounded-xs bg-muted" />
+      <RequestListSkeleton />
+    </div>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────
+
+export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps = {}) {
   const app = useApp();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [listError, setListError] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
+  const [listError, setListError] = useState(false);
+  const [sort, setSortState] = useState<RequestSort | null>(() => readStoredSort(SORT_STORAGE_KEY));
 
   const listWorkOrders = app.listWorkOrders;
-  const setError = app.setError;
-  const flight = useMemo(
-    () =>
-      createSingleFlightLoader(async () => {
-        try {
-          setListError(null);
-          setError(null);
-          return await listWorkOrders();
-        } catch (err) {
-          const message = (err as Error).message;
-          setListError(message);
-          setError(message);
-          throw err;
-        }
-      }),
-    [listWorkOrders, setError],
-  );
+  const flight = useMemo(() => createSingleFlightLoader(() => listWorkOrders()), [listWorkOrders]);
 
   async function load() {
     setLoading(true);
+    setListError(false);
     try {
       setOrders(await flight.load());
     } catch {
       setOrders([]);
+      setListError(true);
     } finally {
       setLoading(false);
     }
@@ -111,11 +185,15 @@ export function MyJobsPage({ search = "", replace }: DeepLinkProps = {}) {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setListError(false);
       try {
         const list = await flight.load();
         if (!cancelled) setOrders(list);
       } catch {
-        if (!cancelled) setOrders([]);
+        if (!cancelled) {
+          setOrders([]);
+          setListError(true);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -125,98 +203,107 @@ export function MyJobsPage({ search = "", replace }: DeepLinkProps = {}) {
     };
   }, [flight]);
 
-  useDeepLinkOpen({
-    search,
-    param: "wo",
-    items: orders,
-    loadList: () => flight.load(),
-    onList: setOrders,
-    onFound: (found) => {
-      setEditing(found);
-      setDialogOpen(true);
-      replace?.("/maintenance");
-    },
-    onMiss: () => replace?.("/maintenance"),
-  });
+  // `?wo=<id>` (calendar, notifications, messages): go straight to the request
+  // page. Replace, so Back does not bounce through the redirect again. The page
+  // itself shows "isn't available" for a job the worker cannot read.
+  const deepLinkId = queryId(search, "wo");
+  useEffect(() => {
+    if (deepLinkId == null) return;
+    const to = jobPath({ id: deepLinkId });
+    if (replace) replace(to);
+    else navigate?.(to);
+  }, [deepLinkId, replace, navigate]);
+
+  function openJob(order: WorkOrder) {
+    const to = jobPath(order);
+    if (navigate) navigate(to);
+    else replace?.(to);
+  }
+
+  function setSort(next: RequestSort | null) {
+    setSortState(next);
+    writeStoredSort(SORT_STORAGE_KEY, next);
+  }
 
   const now = useMemo(() => new Date(), [orders]);
-  const sections = useMemo(() => {
-    const groups: Record<JobSection, WorkOrder[]> = {
-      Today: [],
-      Upcoming: [],
-      "On hold": [],
-      "Recently completed": [],
-    };
-    for (const o of orders) {
-      groups[jobSectionFor(o, now)].push(o);
-    }
-    // Cap completed to most recently closed, not most recently created.
-    groups["Recently completed"] = [...groups["Recently completed"]]
-      .sort((a, b) => {
-        const ta = parseWhenDate(a.completed_at ?? a.created_at)?.getTime() ?? 0;
-        const tb = parseWhenDate(b.completed_at ?? b.created_at)?.getTime() ?? 0;
-        return tb - ta;
-      })
-      .slice(0, 5);
-    return (Object.keys(groups) as JobSection[])
-      .map((label) => ({ label, items: groups[label] }))
-      .filter((g) => g.items.length > 0);
-  }, [orders, now]);
+  const sections = useMemo(
+    () =>
+      groupJobsWith(
+        orders,
+        // Recommended: by scheduled date within each section (spec §6.1).
+        (items) => (sort ? sortRequests(items, sort) : sortRecommended(items, "scheduled")),
+        now,
+      ),
+    [orders, sort, now],
+  );
+  const shown = useMemo(() => sections.flatMap((s) => s.items), [sections]);
+  const thumbnails = useRequestThumbnails(useMemo(() => shown.map((o) => o.id), [shown]));
 
   const openCount = orders.filter((o) => o.status !== "closed").length;
   const todayCount = sections.find((s) => s.label === "Today")?.items.length ?? 0;
+  const mineOpen = orders.filter((o) => o.status !== "closed" && jobSectionFor(o, now) !== "Job offers").length;
   const meta =
-    openCount === 0
-      ? "No open jobs"
-      : todayCount > 0
-        ? `Today · ${todayCount}`
-        : `${openCount} open`;
+    loading || listError
+      ? undefined
+      : openCount === 0
+        ? "No open jobs"
+        : todayCount > 0
+          ? `${todayCount} today`
+          : mineOpen > 0
+            ? `${mineOpen} open`
+            : `${openCount} on offer`;
 
   return (
     <PageShell title="My jobs" meta={meta}>
       {loading ? (
-        <div className="space-y-2">
-          <SkeletonRow className="h-[52px] rounded-md border border-border" />
-          <SkeletonRow className="h-[52px] rounded-md border border-border" />
-          <SkeletonRow className="h-[52px] rounded-md border border-border" />
-        </div>
+        <JobsLoading />
       ) : listError ? (
-        <ErrorRetry message={listError} onRetry={() => void load()} />
-      ) : orders.length === 0 ? (
-        <EmptyState
-          icon={<Wrench className="size-5" aria-hidden />}
-          message="No jobs assigned yet. New work will show up here."
+        <ErrorRetry
+          message="We couldn't load the requests. Check your connection and try again."
+          onRetry={() => void load()}
         />
+      ) : orders.length === 0 ? (
+        <div className="rounded-md border border-border bg-card">
+          <EmptyState icon={<Wrench className="size-5" aria-hidden />} message="No jobs assigned right now." />
+        </div>
       ) : (
-        <div className="space-y-4">
-          {sections.map((section) => (
-            <section key={section.label} className="space-y-2">
-              <h2 className="text-xs font-semibold text-muted-foreground">{section.label}</h2>
-              <div className="space-y-2">
-                {section.items.map((o) => (
-                  <CompactJobRow
-                    key={o.id}
-                    order={o}
-                    onClick={() => {
-                      setEditing(o);
-                      setDialogOpen(true);
-                    }}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
+        <div className="flex w-full flex-col gap-6">
+          <div className="flex justify-end">
+            <RequestSortMenu sort={sort} onSortChange={setSort} className="h-11 md:h-8" />
+          </div>
+          {sections.map((section) => {
+            const headingId = `my-jobs-${section.label.toLowerCase().replace(/\s+/g, "-")}`;
+            const items: RequestListItem[] = section.items.map((order) => ({
+              order,
+              context: jobContextLine(order),
+              assigneeName: null,
+            }));
+            return (
+              <section key={section.label} aria-labelledby={headingId} className="flex flex-col gap-3">
+                <h2 id={headingId} className="text-[15px] font-semibold leading-[22px] text-foreground">
+                  {section.label} <span className="font-normal text-muted-foreground">· {section.items.length}</span>
+                </h2>
+                {section.label === "Job offers" ? (
+                  <p className="-mt-1.5 text-sm leading-5 text-muted-foreground">
+                    Offered to all workers. Open one to accept it.
+                  </p>
+                ) : null}
+                <RequestListTable
+                  items={items}
+                  onOpen={openJob}
+                  hrefFor={jobPath}
+                  thumbnails={thumbnails}
+                  showAssignee={false}
+                  dateColumn="scheduled"
+                  sort={sort}
+                  onSortChange={setSort}
+                  ariaLabel={`${section.label} jobs`}
+                />
+              </section>
+            );
+          })}
         </div>
       )}
-
-      <WorkOrderDialog
-        open={dialogOpen}
-        onOpenChange={(o) => {
-          setDialogOpen(o);
-          if (!o) void load();
-        }}
-        workOrder={editing}
-      />
     </PageShell>
   );
 }

@@ -1,9 +1,11 @@
 import { cn } from "@/lib/utils";
+import type { RequestStatus } from "@/lib/request-status";
 
-/** Q2 status labels only — never Open / Scheduled / Closed. */
-export type RequestStatus = "New" | "Assigned" | "In progress" | "On hold" | "Completed";
+/** Q2 status labels only — the type and DB mapping live in `@/lib/request-status`. */
+export type { RequestStatus };
 
-const STATUS_STYLES: Record<RequestStatus, string> = {
+/** Tone per status (brief §2.3). Shared so headers / timelines do not re-declare it. */
+export const STATUS_STYLES: Record<RequestStatus, string> = {
   New: "bg-info-tint text-info",
   Assigned: "bg-brand-tint text-brand-text",
   "In progress": "bg-warning-tint text-warning",
@@ -28,7 +30,7 @@ export function StatusChip({
     <div className={cn("flex flex-col items-start gap-1", className)}>
       <span
         className={cn(
-          "inline-flex shrink-0 items-center rounded-sm px-2 py-0.5 text-xs font-medium",
+          "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium",
           STATUS_STYLES[status],
         )}
       >

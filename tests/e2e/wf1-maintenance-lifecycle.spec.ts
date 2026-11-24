@@ -1,214 +1,220 @@
 /**
  * WF1 — Maintenance request lifecycle, in a real browser.
  *
- *   Tenant submits a request  →  Admin assigns it to a worker  →  Worker views
- *   and works the request  →  Tenant sees the outcome.
+ *   Tenant submits a request  →  Admin assigns it to a worker  →  Worker starts
+ *   and completes it on the request page  →  Tenant follows it on the same page.
  *
- * Every step signs in through the login form as that person and uses the same
- * screens they would. Steps run in order and share one database, so a failure
- * stops the rest (later steps would be meaningless).
+ * Every role works on the ONE request page (/maintenance/:id), reached in one
+ * click from its list. Every step signs in through the login form as that
+ * person. Steps run in order and share one database, so a failure stops the
+ * rest (later steps would be meaningless).
  */
-import { choose, expect, PNG, resetWorld, selectUnder, shot, signIn, test, tomorrow } from "./support";
+import { type Page } from "@playwright/test";
+import { choose, expect, PNG, resetWorld, shot, signIn, test, tomorrow } from "./support";
 
 const TITLE = "Bathroom sink is leaking";
 const DESCRIPTION = "Water pools under the sink every time the tap runs.";
 const WORKER_UPDATE = "Found a cracked trap — back tomorrow with the part.";
+const TENANT_REPLY = "Thanks — I'll keep the bathroom clear.";
 const RESOLUTION = "Replaced the cracked trap and re-sealed the drain.";
+const STATUS_WORDS_NEVER_SHOWN = /Open → |Scheduled → |In Progress → |Offered to workers|Assigned \(staff\)|Urgent/;
 
 test.describe.configure({ mode: "serial" });
+
+/** The visible list row (desktop grid or phone row) for a request title. */
+function requestRow(page: Page, title: string) {
+  return page.getByRole("link", { name: new RegExp(title) }).filter({ visible: true }).first();
+}
+
+/** One click from the role's list lands on the request page. */
+async function openFromList(page: Page, title: string) {
+  await requestRow(page, title).click();
+  await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+  await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
+}
 
 test.describe("[WF1] Maintenance request lifecycle", () => {
   test.beforeAll(async () => {
     await resetWorld();
   });
 
-  test("Tenant · submits a maintenance request with a photo", async ({ page }, testInfo) => {
+  test("Tenant · reports a problem with a photo", async ({ page }, testInfo) => {
     await signIn(page, "tenant");
-    // Tenants land on Home; their requests are one click away in the nav.
-    await page.getByRole("link", { name: "Requests", exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Requests" })).toBeVisible();
-    await expect(page.getByText(/Unit 1A · Maple Court/).first()).toBeVisible();
+    await page.goto("/maintenance");
+    await expect(page.getByRole("heading", { name: "Requests" })).toBeVisible();
 
-    await page.getByRole("button", { name: "New maintenance request" }).first().click();
+    await page.getByRole("button", { name: "Report a problem" }).filter({ visible: true }).first().click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Request maintenance" })).toBeVisible();
-    await expect(dialog).toContainText("Unit 1A · Maple Court");
-    await dialog.getByLabel("Issue title").fill(TITLE);
+    await expect(dialog.getByText("Unit 1A · Maple Court")).toBeVisible();
+    await dialog.locator("#tenant-title").fill(TITLE);
     await choose(page, dialog.locator("#tenant-category"), "Plumbing");
-    await dialog.getByLabel("Description").fill(DESCRIPTION);
+    await dialog.locator("#tenant-desc").fill(DESCRIPTION);
     await choose(page, dialog.locator("#tenant-permission"), "Yes, if no one home");
     await dialog.locator("#tenant-photos").setInputFiles(PNG);
     await shot(page, testInfo, "Tenant fills in the request");
     await dialog.getByRole("button", { name: "Submit", exact: true }).click();
 
-    await expect(dialog).toHaveCount(0);
-    await expect(page.getByText(TITLE).filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByText(/Request submitted with photos/)).toBeVisible();
+    await expect(requestRow(page, TITLE)).toBeVisible();
     await shot(page, testInfo, "Request appears in Requests");
   });
 
   test("Worker · does not see the request before it is assigned", async ({ page }, testInfo) => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
-    await expect(page.getByRole("heading", { level: 1, name: "My jobs" })).toBeVisible();
-    await expect(page.getByText("No jobs assigned yet. New work will show up here.")).toBeVisible();
-    await expect(page.getByRole("button", { name: new RegExp(TITLE) })).toHaveCount(0);
-    await shot(page, testInfo, "Worker's queue is empty");
+    await expect(page.getByRole("heading", { name: "My jobs" })).toBeVisible();
+    await expect(page.getByText(TITLE)).toHaveCount(0);
+    await shot(page, testInfo, "Worker's jobs do not include it");
   });
 
-  test("Admin · sees the new request and assigns it to a worker with a date", async ({ page }, testInfo) => {
+  test("Admin · opens the new request in one click and assigns it with a date", async ({ page }, testInfo) => {
     await signIn(page, "admin");
     await page.goto("/maintenance");
-    // New, unassigned requests land in Needs action (the default tab).
-    const row = page.getByRole("link", { name: new RegExp(TITLE) });
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("Tina Renter");
-    await expect(row).toContainText("Unassigned");
-    await shot(page, testInfo, "Admin's maintenance queue");
+    await expect(requestRow(page, TITLE)).toBeVisible();
+    await shot(page, testInfo, "Admin's Needs action list");
 
-    await row.click();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
-    await expect(page.getByText(DESCRIPTION).first()).toBeVisible();
-    await expect(page.getByText("1 photo", { exact: true })).toBeVisible();
+    await openFromList(page, TITLE);
+    await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
+    await expect(page.getByText(DESCRIPTION)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open photo 1 of 1" })).toBeVisible();
+    await expect(page.getByText("Not assigned yet").first()).toBeVisible();
+    await expect(page.getByText("Request #")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Assign and schedule" }).first().click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Edit work order" })).toBeVisible();
-    await expect(dialog.getByLabel("Description")).toHaveValue(DESCRIPTION);
-    await expect(dialog.getByRole("img", { name: "Maintenance photo" })).toBeVisible();
-
-    // Accept & schedule is expanded by default for Open requests (WS-K).
-    await expect(dialog.getByRole("button", { name: "Hide", exact: true })).toBeVisible();
-    // Wait until staff options have loaded (listStaff is async on dialog open).
+    await page.getByRole("button", { name: "Assign and schedule" }).filter({ visible: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: "Assign and schedule" });
     await expect
-      .poll(async () => {
-        await selectUnder(dialog, "Staff").click();
-        const n = await page.getByRole("option", { name: /Fixit, Sam/ }).count();
-        await page.keyboard.press("Escape");
-        return n;
-      }, { timeout: 15_000 })
+      .poll(
+        async () => {
+          await dialog.locator("#assign-staff").click();
+          const n = await page.getByRole("option", { name: /Sam Fixit/ }).count();
+          await page.keyboard.press("Escape");
+          return n;
+        },
+        { timeout: 15_000 },
+      )
       .toBeGreaterThan(0);
-    await choose(page, selectUnder(dialog, "Staff"), "Fixit, Sam");
-    await dialog.locator('label:text-is("Date") ~ input[type="date"]').fill(tomorrow());
+    await choose(page, dialog.locator("#assign-staff"), /Sam Fixit/);
+    await dialog.locator("#assign-date").fill(tomorrow());
     await shot(page, testInfo, "Admin assigns Sam and picks a date");
-    await dialog.getByRole("button", { name: "Confirm Accept & schedule" }).click();
-    await expect(page.getByText("Request accepted and scheduled.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Assign", exact: true }).click();
 
-    await page.goto("/maintenance");
-    await expect(page.getByRole("link", { name: new RegExp(TITLE) }), "assigned work leaves Needs action").toHaveCount(0);
-    await page.getByRole("button", { name: /^Active \(/ }).click();
-    const active = page.getByRole("link", { name: new RegExp(TITLE) });
-    await expect(active).toBeVisible();
-    await expect(active).toContainText("Sam Fixit");
-    await shot(page, testInfo, "Request is now Active, assigned to Sam");
+    await expect(page.getByText(/Sam Fixit assigned for/)).toBeVisible();
+    await expect(page.getByText("Assigned", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(STATUS_WORDS_NEVER_SHOWN)).toHaveCount(0);
+    await shot(page, testInfo, "Request is now Assigned");
   });
 
-  test("Worker · opens the assigned request and sees the tenant's report and photo", async ({ page }, testInfo) => {
+  test("Worker · opens the job from My jobs and starts work", async ({ page }, testInfo) => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
-    const row = page.getByRole("button", { name: new RegExp(TITLE) });
-    await expect(row).toBeVisible();
-    await expect(row).toContainText("Maple Court · Unit 1A");
-    await shot(page, testInfo, "Worker's queue shows the job");
+    await requestRow(page, TITLE).click();
+    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
 
-    await row.click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByLabel("Title")).toHaveValue(TITLE);
-    await expect(dialog.getByLabel("Title"), "worker cannot edit what the tenant reported").toBeDisabled();
-    await expect(dialog.getByLabel("Description")).toHaveValue(DESCRIPTION);
-    await expect(dialog.getByLabel("Permission to enter")).toBeChecked();
-    await expect(dialog.getByRole("img", { name: "Maintenance photo" })).toBeVisible();
-    await expect(dialog.getByText("Open → Scheduled")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Accept & schedule", exact: true }), "scheduling is admin-only").toHaveCount(0);
-    await shot(page, testInfo, "Worker views the request details");
-  });
+    await expect(page.getByRole("heading", { name: TITLE })).toBeVisible();
+    await expect(page.getByText(DESCRIPTION)).toBeVisible();
+    await expect(page.getByText("OK to enter if absent")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open photo 1 of 1" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Edit work order" }), "the old form is retired").toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Edit details" }), "editing is admin-only").toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Put on hold" }).filter({ visible: true })).toHaveCount(1);
+    await shot(page, testInfo, "Worker views the request page");
 
-  test("Worker · starts the job and posts an update for the tenant", async ({ page }, testInfo) => {
-    await signIn(page, "worker");
-    await page.goto("/maintenance");
-    await page.getByRole("button", { name: new RegExp(TITLE) }).click();
-    const dialog = page.getByRole("dialog");
+    await page.getByRole("button", { name: "Start work" }).filter({ visible: true }).first().click();
+    await expect(page.getByText("Work started.")).toBeVisible();
+    await expect(page.getByText("You started work")).toBeVisible();
 
-    await choose(page, selectUnder(dialog, "Status"), "In progress");
-    await dialog.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByText("Work order saved.")).toBeVisible();
-
-    const row = page.getByRole("button", { name: new RegExp(TITLE) });
-    await expect(row).toContainText("In progress");
-    await row.click();
-    await dialog.getByPlaceholder("Add a comment…").fill(WORKER_UPDATE);
-    await choose(page, dialog.locator('button[role="combobox"]', { hasText: "Internal" }), "Tenant visible");
-    await dialog.getByRole("button", { name: "Post comment" }).click();
-    await expect(dialog.getByText(WORKER_UPDATE)).toBeVisible();
-    await expect(dialog.getByText("Scheduled → In Progress")).toBeVisible();
+    // Internal only is off by default: the tenant sees this update.
+    await expect(page.getByRole("switch", { name: "Internal only" })).toHaveAttribute("aria-checked", "false");
+    await page.getByRole("textbox", { name: "Message" }).fill(WORKER_UPDATE);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(page.getByText("Message sent.")).toBeVisible();
+    await expect(page.getByText(WORKER_UPDATE)).toBeVisible();
     await shot(page, testInfo, "Job in progress with a tenant-visible update");
   });
 
-  test("Tenant · sees the request in progress and reads the worker's update", async ({ page }, testInfo) => {
+  test("Tenant · follows the request on the page and replies there", async ({ page }, testInfo) => {
     await signIn(page, "tenant");
-    await page.getByRole("link", { name: "Requests", exact: true }).click();
-    const row = page.getByRole("button", { name: new RegExp(TITLE) });
-    await expect(row).toContainText("In progress");
-    await row.click();
-    await expect(page.getByText(WORKER_UPDATE).filter({ visible: true }).first()).toBeVisible();
-    await shot(page, testInfo, "Tenant reads the worker's update");
-    // Tenant replies would go through Messages, whose request threads are still a
-    // demo (no message-center API), so there is no real reply to test here yet.
+    await page.goto("/maintenance");
+    await openFromList(page, TITLE);
+
+    await expect(page.getByText("In progress", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Sam Fixit", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText(WORKER_UPDATE)).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Internal only" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open request conversation" })).toHaveCount(0);
+
+    await page.getByRole("textbox", { name: "Message" }).fill(TENANT_REPLY);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(page.getByText(TENANT_REPLY)).toBeVisible();
+    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
+    await shot(page, testInfo, "Tenant reads the update and replies on the page");
   });
 
-  test("Worker · closes the job with resolution notes", async ({ page }, testInfo) => {
+  test("Worker · adds a photo of the finished work and marks the job completed", async ({ page }, testInfo) => {
     await signIn(page, "worker");
     await page.goto("/maintenance");
-    await page.getByRole("button", { name: new RegExp(TITLE) }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText(WORKER_UPDATE)).toBeVisible();
+    await requestRow(page, TITLE).click();
+    await expect(page.getByText(TENANT_REPLY)).toBeVisible();
 
-    // A job can't be completed without a photo of the finished work.
-    await dialog.locator('input[type="file"]').setInputFiles(PNG);
-    await dialog.getByRole("button", { name: "Upload 1 photo" }).click();
-    await expect(page.getByText("Photos uploaded.")).toBeVisible();
-    await expect(dialog.getByRole("img", { name: "Maintenance photo" })).toHaveCount(2);
-
-    await choose(page, selectUnder(dialog, "Status"), "Closed");
-    await dialog.getByPlaceholder("What fixed it?").fill(RESOLUTION);
+    await page.getByRole("button", { name: "Mark completed" }).filter({ visible: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: "Mark completed" });
+    await expect(dialog.getByText("Add a photo of the finished work first.")).toBeVisible();
+    await dialog.locator('input[type="file"]').setInputFiles({ ...PNG, name: "fixed.png" });
+    await expect(page.getByText("Photo added.")).toBeVisible();
+    await dialog.locator("#resolution-notes").fill(RESOLUTION);
     await shot(page, testInfo, "Worker records what fixed it");
-    await dialog.getByRole("button", { name: "Save changes" }).click();
-    await expect(page.getByText("Work order saved.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Mark completed" }).click();
 
-    await expect(page.getByText("No open jobs"), "closed jobs leave the open queue").toBeVisible();
-    const completed = page.locator("section", { has: page.getByRole("heading", { name: "Recently completed" }) });
-    await expect(completed.getByRole("button", { name: new RegExp(TITLE) })).toBeVisible();
-    await shot(page, testInfo, "Job moves to Recently completed");
+    await expect(page.getByText("Marked completed.")).toBeVisible();
+    await expect(page.getByText("This request is completed. Messages are closed.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open photo 2 of 2" })).toBeVisible();
   });
 
-  test("Tenant · sees the request completed with its status history", async ({ page }, testInfo) => {
+  test("Tenant · sees it completed with a plain-language timeline", async ({ page }, testInfo) => {
     await signIn(page, "tenant");
-    await page.getByRole("link", { name: "Requests", exact: true }).click();
-    await expect(page.getByText("No open requests right now.")).toBeVisible();
-    await page.getByRole("button", { name: "Completed · 1", exact: true }).click();
-    const row = page.getByRole("button", { name: new RegExp(TITLE) });
-    await expect(row).toContainText("Completed");
-    await row.click();
-    await page.getByRole("button", { name: "Open full request" }).click();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
-    const updates = page.getByRole("list").filter({ hasText: "Status → Closed" });
-    for (const line of ["Created", "Status → Scheduled", "Status → In Progress", WORKER_UPDATE, "Status → Closed"]) {
-      await expect(updates.getByText(line, { exact: true })).toBeVisible();
-    }
-    await expect(updates.getByRole("img", { name: "Photo" }), "the tenant's photo and the finished-work photo").toHaveCount(2);
-    await shot(page, testInfo, "Tenant sees the completed request and its trail");
+    await page.goto("/maintenance");
+    await page.getByRole("button", { name: /^Completed/ }).first().click();
+    await openFromList(page, TITLE);
+
+    await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("You reported this")).toBeVisible();
+    await expect(page.getByText("Sam Fixit started work")).toBeVisible();
+    await expect(page.getByText(new RegExp(`Sam Fixit completed this: .${RESOLUTION.replace(/\./g, "\\.")}`))).toBeVisible();
+    await expect(page.getByText(STATUS_WORDS_NEVER_SHOWN)).toHaveCount(0);
+    await shot(page, testInfo, "Tenant sees the completed request and its timeline");
   });
 
-  test("Admin · sees the job completed, with the worker's resolution", async ({ page }, testInfo) => {
+  test("Admin · reviews the completed job and can reopen it", async ({ page }, testInfo) => {
     await signIn(page, "admin");
     await page.goto("/maintenance");
-    await page.getByRole("button", { name: /^Completed \(/ }).click();
-    const row = page.getByRole("link", { name: new RegExp(TITLE) });
-    await expect(row).toContainText("Sam Fixit");
-    await row.click();
-    await expect(page).toHaveURL(/\/maintenance\/\d+$/);
-    await page.getByRole("button", { name: "Edit details" }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByPlaceholder("What fixed it?")).toHaveValue(RESOLUTION);
+    await page.getByRole("button", { name: "Completed", exact: true }).click();
+    await openFromList(page, TITLE);
+    await expect(page.getByText("What fixed it")).toBeVisible();
+    await expect(page.getByText(RESOLUTION).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reopen" })).toBeVisible();
     await shot(page, testInfo, "Admin reviews the completed job");
+  });
+
+  test("Admin · New request picks the unit first, which fills in the tenant", async ({ page }, testInfo) => {
+    await signIn(page, "admin");
+    await page.goto("/maintenance");
+    await page.getByRole("button", { name: "New request" }).filter({ visible: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: "New request" });
+    for (const gone of ["Worker price", "Landlord price", "Vendor", "Internal notes"]) {
+      await expect(dialog.getByText(gone, { exact: true }), `${gone} is not on the new form`).toHaveCount(0);
+    }
+    await dialog.locator("#anr-title").fill("Hallway light is out");
+    await choose(page, dialog.locator("#anr-property"), "Maple Court");
+    await choose(page, dialog.locator("#anr-unit"), /1A/);
+    await expect(dialog.locator("#anr-tenant")).toContainText("Tina");
+    await expect(dialog.getByText("Filled in from the unit.", { exact: false })).toBeVisible();
+    await choose(page, dialog.locator("#anr-category"), "Electrical");
+    await choose(page, dialog.locator("#anr-priority"), "Emergency");
+    await shot(page, testInfo, "Admin fills in the new request");
+    await dialog.getByRole("button", { name: "Create request" }).click();
+
+    await expect(page.getByText("Request created.", { exact: false })).toBeVisible();
+    await expect(requestRow(page, "Hallway light is out")).toBeVisible();
+    await expect(page.getByText("Urgent")).toHaveCount(0);
   });
 });

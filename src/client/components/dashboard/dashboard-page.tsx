@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/context";
 import { useShellChrome } from "@/components/chrome/shell-chrome-context";
-import { WorkOrderDialog } from "@/components/maintenance/work-order-dialog";
+import { AdminNewRequestDialog } from "@/components/maintenance/admin-new-request-dialog";
 import { PropertyDialog } from "@/components/properties/property-dialog";
 import { TenantDialog } from "@/components/tenants/tenant-dialog";
 import { AdminUploadDocumentDialog } from "@/components/documents/admin-upload-document-dialog";
@@ -106,11 +106,13 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
         onAddProperty={() => setDialog("property")}
       />
 
-      <WorkOrderDialog
-        open={dialog === "request"}
-        onOpenChange={closeDialog}
-        onSaved={() => void refreshAfterSave()}
-      />
+      {app.canCreateWorkOrders ? (
+        <AdminNewRequestDialog
+          open={dialog === "request"}
+          onOpenChange={closeDialog}
+          onSaved={() => void refreshAfterSave()}
+        />
+      ) : null}
       {/* Saving a property updates the shell's list, which reloads the dashboard on its own. */}
       <PropertyDialog open={dialog === "property"} onOpenChange={closeDialog} />
       <TenantDialog
