@@ -425,6 +425,7 @@ export function mapWorkOrder(
     permission_to_enter: Boolean(row.permission_to_enter),
     assigned_staff_id: row.assigned_staff_id,
     scheduled_at: row.scheduled_for,
+    scheduled_end_at: row.scheduled_end_at ?? null,
     completed_at: row.closed_at,
     worker_price: extras?.worker_price ?? null,
     landlord_price: extras?.landlord_price ?? null,

@@ -1696,6 +1696,9 @@ export async function updateWorkOrder(
         : patch.scheduled_at
       : null;
   }
+  // Arrival-window end. Leaving it out while moving scheduled_for clears the
+  // window in the database (keep_visit_window), so a stale end never sticks.
+  if (patch.scheduled_end_at !== undefined) row.scheduled_end_at = patch.scheduled_end_at;
   if (patch.resolution_notes !== undefined) row.resolution_notes = patch.resolution_notes;
   if (patch.hold_reason !== undefined) row.hold_reason = patch.hold_reason;
   if (patch.next_follow_up_date !== undefined) row.next_follow_up_date = patch.next_follow_up_date;

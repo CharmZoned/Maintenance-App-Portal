@@ -393,6 +393,38 @@ describe("[R4] Maintenance requests", () => {
       expect(wo.scheduled_at?.slice(0, 10)).toBe(tomorrow());
     });
 
+    test("an admin schedules a visit as a date plus an arrival window", async () => {
+      const id = await seedRequest();
+      await signInApp("admin");
+      const day = tomorrow();
+      const start = new Date(`${day}T08:00:00`).toISOString();
+      const end = new Date(`${day}T12:00:00`).toISOString();
+      const wo = await data.updateWorkOrder(
+        id,
+        { status: "scheduled", assigned_staff_id: world.staff.worker.id, scheduled_at: start, scheduled_end_at: end },
+        { previousStatus: "open" },
+      );
+      expect(Date.parse(wo.scheduled_at ?? "")).toBe(Date.parse(start));
+      expect(Date.parse(wo.scheduled_end_at ?? "")).toBe(Date.parse(end));
+
+      // Moving the day without a new end drops the stale window.
+      const moved = await data.updateWorkOrder(id, { scheduled_at: tomorrow() });
+      expect(moved.scheduled_end_at).toBeNull();
+
+      // A window must end after it starts.
+      await expect(
+        data.updateWorkOrder(id, { scheduled_at: end, scheduled_end_at: start }),
+      ).rejects.toThrow(/requests_visit_window/);
+    });
+
+    test("only an admin sets the arrival window", async () => {
+      const id = await seedRequest();
+      await assign(id);
+      await signInApp("worker");
+      const later = new Date(Date.now() + 2 * 86_400_000).toISOString();
+      await expect(data.updateWorkOrder(id, { scheduled_end_at: later })).rejects.toThrow(/Only admins/);
+    });
+
     test("a request cannot be Scheduled without both a worker and a date", async () => {
       const id = await seedRequest();
       await signInApp("admin");

@@ -287,7 +287,14 @@ export interface WorkOrder {
   status: WorkOrderStatus;
   permission_to_enter: boolean;
   assigned_staff_id?: number | null;
+  /** Visit: start of the arrival window (DB `scheduled_for`). */
   scheduled_at: string | null;
+  /**
+   * Visit: end of the arrival window (DB `scheduled_end_at`). Null = no window:
+   * a date only (noon-UTC sentinel) or an arrival time only. Format with
+   * `formatVisit` (lib/request-status).
+   */
+  scheduled_end_at?: string | null;
   completed_at: string | null;
   /**
    * What the worker is paid (MaintenanceRequestWorkerPrices). Readable by admin,

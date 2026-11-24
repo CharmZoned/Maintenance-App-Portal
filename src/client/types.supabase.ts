@@ -355,6 +355,7 @@ export interface Database {
           assigned_staff_id: number | null;
           created_at: string;
           scheduled_for: string | null;
+          scheduled_end_at: string | null;
           started_at: string | null;
           hold_reason: string | null;
           next_follow_up_date: string | null;
@@ -388,6 +389,7 @@ export interface Database {
           assigned_staff_id?: number | null;
           created_at?: string;
           scheduled_for?: string | null;
+          scheduled_end_at?: string | null;
           started_at?: string | null;
           hold_reason?: string | null;
           next_follow_up_date?: string | null;
@@ -774,6 +776,7 @@ export interface Database {
           p_scheduled_for: string;
           p_worker_price: number;
           p_landlord_price?: number | null;
+          p_scheduled_end_at?: string | null;
         };
         Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
       };
