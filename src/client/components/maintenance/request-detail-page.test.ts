@@ -113,7 +113,11 @@ describe("landlord request detail", () => {
     expect(html).toContain("#MR-001000");
     expect(html).toContain("Kitchen faucet leaking");
     expect(html).toContain("Assigned");
-    expect(html).toContain("High priority");
+    expect(html).toContain("bg-warning-tint text-warning\">High</span>");
+    expect(html).not.toContain("High priority");
+    expect(html).toContain('lg-caption text-muted-foreground">Priority</p><p class="lg-body min-w-0 text-foreground">High</p>');
+    expect(html).toContain('data-next-step="worker"');
+    expect(html).toContain("Nothing needed from you.");
     expect(html).toContain("Unit 1A · Maple Court · Reported by Tina Renter");
     expect(html).toContain("Plumbing");
     expect(html).toContain("Kitchen faucet drips constantly.");
@@ -183,6 +187,9 @@ describe("landlord request detail", () => {
     expect(html).toContain("Fan motor replaced · $180 · Harbor Electric");
     expect(html).toContain("Electrical");
     expect(html).not.toContain("High priority");
+    expect(html).not.toContain("bg-warning-tint text-warning\">High</span>");
+    expect(html).toContain("text-foreground\">Normal</p>");
+    expect(html).toContain("This job is done. Nothing needed from you.");
     expect(html).not.toContain("Entry");
     expect(html).not.toContain("Please schedule first");
     expect(html).toContain("Photos · 0");
@@ -297,5 +304,48 @@ describe("landlord request detail", () => {
     expect(different).toContain("$180 · Harbor Electric");
     expect(different).toContain("Fan motor replaced · $180 · Harbor Electric");
     expect(different).not.toContain("$77");
+  });
+
+  it("prints Emergency, never Urgent, in the tag and under Details", () => {
+    const html = render({ order: order({ id: 10, title: "Burst pipe", priority: "urgent" }) });
+    expect(html).toContain("bg-destructive-tint text-destructive\">Emergency</span>");
+    expect(html).toContain(
+      'lg-caption text-muted-foreground">Priority</p><p class="lg-body min-w-0 text-foreground">Emergency</p>',
+    );
+    expect(html).not.toContain("Urgent");
+    expect(html).not.toContain("urgent");
+
+    const low = render({ order: order({ id: 10, title: "Loose handle", priority: "low" }) });
+    expect(low).toContain("text-foreground\">Normal</p>");
+    expect(low).not.toContain(">Low<");
+  });
+
+  it("says who is waiting on an on-hold request", () => {
+    const office = render({
+      order: order({
+        id: 10,
+        title: "Kitchen faucet leaking",
+        status: "on_hold",
+        hold_reason: "Waiting on a part",
+        next_follow_up_date: "2026-11-20",
+      }),
+    });
+    expect(office).toContain("On hold");
+    expect(office).toContain('data-next-step="office"');
+    expect(office).toContain("Landlord Gopher is waiting on a part.");
+    expect(office).toContain("Next check-in");
+    expect(office).toContain("Nothing needed from you.");
+
+    const landlord = render({
+      order: order({
+        id: 10,
+        title: "Kitchen faucet leaking",
+        status: "on_hold",
+        hold_reason: "Waiting on owner approval",
+      }),
+    });
+    expect(landlord).toContain('font-medium text-foreground" data-next-step="landlord"');
+    expect(landlord).toContain("Message Landlord Gopher to answer.");
+    expect(landlord).not.toContain("Nothing needed from you.");
   });
 });

@@ -2,13 +2,27 @@ import type { RequestStatus } from "@/components/patterns/status-chip";
 import type { WorkOrder, WorkOrderPriority, WorkOrderStatus } from "@/types";
 import { formatDate } from "@/lib/utils";
 
+/** Who is reading the label. D4: every audience sees the same five words today. */
+export type StatusAudience = "tenant" | "landlord" | "staff";
+
+/** The fields that decide a status label. Pass the order to tell New from Assigned. */
+export type StatusInput = Pick<WorkOrder, "status"> & Partial<Pick<WorkOrder, "assigned_staff_id">>;
+
 /**
- * Map live MaintenanceRequests status (+ assignee) to Figma Q2 RequestStatus chips.
+ * The one place a status turns into words (owner decision D4).
  * DB: open | scheduled | in_progress | on_hold | closed
  * UI: New | Assigned | In progress | On hold | Completed
+ *
+ * A bare DB status `open` reads "New". Pass the order instead and an open
+ * request with an assignee reads "Assigned".
  */
-export function toRequestStatus(wo: Pick<WorkOrder, "status" | "assigned_staff_id">): RequestStatus {
-  switch (wo.status as WorkOrderStatus) {
+export function statusLabel(
+  status: WorkOrderStatus | StatusInput,
+  audience: StatusAudience,
+): RequestStatus {
+  void audience; // Same words for everyone (D4); kept so screens say who is reading.
+  const order: StatusInput = typeof status === "string" ? { status } : status;
+  switch (order.status as WorkOrderStatus) {
     case "closed":
       return "Completed";
     case "on_hold":
@@ -19,7 +33,89 @@ export function toRequestStatus(wo: Pick<WorkOrder, "status" | "assigned_staff_i
       return "Assigned";
     case "open":
     default:
-      return wo.assigned_staff_id ? "Assigned" : "New";
+      return order.assigned_staff_id ? "Assigned" : "New";
+  }
+}
+
+/** Map live MaintenanceRequests status (+ assignee) to Figma Q2 RequestStatus chips. */
+export function toRequestStatus(wo: StatusInput): RequestStatus {
+  return statusLabel(wo, "staff");
+}
+
+/**
+ * The one place a priority turns into words (owner decision D5).
+ * DB `urgent` reads "Emergency"; `low` and `normal` both read "Normal".
+ * Never print the raw DB value.
+ */
+export function priorityLabel(p: WorkOrderPriority): "Normal" | "High" | "Emergency" {
+  if (p === "urgent") return "Emergency";
+  if (p === "high") return "High";
+  return "Normal";
+}
+
+export type NextStepWho = "office" | "worker" | "landlord" | "none";
+
+export interface LandlordNextStep {
+  who: NextStepWho;
+  text: string;
+}
+
+const NOTHING_NEEDED = "Nothing needed from you.";
+const OFFICE = "Landlord Gopher";
+
+/** Hold reasons that mean the office is waiting on the landlord. */
+const LANDLORD_HOLD = /\b(landlord|owner|approv\w*|sign[- ]?off|go[- ]?ahead)\b/i;
+
+/** Calendar day from a date-only or noon-UTC value, e.g. "Tue, Nov 17". */
+function shortDay(iso: string | null | undefined): string {
+  const key = iso?.trim().slice(0, 10);
+  if (!key || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return "";
+  return formatDate(key, { weekday: "short", day: "numeric", month: "short" });
+}
+
+function cleanReason(reason: string | null | undefined): string {
+  return (reason ?? "").replace(/\s+/g, " ").trim().replace(/[\s.…!]+$/u, "");
+}
+
+/** "Waiting on a part" -> "Landlord Gopher is waiting on a part." */
+function holdSentence(reason: string): string {
+  if (!reason) return `${OFFICE} has paused this job.`;
+  if (/^(waiting|awaiting)\b/i.test(reason)) {
+    return `${OFFICE} is ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.`;
+  }
+  return `On hold: ${reason}.`;
+}
+
+/**
+ * One plain sentence telling a landlord who has the request and whether they
+ * need to do anything. Uses `hold_reason` and `next_follow_up_date` on holds.
+ */
+export function landlordNextStep(o: WorkOrder): LandlordNextStep {
+  switch (statusLabel(o, "landlord")) {
+    case "New":
+      return { who: "office", text: `${OFFICE} will assign someone. ${NOTHING_NEEDED}` };
+    case "Assigned": {
+      const when = shortDay(o.scheduled_at);
+      if (when) return { who: "worker", text: `Visit booked for ${when}. ${NOTHING_NEEDED}` };
+      return { who: "office", text: `${OFFICE} is booking a visit. ${NOTHING_NEEDED}` };
+    }
+    case "In progress":
+      return { who: "worker", text: `The work is under way. ${NOTHING_NEEDED}` };
+    case "On hold": {
+      const reason = cleanReason(o.hold_reason);
+      const follow = shortDay(o.next_follow_up_date);
+      const parts = [holdSentence(reason)];
+      if (follow) parts.push(`Next check-in ${follow}.`);
+      if (reason && LANDLORD_HOLD.test(reason)) {
+        parts.push(`Message ${OFFICE} to answer.`);
+        return { who: "landlord", text: parts.join(" ") };
+      }
+      parts.push(NOTHING_NEEDED);
+      return { who: "office", text: parts.join(" ") };
+    }
+    case "Completed":
+    default:
+      return { who: "none", text: `This job is done. ${NOTHING_NEEDED}` };
   }
 }
 
@@ -75,10 +171,10 @@ export function requestContextLine(
   return parts.join(" · ");
 }
 
+/** Chip level for Emergency / High; null for Normal (no chip). */
 export function priorityLevel(priority: WorkOrderPriority): "Emergency" | "High" | null {
-  if (priority === "urgent") return "Emergency";
-  if (priority === "high") return "High";
-  return null;
+  const label = priorityLabel(priority);
+  return label === "Normal" ? null : label;
 }
 
 /**

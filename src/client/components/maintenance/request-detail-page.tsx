@@ -25,6 +25,8 @@ import { formatDocumentDate } from "@/lib/landlord-documents";
 import { workOrderStatusFromDb } from "@/lib/mappers";
 import {
   formatActivityStamp,
+  landlordNextStep,
+  priorityLabel,
   priorityLevel,
   requestNextStep,
   toRequestStatus,
@@ -900,6 +902,7 @@ export function LandlordRequestDetail({
   const status = toRequestStatus(order);
   const reporter = personName(order.tenant_first_name, order.tenant_last_name);
   const caption = landlordStatusCaption(order);
+  const next = landlordNextStep(order);
   const priority = priorityLevel(order.priority);
   const completed = status === "Completed";
   const priceLine = costLine(order);
@@ -914,8 +917,8 @@ export function LandlordRequestDetail({
         <BackToMaintenance navigate={navigate} />
         <div className="flex flex-col gap-2">
           <LandlordPageIntro eyebrow={requestNumber ?? "Request"} title={order.title} />
-          <div className="flex flex-col items-start gap-2 md:flex-row md:gap-4">
-            <div className="flex min-w-0 flex-col items-start gap-1">
+          <div className="flex min-w-0 flex-col items-start gap-1">
+            <div className="flex flex-wrap items-center gap-2">
               <span
                 className={cn(
                   "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium",
@@ -924,20 +927,29 @@ export function LandlordRequestDetail({
               >
                 {status}
               </span>
-              {caption ? <p className="lg-caption text-muted-foreground">{caption}</p> : null}
+              {priority ? (
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                    priority === "Emergency"
+                      ? "bg-destructive-tint text-destructive"
+                      : "bg-warning-tint text-warning",
+                  )}
+                >
+                  {priority}
+                </span>
+              ) : null}
             </div>
-            {priority ? (
-              <span
-                className={cn(
-                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                  priority === "Emergency"
-                    ? "bg-destructive-tint text-destructive"
-                    : "bg-warning-tint text-warning",
-                )}
-              >
-                {priority === "Emergency" ? "Emergency" : "High priority"}
-              </span>
-            ) : null}
+            {caption ? <p className="lg-caption text-muted-foreground">{caption}</p> : null}
+            <p
+              className={cn(
+                "lg-caption",
+                next.who === "landlord" ? "font-medium text-foreground" : "text-muted-foreground",
+              )}
+              data-next-step={next.who}
+            >
+              {next.text}
+            </p>
           </div>
           <p className="lg-body text-muted-foreground">{contextLine(order, reporter)}</p>
         </div>
@@ -1245,7 +1257,7 @@ function detailRows(
     { label: "Category", value: order.category?.trim() || "—" },
     { label: "Where", value: where },
     { label: "Description", value: order.description?.trim() || "—" },
-    { label: "Priority", value: priorityWord(order.priority) },
+    { label: "Priority", value: priorityLabel(order.priority) },
   ];
   if (!completed) rows.push({ label: "Entry", value: entryValue(order) });
   rows.push({ label: "Assigned to", value: assignedValue(order) });
@@ -1266,26 +1278,20 @@ function detailRows(
   return rows;
 }
 
+/**
+ * Facts under the landlord status chip that the next-step hint doesn't already
+ * say: the vendor on an assigned job, the date and cost on a completed one.
+ */
 function landlordStatusCaption(order: WorkOrder): string | undefined {
   const status = toRequestStatus(order);
-  const vendor = order.vendor_name?.trim() ?? "";
-  if (status === "New") return "Needs assignment";
-  if (status === "Assigned") {
-    const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
-    if (vendor && when) return `${vendor} · visit ${when}`;
-    if (vendor) return vendor;
-    if (when) return `Visit ${when}`;
-    if (order.assigned_staff_id) return "Assigned to maintenance";
-    return "Assigned";
-  }
-  if (status === "In progress") return "Work in progress";
-  if (status === "On hold") return requestNextStep(order);
+  if (status === "Assigned") return order.vendor_name?.trim() || undefined;
+  if (status !== "Completed") return undefined;
   const when = order.completed_at ? formatDocumentDate(order.completed_at) : "";
   const tail = costLine(order);
   if (when && tail) return `Completed ${when} · ${tail}`;
   if (when) return `Completed ${when}`;
   if (tail) return tail;
-  return "Completed";
+  return undefined;
 }
 
 function requestNumberLabel(order: WorkOrder): string {
@@ -1344,19 +1350,6 @@ function costLine(order: WorkOrder): string {
   const price = order.landlord_price != null ? formatLandlordPrice(order.landlord_price) : "";
   const vendor = order.vendor_name?.trim() ?? "";
   return [price, vendor].filter(Boolean).join(" · ");
-}
-
-function priorityWord(priority: WorkOrder["priority"]): string {
-  switch (priority) {
-    case "low":
-      return "Low";
-    case "high":
-      return "High";
-    case "urgent":
-      return "Urgent";
-    default:
-      return "Normal";
-  }
 }
 
 function formatLandlordPrice(amount: number): string {
