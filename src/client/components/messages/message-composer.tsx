@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -21,6 +21,8 @@ export function MessageComposer({
   className,
   /** Active conversation id — draft clears whenever this changes (thread switch / deep-link). */
   resetKey = null,
+  toolbar,
+  maxLength,
 }: {
   disabled?: boolean;
   placeholder?: string;
@@ -31,6 +33,9 @@ export function MessageComposer({
   onSend?: (body: string, visibility: CommentVisibility) => Promise<void> | void;
   className?: string;
   resetKey?: string | number | null;
+  /** Extra controls under the field (e.g. the office chat's "About a request" picker). */
+  toolbar?: ReactNode;
+  maxLength?: number;
 }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -68,6 +73,7 @@ export function MessageComposer({
           placeholder={placeholder}
           disabled={disabled || busy}
           rows={2}
+          maxLength={maxLength}
           className="min-h-11 min-w-0 flex-1 resize-none rounded-md border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
           aria-label={placeholder}
           onKeyDown={(e) => {
@@ -87,6 +93,7 @@ export function MessageComposer({
           Send
         </Button>
       </div>
+      {toolbar}
       {showVisibility ? (
         <div className="flex items-center gap-2">
           <Select
