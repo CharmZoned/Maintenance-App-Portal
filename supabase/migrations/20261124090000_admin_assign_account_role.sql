@@ -308,4 +308,20 @@ ALTER TABLE public."Staff"
 COMMENT ON COLUMN public."Staff".active IS
   'Office flag: false = no longer takes new work. Portal access is still governed by user_roles.account_status.';
 
+-- Staff was left SELECT-only for authenticated (like Landlords/Tenants before
+-- 20261114010000), so the admin-only RLS policies staff_admin_insert /
+-- staff_admin_update could never be reached from the portal. Grant the DML
+-- those policies already gate; DELETE stays off (Staff rows anchor job history).
+GRANT INSERT, UPDATE ON TABLE public."Staff" TO authenticated;
+
+DO $$
+DECLARE
+  identity_sequence regclass;
+BEGIN
+  SELECT pg_get_serial_sequence('public."Staff"', 'id')::regclass INTO identity_sequence;
+  IF identity_sequence IS NOT NULL THEN
+    EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO authenticated', identity_sequence);
+  END IF;
+END $$;
+
 NOTIFY pgrst, 'reload schema';

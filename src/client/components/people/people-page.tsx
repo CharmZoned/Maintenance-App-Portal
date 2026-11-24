@@ -51,7 +51,7 @@ function ResourceGate<T>({
     return (
       <div className="rounded-md border border-border bg-card">
         <ErrorRetry
-          message={`We couldn't load ${what}. ${resource.error ?? ""}`.trim()}
+          message={`We couldn't load ${what}. Check your connection and try again.`}
           onRetry={() => void resource.reload()}
         />
       </div>

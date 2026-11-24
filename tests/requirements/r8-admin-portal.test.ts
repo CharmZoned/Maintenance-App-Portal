@@ -77,6 +77,60 @@ describe("[R8] Admin web portal", () => {
         expect.arrayContaining(["Sam Fixit", "Riley Wrench"]),
       );
     });
+
+    test("the admin adds and edits a team member; their sign-up then arrives pre-linked", async () => {
+      await signInApp("admin");
+      const added = await data.createStaff({
+        first_name: "Priya",
+        last_name: "Pipes",
+        email: "Priya.Pipes@trades.test",
+        phone: "(410) 555-0142",
+        services: ["Plumbing", "Heating / AC"],
+      });
+      expect(added).toMatchObject({ email: "priya.pipes@trades.test", services: ["Plumbing", "Heating / AC"], active: true });
+      const edited = await data.updateStaff(added.id, { active: false, job_title: "Plumber" });
+      expect(edited).toMatchObject({ active: false, job_title: "Plumber" });
+
+      const login = await sql<{ id: string }>(
+        `insert into auth.users (email, encrypted_password, email_confirmed_at) values ('priya.pipes@trades.test', 'x', now()) returning id`,
+      );
+      const accounts = await data.listUserAccounts();
+      expect(accounts.find((a) => a.user_id === login[0].id)).toMatchObject({
+        role: "maintenance",
+        staff_id: added.id,
+        account_status: "pending",
+      });
+    });
+
+    test("open job counts per team member exclude closed work", async () => {
+      await signInApp("admin");
+      const before = (await data.countOpenJobsByStaff()).get(world.staff.worker.id) ?? 0;
+      await sql(
+        `insert into public."MaintenanceRequests" (title, description, category, unit_id, property_id, assigned_staff_id, scheduled_for, status)
+         values ('Open one', 'x', 'Other', $1, $2, $3, now() + interval '1 day', 'Scheduled'),
+                ('Closed one', 'x', 'Other', $1, $2, $3, now() - interval '1 day', 'Open')`,
+        [world.units.a.id, world.property.id, world.staff.worker.id],
+      );
+      await sql(
+        `update public."MaintenanceRequests"
+            set status = 'Closed', closed_at = now(), resolution_notes = 'Done'
+          where title = 'Closed one' and assigned_staff_id = $3 and unit_id = $1 and property_id = $2`,
+        [world.units.a.id, world.property.id, world.staff.worker.id],
+      );
+      expect((await data.countOpenJobsByStaff()).get(world.staff.worker.id)).toBe(before + 1);
+    });
+
+    test("only an admin can add or edit team members", async () => {
+      for (const persona of ["worker", "landlord", "tenant"] as const) {
+        const client = await clientFor(persona);
+        expectDenied(
+          await client.from("Staff").insert({ first_name: "X", last_name: "Y", email: `${persona}.x@y.test` }).select(),
+          `${persona} must not add team members`,
+        );
+        const upd = await client.from("Staff").update({ job_title: "Boss" }).eq("id", world.staff.worker.id).select();
+        expect(upd.data ?? [], `${persona} must not edit team members`).toEqual([]);
+      }
+    });
   });
 
   describe("rental applications", () => {

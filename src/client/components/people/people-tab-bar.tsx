@@ -54,7 +54,7 @@ export function PeopleTabBar({
 
   useEffect(() => {
     const el = scroller.current?.querySelector<HTMLElement>(`[data-tab="${active}"]`);
-    el?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    el?.scrollIntoView?.({ block: "nearest", inline: "center" });
   }, [active]);
 
   const mask =
