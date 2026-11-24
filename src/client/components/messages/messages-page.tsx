@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { MessageSquare, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
+import { cn } from "@/lib/utils";
 import { MessageThreadRow } from "./message-thread-row";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
@@ -60,6 +69,42 @@ async function loadOfficeInbox(): Promise<OfficeInbox> {
       : Promise.resolve(new Map<string, OfficePerson>()),
   ]);
   return { viewer, summaries, people };
+}
+
+/**
+ * Height left for the inbox inside the page's scroll area, measured from where
+ * the inbox starts. The open thread is given exactly this height, so it fills
+ * the screen and scrolls inside itself whatever sits around it (a top banner,
+ * the phone tab bar). Null until measured; the CSS fallback applies meanwhile.
+ */
+function useAvailableHeight(ref: RefObject<HTMLElement | null>, mounted: boolean): number | null {
+  const [height, setHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!mounted || !el || typeof ResizeObserver === "undefined") {
+      setHeight(null);
+      return;
+    }
+    let scroller = el.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) {
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return;
+    const scrollArea = scroller;
+    const measure = () => {
+      const offset =
+        el.getBoundingClientRect().top - scrollArea.getBoundingClientRect().top + scrollArea.scrollTop;
+      const next = Math.floor(scrollArea.clientHeight - offset);
+      setHeight(next > 0 ? next : null);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scrollArea);
+    return () => observer.disconnect();
+  }, [ref, mounted]);
+
+  return height;
 }
 
 /**
@@ -262,6 +307,9 @@ function StaffMessagesPage({
   }, [workOrders, openedIds, office, linkedThreadId]);
 
   const unreadCount = threads.filter((t) => t.unread).length;
+
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const paneHeight = useAvailableHeight(splitRef, state === "ready" && threads.length > 0);
 
   // Deep-link ?thread=wo:123 or ?thread=office:<userId> — mark opened; clear
   // selection when param absent.
@@ -524,7 +572,11 @@ function StaffMessagesPage({
           <EmptyState message="No conversations yet." />
         )
       ) : (
-        <div className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]">
+        <div
+          ref={splitRef}
+          className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]"
+          style={paneHeight ? { minHeight: paneHeight } : undefined}
+        >
           <div
             className={
               mobileThread && selected
@@ -559,12 +611,17 @@ function StaffMessagesPage({
               ))}
             </ul>
           </div>
+          {/*
+            The thread is one screen tall and scrolls inside itself, so the
+            newest message and the composer stay in view however long the
+            conversation (or the list beside it) gets.
+          */}
           <div
-            className={
-              mobileThread && selected
-                ? "flex min-w-0 flex-1 flex-col"
-                : "hidden min-w-0 flex-1 flex-col md:flex"
-            }
+            className={cn(
+              "h-[calc(100dvh-8rem)] min-w-0 flex-1 flex-col md:sticky md:top-0 md:h-[calc(100dvh-7rem)] md:self-start",
+              mobileThread && selected ? "flex" : "hidden md:flex",
+            )}
+            style={paneHeight ? { height: paneHeight } : undefined}
           >
             {threadPane}
           </div>
