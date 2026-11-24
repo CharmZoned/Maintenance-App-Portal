@@ -14,10 +14,37 @@ import { PriorityChip, StatusChip } from "@/components/patterns";
 import type { RequestStatus } from "@/components/patterns/status-chip";
 import { AdminButton, navProps } from "@/components/dashboard/dashboard-primitives";
 import type { WorkOrder } from "@/types";
-import type { RequestAge, RequestAssignee } from "./maintenance-list";
-import { requestPlaceLine, staffDisplayName } from "./maintenance-list";
+import type { RequestAge, RequestAssignee, RequestPriorityChip } from "./maintenance-list";
+import { priorityChipLevel, requestPlaceLine, staffDisplayName } from "./maintenance-list";
 
 const ICON = { size: 14, strokeWidth: 2, absoluteStrokeWidth: true, "aria-hidden": true } as const;
+
+/**
+ * Pause between the parts of a row for screen readers, so the link reads
+ * "Title, High priority, New, Maple Court · Unit 2B · Tom Lodger, Assigned
+ * to: Sam Fixit, Opened 3 days ago" rather than one run-on string.
+ */
+function Pause({ children = ", " }: { children?: string }) {
+  return <span className="sr-only">{children}</span>;
+}
+
+/** Emergency / High use the shared PriorityChip; Low is a quiet neutral chip. */
+function RowPriorityChip({ level }: { level: RequestPriorityChip }) {
+  const chip =
+    level === "Low" ? (
+      <span className="inline-flex shrink-0 items-center rounded-sm bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+        Low
+      </span>
+    ) : (
+      <PriorityChip level={level} />
+    );
+  return (
+    <>
+      {chip}
+      <Pause>{" priority, "}</Pause>
+    </>
+  );
+}
 
 /**
  * One request in the admin Maintenance list.
@@ -46,23 +73,20 @@ export function MaintenanceRequestRow({
   onOpen: () => void;
   action?: React.ReactNode;
 }) {
-  const titleId = React.useId();
+  const priority = priorityChipLevel(order.priority);
   const body = (
     <>
       <span className="flex min-w-0 flex-col gap-1">
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span id={titleId} className="lg-body-medium min-w-0 break-words text-foreground">
-            {order.title}
-          </span>
-          {order.priority === "urgent" ? (
-            <PriorityChip level="Emergency" />
-          ) : order.priority === "high" ? (
-            <PriorityChip level="High" />
-          ) : null}
+          <span className="lg-body-medium min-w-0 break-words text-foreground">{order.title}</span>
+          <Pause />
+          {priority ? <RowPriorityChip level={priority} /> : null}
           <StatusChip status={status} />
+          <Pause />
         </span>
         <span className="lg-caption break-words text-muted-foreground">
           {requestPlaceLine(order)}
+          <Pause />
         </span>
       </span>
       <span className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 @2xl:contents">
@@ -76,6 +100,7 @@ export function MaintenanceRequestRow({
           <span className="min-w-0 truncate">
             <span className="sr-only">Assigned to: </span>
             {assignee.label}
+            {age.label ? <Pause /> : null}
           </span>
         </span>
         {age.label ? (
@@ -107,7 +132,6 @@ export function MaintenanceRequestRow({
       {href ? (
         <a
           {...navProps(href, onOpen)}
-          aria-labelledby={titleId}
           className={rowClass}
           data-testid="maintenance-row"
         >
@@ -131,12 +155,16 @@ export function AssignMenu({
   title,
   staff,
   busy,
+  disabled = false,
   onAssign,
   onAssignAndSchedule,
 }: {
   title: string;
   staff: StaffMember[];
+  /** This request's assign is saving. */
   busy: boolean;
+  /** Another request's assign is saving: one at a time. */
+  disabled?: boolean;
   onAssign: (member: StaffMember) => void;
   onAssignAndSchedule: () => void;
 }) {
@@ -145,8 +173,9 @@ export function AssignMenu({
       <DropdownMenuTrigger asChild>
         <AdminButton
           className="h-9 gap-1 px-3"
-          disabled={busy}
+          disabled={busy || disabled}
           aria-label={`Assign — ${title}`}
+          data-assign-trigger=""
         >
           <UserPlus {...ICON} size={16} className="shrink-0" />
           <span>{busy ? "Assigning…" : "Assign"}</span>

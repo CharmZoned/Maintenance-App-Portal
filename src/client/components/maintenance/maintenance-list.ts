@@ -28,13 +28,15 @@ export function daysSince(iso: string | null | undefined, now: Date = new Date()
   return Math.max(0, dayDiff(day, toDay(now)));
 }
 
-/** "today" · "yesterday" · "3 days ago" · "2 weeks ago" · "3 months ago" */
+/** "today" · "yesterday" · "3 days ago" · "2 weeks ago" · "3 months ago" · "2 years ago" */
 export function relativeAge(days: number): string {
   if (days <= 0) return "today";
   if (days === 1) return "yesterday";
   if (days < 14) return `${days} days ago`;
   if (days < 60) return `${Math.floor(days / 7)} weeks ago`;
-  return `${Math.floor(days / 30)} months ago`;
+  if (days < 365) return `${Math.min(11, Math.floor(days / 30))} months ago`;
+  const years = Math.floor(days / 365);
+  return years === 1 ? "1 year ago" : `${years} years ago`;
 }
 
 export interface RequestAge {
@@ -77,6 +79,27 @@ const PRIORITY_RANK: Record<WorkOrderPriority, number> = {
 
 function priorityRank(priority: WorkOrderPriority | string): number {
   return PRIORITY_RANK[priority as WorkOrderPriority] ?? PRIORITY_RANK.normal;
+}
+
+/** Chip shown beside a request title: every priority except normal gets one. */
+export type RequestPriorityChip = "Emergency" | "High" | "Low";
+
+/**
+ * Which priority chip a row shows. Normal is the default and shows nothing;
+ * low is shown (quietly) so a low request sitting at the bottom of the Needs
+ * action queue explains itself.
+ */
+export function priorityChipLevel(priority: WorkOrderPriority | string): RequestPriorityChip | null {
+  switch (priority) {
+    case "urgent":
+      return "Emergency";
+    case "high":
+      return "High";
+    case "low":
+      return "Low";
+    default:
+      return null;
+  }
 }
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   compareNeedsAction,
   daysSince,
+  priorityChipLevel,
   relativeAge,
   requestAge,
   requestAssignee,
@@ -51,7 +52,11 @@ describe("relativeAge", () => {
     [14, "2 weeks ago"],
     [59, "8 weeks ago"],
     [60, "2 months ago"],
-    [400, "13 months ago"],
+    [329, "10 months ago"],
+    [364, "11 months ago"],
+    [365, "1 year ago"],
+    [400, "1 year ago"],
+    [730, "2 years ago"],
   ])("%i days → %s", (days, label) => {
     expect(relativeAge(days)).toBe(label);
   });
@@ -123,6 +128,18 @@ describe("compareNeedsAction / sortForQueueTab", () => {
     expect(sortForQueueTab(list, "needs").map((r) => r.id)).toEqual([4, 6, 3, 5, 1, 2]);
   });
 
+  test("every priority that sorts away from normal shows a chip explaining why", () => {
+    const sorted = sortForQueueTab(list, "needs");
+    expect(sorted.map((r) => priorityChipLevel(r.priority))).toEqual([
+      "Emergency",
+      "High",
+      "High",
+      null,
+      null,
+      "Low",
+    ]);
+  });
+
   test("ties on priority and time fall back to id", () => {
     const at = localIso(2026, 10, 20);
     expect(compareNeedsAction(row(9, "normal", at), row(7, "normal", at))).toBeGreaterThan(0);
@@ -189,5 +206,17 @@ describe("staffDisplayName / requestPlaceLine", () => {
       "Birch House · Unit Main",
     );
     expect(requestPlaceLine({})).toBe("—");
+  });
+});
+
+describe("priorityChipLevel", () => {
+  test.each([
+    ["urgent", "Emergency"],
+    ["high", "High"],
+    ["normal", null],
+    ["low", "Low"],
+    ["unexpected", null],
+  ] as const)("%s → %s", (priority, level) => {
+    expect(priorityChipLevel(priority)).toBe(level);
   });
 });

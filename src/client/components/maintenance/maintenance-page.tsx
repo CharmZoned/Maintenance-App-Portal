@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import {
@@ -103,6 +103,10 @@ function StaffLandlordMaintenancePage({
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
   /** Request whose inline Assign is saving. */
   const [assigningId, setAssigningId] = useState<number | null>(null);
+  /** Position in the list of the row last assigned inline; focus goes back there after the reload. */
+  const refocusAssignAt = useRef<number | null>(null);
+  const listRef = useRef<HTMLOListElement | null>(null);
+  const staffTabsRef = useRef<HTMLDivElement | null>(null);
 
   const listWorkOrders = app.listWorkOrders;
   const setError = app.setError;
@@ -276,6 +280,21 @@ function StaffLandlordMaintenancePage({
     focusFilter,
   ]);
 
+  // After an inline Assign the row leaves Needs action and its trigger unmounts.
+  // Keep keyboard users in place: focus the Assign button now in that slot (the
+  // next request), else the list, else the selected tab.
+  useEffect(() => {
+    const at = refocusAssignAt.current;
+    if (at == null || assigningId != null) return;
+    refocusAssignAt.current = null;
+    const triggers = listRef.current?.querySelectorAll<HTMLElement>("[data-assign-trigger]");
+    const target =
+      (triggers && triggers.length > 0 ? triggers[Math.min(at, triggers.length - 1)] : null) ??
+      listRef.current ??
+      staffTabsRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    target?.focus();
+  }, [filtered, assigningId]);
+
   const activeCount = orders.filter((o) => o.status !== "closed").length;
   const meta = useAudienceTabs
     ? `${activeCount} active`
@@ -300,6 +319,7 @@ function StaffLandlordMaintenancePage({
   async function assignOrder(w: WorkOrder, member: StaffMember) {
     if (assigningId != null) return;
     setAssigningId(w.id);
+    refocusAssignAt.current = Math.max(0, filtered.findIndex((o) => o.id === w.id));
     try {
       await app.updateWorkOrder(
         w.id,
@@ -359,7 +379,7 @@ function StaffLandlordMaintenancePage({
           />
         </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
+        <div ref={staffTabsRef} className="flex flex-wrap gap-2">
           <QueueTab
             label={`Needs action (${counts.needs})`}
             active={staffTab === "needs"}
@@ -472,8 +492,10 @@ function StaffLandlordMaintenancePage({
         </div>
       ) : !useAudienceTabs ? (
         <ol
+          ref={listRef}
+          tabIndex={-1}
           aria-label="Maintenance requests"
-          className="@container overflow-hidden rounded-md border border-border bg-card divide-y divide-border"
+          className="@container outline-none overflow-hidden rounded-md border border-border bg-card divide-y divide-border"
         >
           {filtered.map((w) => {
             const canAssign =
@@ -496,6 +518,7 @@ function StaffLandlordMaintenancePage({
                       title={w.title}
                       staff={staff}
                       busy={assigningId === w.id}
+                      disabled={assigningId != null}
                       onAssign={(member) => void assignOrder(w, member)}
                       onAssignAndSchedule={() => openOrder(w)}
                     />
