@@ -11,6 +11,9 @@
  *     own photo row only while it has no file);
  *   - only the reporting tenant can reopen, with a note, and not after they
  *     confirmed the fix.
+ *
+ * And from 20261124130000_work_photo_cap_per_visit.sql: the 5-work-photo cap
+ * counts the current visit only, so a reopened job is never stuck.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
@@ -207,5 +210,24 @@ describe("[WF5] the tenant's \"Is it fixed?\"", () => {
     await signInApp("tenant");
     await data.reopenMaintenanceRequestNotFixed(unassigned, "Not done.");
     expect((await status(unassigned)).status).toBe("Open");
+  });
+});
+
+describe("[WF5] the work-photo cap counts the current visit only", () => {
+  test("a job reopened with 5 work photos still takes the new proof", async () => {
+    const id = await startedBySam("Leaking trap");
+    for (let i = 1; i <= 5; i += 1) await data.uploadMaintenancePhoto(id, pngFile(`first-${i}.png`));
+    await expect(data.uploadMaintenancePhoto(id, pngFile("first-6.png"))).rejects.toThrow(/at most 5 work photos/);
+    expect(await complete(id)).toMatchObject({ status: "closed" });
+
+    await signInApp("tenant");
+    await data.reopenMaintenanceRequestNotFixed(id, "Still leaking under the sink.");
+
+    await signInApp("worker");
+    await data.updateWorkOrder(id, { status: "in_progress" }, { previousStatus: "scheduled" });
+    await expect(complete(id, "Resealed the trap.")).rejects.toThrow(/photo of the finished work/);
+    await data.uploadMaintenancePhoto(id, pngFile("second-visit.png"));
+    expect(await complete(id, "Resealed the trap.")).toMatchObject({ status: "closed" });
+    expect(await photoRows(id)).toHaveLength(6);
   });
 });

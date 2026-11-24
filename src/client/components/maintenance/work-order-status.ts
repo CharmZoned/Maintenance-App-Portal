@@ -20,12 +20,24 @@ export const MAX_MAINTENANCE_PHOTOS = 5;
  * The DB keeps two caps of MAX_MAINTENANCE_PHOTOS per request: photos uploaded by
  * the worker, and photos from everyone else. A tenant's photos must not use up
  * the room a worker needs for the required completion photo.
+ *
+ * Work photos count only for the current visit: those taken after `workSince`
+ * (ms; the latest of accepted, released and last reopened, as in
+ * completionPhotoSince). Older work photos stay as history, so a job reopened
+ * with five photos still has room for the new proof. Mirrors
+ * private.enforce_maintenance_photo_cap.
  */
 export function photoSlotsLeft(
-  photos: { uploaded_by_role: string | null }[],
+  photos: { uploaded_by_role: string | null; created_at?: string | null }[],
   uploaderIsWorker: boolean,
+  workSince: number | null = null,
 ): number {
-  const used = photos.filter((p) => (p.uploaded_by_role === "maintenance") === uploaderIsWorker).length;
+  const used = photos.filter((p) => {
+    if ((p.uploaded_by_role === "maintenance") !== uploaderIsWorker) return false;
+    if (!uploaderIsWorker || workSince == null) return true;
+    const t = p.created_at ? Date.parse(p.created_at) : NaN;
+    return Number.isNaN(t) || t > workSince;
+  }).length;
   return Math.max(0, MAX_MAINTENANCE_PHOTOS - used);
 }
 

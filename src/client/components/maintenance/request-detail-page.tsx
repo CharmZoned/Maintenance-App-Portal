@@ -64,7 +64,7 @@ import {
 import { RequestHeader } from "./request/request-header";
 import { RequestPhotosCard } from "./request/request-photos-card";
 import { CompleteJobDialog } from "./request/complete-job-dialog";
-import { completionProof, lastReopenedAt } from "./request/completion-proof";
+import { completionProof, lastReopenedAt, completionPhotoSince } from "./request/completion-proof";
 import { NoteDialog } from "./request/note-dialog";
 import type { PendingPhoto } from "./request/photo-tiles";
 import { TenantFixCheck, tenantFixState, tenantFixSummary } from "./request/tenant-fix-check";
@@ -557,7 +557,7 @@ export function RequestDetailView({
             <RequestPhotosCard
               photos={photos}
               max={MAX_MAINTENANCE_PHOTOS}
-              slotsLeft={photoSlotsLeft(photos, isWorker)}
+              slotsLeft={photoSlotsLeft(photos, isWorker, completionPhotoSince(order, history))}
               canAdd={visibility.addPhotos}
               uploading={uploading}
               onAdd={visibility.addPhotos ? onAddPhotos : undefined}
@@ -1248,7 +1248,7 @@ export function RequestDetailPage({
 
   function addPhotos(files: FileList | File[]) {
     const inFlight = isWorker ? pending.length : 0;
-    const picked = takePhotoFiles(files, Math.max(0, photoSlotsLeft(photos, isWorker) - inFlight));
+    const picked = takePhotoFiles(files, Math.max(0, photoSlotsLeft(photos, isWorker, proof.since) - inFlight));
     if (picked.length === 0) return;
     const items: PendingPhoto[] = picked.map((file) => {
       const key = `pending-${++pendingSeq}`;
@@ -1602,7 +1602,7 @@ export function RequestDetailPage({
         proofPhotos={isWorker ? proof.photos : []}
         need={isWorker ? proof.need : "none"}
         pending={pending}
-        slotsLeft={Math.max(0, photoSlotsLeft(photos, isWorker) - pending.length)}
+        slotsLeft={Math.max(0, photoSlotsLeft(photos, isWorker, proof.since) - pending.length)}
         uploading={uploading}
         onAddPhotos={addPhotos}
         onRetryPending={retryPending}
