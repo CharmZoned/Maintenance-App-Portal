@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Receipt, Sparkles } from "lucide-react";
 import { useApp } from "@/context";
-import { queryPeriod, type DeepLinkProps } from "@/lib/deep-link";
+import { queryId, queryPeriod, type DeepLinkProps } from "@/lib/deep-link";
 import { feedbackForGenerateCharges } from "@/lib/generate-charges-feedback";
 import { addMonths, cn, currentPeriod, formatDate, formatMoney, formatPeriod } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PaymentDialog } from "./payment-dialog";
+import { AwaitingVerificationSection, verifiedNotice, type VerificationFocus } from "./zelle-verification";
 import type { ChargeStatus, RentCharge } from "@/types";
+import type { ReportedZellePayment } from "@/lib/zelle-payments";
 import { PageShell } from "@/components/page-shell";
 
 const STATUS_TONE: Record<ChargeStatus, string> = {
@@ -26,13 +28,24 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
   const [loading, setLoading] = useState(true);
   const [paymentTarget, setPaymentTarget] = useState<RentCharge | null>(null);
   const [generating, setGenerating] = useState(false);
+  /** What a deep link pointed at in "Awaiting verification" (`?verify=<intentId>` or `?period=`). */
+  const [verifyFocus, setVerifyFocus] = useState<VerificationFocus | null>(null);
+  const [verificationRefresh, setVerificationRefresh] = useState(0);
 
   useEffect(() => {
     const fromQuery = queryPeriod(search);
-    if (!fromQuery) return;
-    setPeriod(fromQuery);
+    const verify = queryId(search, "verify");
+    if (!fromQuery && verify == null) return;
+    if (fromQuery) setPeriod(fromQuery);
+    setVerifyFocus({ intentId: verify, period: fromQuery });
     replace?.("/rent");
   }, [search, replace]);
+
+  /** Period stepper: a manual move ends whatever the deep link was pointing at. */
+  function stepPeriod(next: string | ((current: string) => string)) {
+    setVerifyFocus(null);
+    setPeriod(next);
+  }
 
   const listCharges = app.listCharges;
   const setError = app.setError;
@@ -111,6 +124,26 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
     }
   }
 
+  /** `?verify=<id>` without a period: show the month the payment belongs to. */
+  function showPeriodOf(payment: ReportedZellePayment) {
+    const chargePeriod = payment.charge?.period;
+    if (verifyFocus?.period == null && chargePeriod) setPeriod(chargePeriod);
+  }
+
+  /** A reported Zelle payment was confirmed: refresh the table and totals, then say so. */
+  async function afterVerified(payment: ReportedZellePayment) {
+    setVerifyFocus(null);
+    const reloaded = await load();
+    if (!reloaded) {
+      // Keep the load error — do not cover it with a green success notice.
+      app.setNotice(null);
+      app.setError(`${verifiedNotice(payment, app.settings.currency)} The list failed to refresh.`);
+      return;
+    }
+    app.setError(null);
+    app.setNotice(verifiedNotice(payment, app.settings.currency));
+  }
+
   const totals = useMemo(() => {
     const charged = charges.reduce((s, c) => s + (c.amount ?? 0), 0);
     const collected = charges.reduce((s, c) => s + (c.amount_paid ?? 0), 0);
@@ -130,12 +163,12 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
           {/* The period stepper is view state, so it sits left of the one ink
               action and names its current value rather than saying "Period". */}
           <div className="inline-flex items-center rounded-full bg-muted p-[0.1875rem]">
-            <Button variant="ghost" size="icon" onClick={() => setPeriod((p) => addMonths(p, -1))} aria-label="Previous month">
+            <Button variant="ghost" size="icon" onClick={() => stepPeriod((p) => addMonths(p, -1))} aria-label="Previous month">
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <button
               type="button"
-              onClick={() => setPeriod(currentPeriod())}
+              onClick={() => stepPeriod(currentPeriod())}
               className={cn(
                 "rounded-sm px-3 py-1 text-sm font-medium transition-colors duration-150",
                 period === currentPeriod()
@@ -145,7 +178,7 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
             >
               {formatPeriod(period)}
             </button>
-            <Button variant="ghost" size="icon" onClick={() => setPeriod((p) => addMonths(p, 1))} aria-label="Next month">
+            <Button variant="ghost" size="icon" onClick={() => stepPeriod((p) => addMonths(p, 1))} aria-label="Next month">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
@@ -171,6 +204,15 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
             tone={totals.overdue > 0 ? "danger" : "default"}
           />
         </section>
+
+        <AwaitingVerificationSection
+          currency={app.settings.currency}
+          canVerify={app.canMutatePortfolio}
+          focus={verifyFocus}
+          refreshKey={verificationRefresh}
+          onLocated={showPeriodOf}
+          onVerified={(payment) => void afterVerified(payment)}
+        />
 
         {loading ? (
           <Card className="divide-y divide-border overflow-hidden" role="status" aria-label="Loading rent charges">
@@ -264,7 +306,11 @@ export function RentPage({ search = "", replace }: DeepLinkProps = {}) {
         open={paymentTarget !== null}
         onOpenChange={(o) => { if (!o) setPaymentTarget(null); }}
         charge={paymentTarget}
-        onSaved={load}
+        onSaved={() => {
+          void load();
+          // A payment recorded by hand changes what a waiting Zelle report would settle against.
+          setVerificationRefresh((n) => n + 1);
+        }}
       />
     </PageShell>
   );

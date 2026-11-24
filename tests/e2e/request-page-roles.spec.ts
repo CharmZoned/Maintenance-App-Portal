@@ -41,7 +41,8 @@ test.describe("Request page · per role", () => {
   test("Landlord · opens a request in one click and never sees Urgent", async ({ page }) => {
     await signIn(page, "landlord");
     await page.goto("/maintenance");
-    await page.getByRole("link", { name: new RegExp(EMERGENCY) }).filter({ visible: true }).first().click();
+    // The landlord queue (grouped by property) opens the request from its row's View control.
+    await page.getByRole("button", { name: `View ${EMERGENCY}` }).filter({ visible: true }).first().click();
     await expect(page).toHaveURL(/\/maintenance\/\d+$/);
     await expect(page.getByRole("heading", { name: EMERGENCY })).toBeVisible();
     await expect(page.getByText("Emergency").first()).toBeVisible();

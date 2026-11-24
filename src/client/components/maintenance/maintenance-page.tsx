@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { AdminNewRequestDialog } from "./admin-new-request-dialog";
 import { TenantRequestsPage } from "./tenant-requests-page";
+import { LandlordMaintenancePage } from "./landlord-maintenance-page";
 import type { WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
 import { EmptyState, ErrorRetry } from "@/components/patterns";
@@ -42,7 +43,6 @@ import {
 } from "./request-list-sort";
 
 type StaffTab = "needs" | "active" | "completed" | "all";
-type LandlordTab = "open" | "completed";
 
 const LIST_ERROR = "We couldn't load the requests. Check your connection and try again.";
 
@@ -53,7 +53,10 @@ export function MaintenancePage(
   if (app.isTenant) {
     return <TenantRequestsPage {...props} />;
   }
-  return <StaffLandlordMaintenancePage {...props} />;
+  if (app.isLandlord) {
+    return <LandlordMaintenancePage {...props} />;
+  }
+  return <StaffMaintenancePage {...props} />;
 }
 
 /** "Unit 1A" / "Common area" (no unit on the request). */
@@ -80,26 +83,25 @@ const RECOMMENDED: Record<StaffTab, RecommendedOrder> = {
 };
 
 /**
- * Admin + landlord maintenance list (spec §6, U6 / U9). One shared request row
- * (RequestListTable); a single click opens `/maintenance/:id`.
+ * Staff maintenance list (spec §6, U6). One shared request row
+ * (RequestListTable); a single click opens `/maintenance/:id`. Landlords use
+ * LandlordMaintenancePage (grouped by property), which opens the same page.
  */
-function StaffLandlordMaintenancePage({
+function StaffMaintenancePage({
   search = "",
   replace,
   navigate,
 }: DeepLinkProps & { navigate?: (to: string) => void } = {}) {
   const app = useApp();
-  const isLandlord = app.isLandlord;
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [staffTab, setStaffTab] = useState<StaffTab>("needs");
-  const [landlordTab, setLandlordTab] = useState<LandlordTab>("open");
   const [propertyFilter, setPropertyFilter] = useState<string>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [query, setQuery] = useState("");
   const [staff, setStaff] = useState<StaffMember[]>([]);
-  const sortKey = `maintenance-list-sort:${isLandlord ? "landlord" : "admin"}`;
+  const sortKey = "maintenance-list-sort:admin";
   const [sort, setSortState] = useState<RequestSort | null>(() => readStoredSort(sortKey));
   // Admin "New request" form (Figma 28:58861); `openNewRequest` is the single entry.
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -222,12 +224,7 @@ function StaffLandlordMaintenancePage({
 
   const filtered = useMemo(() => {
     let list = orders;
-    if (isLandlord) {
-      list =
-        landlordTab === "completed"
-          ? list.filter((o) => o.status === "closed")
-          : list.filter((o) => o.status !== "closed");
-    } else if (staffTab !== "all") {
+    if (staffTab !== "all") {
       list = list.filter(
         (o) => staffQueueTab(o.status, Boolean(o.assigned_staff_id)) === staffTab,
       );
@@ -236,7 +233,7 @@ function StaffLandlordMaintenancePage({
       const pid = Number(propertyFilter);
       list = list.filter((o) => o.property_id === pid);
     }
-    if (assigneeFilter !== "all" && !isLandlord) {
+    if (assigneeFilter !== "all") {
       if (assigneeFilter === "unassigned") {
         list = list.filter((o) => o.assigned_staff_id == null);
       } else {
@@ -244,9 +241,9 @@ function StaffLandlordMaintenancePage({
         list = list.filter((o) => o.assigned_staff_id === sid);
       }
     }
-    if (!isLandlord && focusFilter === "unassigned") {
+    if (focusFilter === "unassigned") {
       list = list.filter((o) => o.status === "open" && !o.assigned_staff_id);
-    } else if (!isLandlord && focusFilter === "urgent") {
+    } else if (focusFilter === "urgent") {
       list = list.filter((o) => o.status !== "closed" && o.priority === "urgent");
     }
     const q = query.trim().toLowerCase();
@@ -269,15 +266,13 @@ function StaffLandlordMaintenancePage({
     }
     return sort
       ? sortRequests(list, sort, assigneeNameOf)
-      : sortRecommended(list, isLandlord ? "newest" : RECOMMENDED[staffTab]);
+      : sortRecommended(list, RECOMMENDED[staffTab]);
   }, [
     orders,
     staffTab,
-    landlordTab,
     propertyFilter,
     assigneeFilter,
     query,
-    isLandlord,
     focusFilter,
     sort,
     assigneeNameOf,
@@ -289,47 +284,24 @@ function StaffLandlordMaintenancePage({
     () =>
       filtered.map((o) => ({
         order: o,
-        context: isLandlord ? placeLabel(o) || o.property_name || "—" : adminContext(o),
+        context: adminContext(o),
         assigneeName: assigneeNameOf(o),
       })),
-    [filtered, isLandlord, assigneeNameOf],
+    [filtered, assigneeNameOf],
   );
 
-  /** Landlord: one section per property, newest first within each. */
-  const groups = useMemo(() => {
-    if (!isLandlord) return [];
-    const byKey = new Map<string, { name: string; items: RequestListItem[] }>();
-    for (const item of items) {
-      const key = item.order.property_id != null ? String(item.order.property_id) : "none";
-      const name = item.order.property_name || "Other";
-      const g = byKey.get(key) ?? { name, items: [] };
-      g.items.push(item);
-      byKey.set(key, g);
-    }
-    return [...byKey.entries()]
-      .map(([key, g]) => ({ key, ...g }))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-  }, [items, isLandlord]);
-
-  const propertyCount = useMemo(() => {
-    if (app.properties.length > 0) return app.properties.length;
-    return new Set(orders.map((o) => o.property_id).filter((id) => id != null)).size;
-  }, [app.properties, orders]);
-
-  const meta = isLandlord
-    ? `${counts.open} open · ${propertyCount} ${propertyCount === 1 ? "property" : "properties"}`
-    : [
-        `${counts.needs} new`,
-        counts.emergency > 0 ? `${counts.emergency} emergency` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
+  const meta = [
+    `${counts.needs} new`,
+    counts.emergency > 0 ? `${counts.emergency} emergency` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const filtersActive =
     propertyFilter !== "all" ||
-    (!isLandlord && assigneeFilter !== "all") ||
+    assigneeFilter !== "all" ||
     query.trim().length > 0 ||
-    (!isLandlord && focusFilter != null);
+    focusFilter != null;
 
   function openOrder(w: WorkOrder) {
     if (navigate) {
@@ -353,17 +325,13 @@ function StaffLandlordMaintenancePage({
     setPropertyFilter("all");
     setAssigneeFilter("all");
     setQuery("");
-    if (isLandlord) setLandlordTab("open");
-    else setStaffTab("all");
+    setStaffTab("all");
     if (focusFilter) replace?.("/maintenance");
   }
 
   const canCreate = app.canCreateWorkOrders;
 
   function tabEmptyMessage(): string {
-    if (isLandlord) {
-      return landlordTab === "completed" ? "No completed requests yet." : "Nothing open right now.";
-    }
     switch (staffTab) {
       case "needs":
         return "Nothing needs action right now.";
@@ -386,11 +354,7 @@ function StaffLandlordMaintenancePage({
         <div className="rounded-md border border-border bg-card">
           <EmptyState
             icon={<Inbox className="size-5" aria-hidden />}
-            message={
-              isLandlord
-                ? "No maintenance requests for your properties yet."
-                : "No maintenance requests yet. They will appear here as soon as a tenant or your team reports one."
-            }
+            message="No maintenance requests yet. They will appear here as soon as a tenant or your team reports one."
             actionLabel={canCreate ? "New request" : undefined}
             onAction={canCreate ? openNewRequest : undefined}
           />
@@ -410,26 +374,6 @@ function StaffLandlordMaintenancePage({
           ) : (
             <EmptyState icon={<Inbox className="size-5" aria-hidden />} message={tabEmptyMessage()} />
           )}
-        </div>
-      );
-    }
-    if (isLandlord) {
-      return (
-        <div className="space-y-6">
-          {groups.map((g) => (
-            <section key={g.key} className="space-y-3" aria-label={g.name}>
-              <h2 className="text-[15px] font-semibold leading-[22px] text-foreground">{g.name}</h2>
-              <RequestListTable
-                items={g.items}
-                onOpen={openOrder}
-                thumbnails={thumbnails}
-                dateColumn="reported"
-                sort={sort}
-                onSortChange={setSort}
-                ariaLabel={`Maintenance requests at ${g.name}`}
-              />
-            </section>
-          ))}
         </div>
       );
     }
@@ -478,82 +422,60 @@ function StaffLandlordMaintenancePage({
         ) : null
       }
     >
-      {isLandlord ? (
-        <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-          <div className="flex flex-wrap gap-2" aria-label="Request status">
-            <RequestListTab
-              label="Open"
-              active={landlordTab === "open"}
-              onClick={() => setLandlordTab("open")}
-            />
-            <RequestListTab
-              label="Completed"
-              active={landlordTab === "completed"}
-              onClick={() => setLandlordTab("completed")}
-            />
-          </div>
-          <div className="hidden flex-1 md:block" />
-          <div className="flex flex-col gap-2 md:flex-row md:items-center">
-            {propertySelect}
-            <RequestSortMenu sort={sort} onSortChange={setSort} className="h-11 w-full md:h-8 md:w-auto" />
-          </div>
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+        {/* Phone: one row that scrolls sideways instead of wrapping "All" onto its own line. */}
+        <div
+          className="-mx-6 -my-1 flex gap-2 overflow-x-auto px-6 py-1 [scrollbar-width:none] md:mx-0 md:my-0 md:py-0 md:flex-wrap md:overflow-visible md:px-0 [&>*]:shrink-0"
+          aria-label="Request queue"
+        >
+          <RequestListTab
+            label={loading || listError ? "Needs action" : `Needs action (${counts.needs})`}
+            active={staffTab === "needs"}
+            onClick={() => selectStaffTab("needs")}
+          />
+          <RequestListTab
+            label="Active"
+            active={staffTab === "active"}
+            onClick={() => selectStaffTab("active")}
+          />
+          <RequestListTab
+            label="Completed"
+            active={staffTab === "completed"}
+            onClick={() => selectStaffTab("completed")}
+          />
+          <RequestListTab label="All" active={staffTab === "all"} onClick={() => selectStaffTab("all")} />
         </div>
-      ) : (
+        <div className="hidden flex-1 md:block" />
         <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-          {/* Phone: one row that scrolls sideways instead of wrapping "All" onto its own line. */}
-          <div
-            className="-mx-6 -my-1 flex gap-2 overflow-x-auto px-6 py-1 [scrollbar-width:none] md:mx-0 md:my-0 md:py-0 md:flex-wrap md:overflow-visible md:px-0 [&>*]:shrink-0"
-            aria-label="Request queue"
-          >
-            <RequestListTab
-              label={loading || listError ? "Needs action" : `Needs action (${counts.needs})`}
-              active={staffTab === "needs"}
-              onClick={() => selectStaffTab("needs")}
-            />
-            <RequestListTab
-              label="Active"
-              active={staffTab === "active"}
-              onClick={() => selectStaffTab("active")}
-            />
-            <RequestListTab
-              label="Completed"
-              active={staffTab === "completed"}
-              onClick={() => selectStaffTab("completed")}
-            />
-            <RequestListTab label="All" active={staffTab === "all"} onClick={() => selectStaffTab("all")} />
-          </div>
-          <div className="hidden flex-1 md:block" />
-          <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-            <Input
-              type="search"
-              className="h-11 w-full text-sm md:h-8 md:w-[280px]"
-              placeholder="Search title or request number"
-              aria-label="Search title or request number"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {propertySelect}
-            <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
-              <SelectTrigger
-                className="h-11 w-full text-sm md:h-8 md:w-auto md:min-w-[9rem]"
-                aria-label="Filter by assignee"
-              >
-                <SelectValue placeholder="Any assignee" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Any assignee</SelectItem>
-                <SelectItem value="unassigned">Not assigned</SelectItem>
-                {staff.map((s) => (
-                  <SelectItem key={s.id} value={String(s.id)}>
-                    {staffDisplayName(s)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <RequestSortMenu sort={sort} onSortChange={setSort} className="h-11 w-full md:h-8 md:w-auto" />
-          </div>
+          <Input
+            type="search"
+            className="h-11 w-full text-sm md:h-8 md:w-[280px]"
+            placeholder="Search title or request number"
+            aria-label="Search title or request number"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {propertySelect}
+          <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+            <SelectTrigger
+              className="h-11 w-full text-sm md:h-8 md:w-auto md:min-w-[9rem]"
+              aria-label="Filter by assignee"
+            >
+              <SelectValue placeholder="Any assignee" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any assignee</SelectItem>
+              <SelectItem value="unassigned">Not assigned</SelectItem>
+              {staff.map((s) => (
+                <SelectItem key={s.id} value={String(s.id)}>
+                  {staffDisplayName(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <RequestSortMenu sort={sort} onSortChange={setSort} className="h-11 w-full md:h-8 md:w-auto" />
         </div>
-      )}
+      </div>
 
       {body()}
 

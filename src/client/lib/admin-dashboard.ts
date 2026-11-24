@@ -93,7 +93,10 @@ export interface AdminDashboardSources {
   // Core — without these the page cannot be drawn at all.
   properties: Property[];
   units: Unit[];
-  /** Every request, open and closed (closed ones feed "completed" and spend). */
+  /**
+   * Every open request, plus closed ones completed since `dashboardClosedSince`
+   * (they feed "completed", spend, and recent activity and threads).
+   */
   workOrders: WorkOrder[];
 
   // Secondary — each degrades only the tiles and cards that use it.
@@ -138,6 +141,8 @@ const ROUTES = {
   request: (id: number) => `/maintenance/${id}`,
   rent: "/rent",
   rentPeriod: (period: string) => `/rent?period=${period}`,
+  /** The Rent page opens the reported Zelle payment waiting to be verified. */
+  rentVerify: (intentId: number) => `/rent?verify=${intentId}`,
   properties: "/properties",
   property: (id: number) => `/properties/${id}`,
   /** People → Approvals tab (the page reads `?tab=`). */
@@ -145,6 +150,8 @@ const ROUTES = {
   messages: "/messages",
   /** The Messages page opens a request thread from `?thread=wo:<id>`. */
   requestThread: (id: number) => `/messages?thread=wo:${id}`,
+  /** Direct office DM from `?thread=office:<auth user id>`. */
+  officeThread: (userId: string) => `/messages?thread=office:${userId}`,
   listings: "/listings",
   /** The Leases page resolves `?lease=` to the tenant record or the lease editor. */
   lease: (id: number) => `/leases?lease=${id}`,
@@ -280,6 +287,20 @@ function shiftPeriod(period: string, delta: number): string {
 }
 
 /** The three rent periods the dashboard reads: last month, this month, next month. */
+/** How far back closed requests still matter for recent activity and threads. */
+export const CLOSED_REQUEST_LOOKBACK_DAYS = 90;
+
+/**
+ * The oldest completion time a closed request can have and still show on the
+ * dashboard: the start of this year (spend "this year") or the activity
+ * look-back, whichever is earlier. Returned as an ISO instant for the query.
+ */
+export function dashboardClosedSince(now: Date): string {
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const lookBack = new Date(now.getFullYear(), now.getMonth(), now.getDate() - CLOSED_REQUEST_LOOKBACK_DAYS);
+  return (startOfYear < lookBack ? startOfYear : lookBack).toISOString();
+}
+
 export function dashboardChargePeriods(now: Date): string[] {
   const current = periodOf(toDay(now));
   return [shiftPeriod(current, -1), current, shiftPeriod(current, 1)];
@@ -892,7 +913,7 @@ function buildAttention(ctx: Ctx): AttentionModel {
           placeCompact(charge?.property_name ?? null, charge?.unit_name ?? null),
           lateness,
         ]),
-        href: charge?.period ? ROUTES.rentPeriod(charge.period) : ROUTES.rent,
+        href: ROUTES.rentVerify(intent.id),
         actionLabel: "Verify",
       },
     });
@@ -1170,7 +1191,7 @@ function buildCalendar(ctx: Ctx): DashboardCalendarModel {
         placeLine(intent.charge?.property_name ?? null, intent.charge?.unit_name ?? null),
       ].filter(Boolean),
       actionLabel: "Open rent",
-      href: intent.charge?.period ? ROUTES.rentPeriod(intent.charge.period) : ROUTES.rent,
+      href: ROUTES.rentVerify(intent.id),
     });
   }
 
@@ -1428,7 +1449,7 @@ function buildActivity(ctx: Ctx): ActivityModel {
         "Awaiting verification",
         whenLabel(moment, today),
       ]),
-      href: intent.charge?.period ? ROUTES.rentPeriod(intent.charge.period) : ROUTES.rent,
+      href: ROUTES.rentVerify(intent.id),
       moment,
     });
   }
@@ -1717,7 +1738,7 @@ function buildMessages(ctx: Ctx): MessagesModel {
       preview: oneLine(thread.last_message_body, 140),
       time: threadTime(moment, today),
       unread: thread.unread,
-      href: ROUTES.messages,
+      href: ROUTES.officeThread(thread.thread_user_id),
       ms: moment.ms,
     });
   }

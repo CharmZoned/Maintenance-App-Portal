@@ -5,7 +5,7 @@ export function SkeletonRow({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-[100px] w-full items-center justify-between border-b border-border bg-background px-4 py-3",
+        "flex h-[100px] w-full items-center justify-between border-b border-border bg-background px-4 py-3 admin:bg-card",
         className,
       )}
       aria-hidden

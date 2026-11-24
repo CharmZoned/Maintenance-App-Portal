@@ -9,6 +9,8 @@ export type AdminNavCounts = {
   maintenance?: number;
   /** Accounts waiting for approval — admins only. */
   people?: number;
+  /** Unread OfficeMessages threads for the signed-in viewer. */
+  messages?: number;
 };
 
 async function countOpenRequests(): Promise<number | undefined> {
@@ -27,6 +29,11 @@ async function countPendingAccounts(): Promise<number | undefined> {
   return accounts.filter((a) => a.account_status === "pending").length;
 }
 
+async function countUnreadOfficeThreads(): Promise<number | undefined> {
+  // Slim scan (no message bodies) — see data.countUnreadOfficeThreads.
+  return data.countUnreadOfficeThreads();
+}
+
 /**
  * Counts for the admin workspace rail. Loads in the background (never blocks
  * rendering) and again whenever `refreshKey` changes — pass the current path so
@@ -34,7 +41,6 @@ async function countPendingAccounts(): Promise<number | undefined> {
  *
  * Each count is independent and fails silently: a count that cannot be loaded
  * is dropped, so the rail shows no badge rather than a stale or invented one.
- * Messages has no count here: the portal has no real unread-message count yet.
  */
 export function useAdminNavCounts({
   enabled,
@@ -63,6 +69,7 @@ export function useAdminNavCounts({
         });
     };
     load("maintenance", countOpenRequests);
+    load("messages", countUnreadOfficeThreads);
     if (isAdmin) load("people", countPendingAccounts);
     else setCounts((prev) => (prev.people === undefined ? prev : { ...prev, people: undefined }));
     return () => {

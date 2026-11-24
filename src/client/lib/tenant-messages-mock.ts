@@ -1,10 +1,9 @@
 /**
- * Typed mock inbox + threads for the Tenant Messages screen (Figma M/T/D).
+ * Legacy typed mock inbox for Tenant Messages demo states (`?demo=empty|error`)
+ * and unit tests of the old Figma sample threads.
  *
- * // TODO(data-gap): messages backend not available
- * No conversations / messages tables exist in Supabase. This module is the
- * sole data source until a messages/chat migration is approved. Do not wire
- * Supabase `.from(...)` for chat here.
+ * Live tenant messaging uses OfficeMessages + MaintenanceRequestComments via
+ * `tenant-messages-page.tsx`. Keep this module for demo scenario helpers only.
  */
 
 export type MockMessageSide = "outgoing" | "incoming";
