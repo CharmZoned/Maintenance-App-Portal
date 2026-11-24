@@ -1,5 +1,6 @@
 export { LandlordPortalTitle, StatusBanner, ToneBadge, sectionCardClass } from "./chrome";
 export { LandlordDocumentMenuButton, LandlordDocumentRow } from "./document-row";
+export { DOCUMENT_UNAVAILABLE, downloadLandlordDocument } from "./download-document";
 export { LandlordPageIntro } from "./page-intro";
 export { LandlordPropertyHeading, LandlordScopeHeading } from "./section-heading";
 export {

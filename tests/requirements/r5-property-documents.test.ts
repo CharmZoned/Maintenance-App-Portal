@@ -74,6 +74,8 @@ describe("[R5] Property documents", () => {
         uploaded_by_role: "admin",
       });
       const url = await data.getPropertyDocumentDownloadUrl(doc);
+      // Storage saves the file under its real name, not the storage path.
+      expect(new URL(url).searchParams.get("download")).toBe("House rules.pdf");
       const res = await fetch(url);
       expect(res.status).toBe(200);
       expect(await res.text()).toContain("%PDF");

@@ -1423,11 +1423,14 @@ export async function listWorkOrders(params?: {
   limit?: number;
   /** Skip the staff-notes and price batches (unused on tenant/landlord Home). */
   skip_staff_notes?: boolean;
+  /** Only requests closed on or after this ISO instant (pair with status "closed"). */
+  closed_since?: string;
 }): Promise<WorkOrder[]> {
   let q = supabase.from("MaintenanceRequests").select("*").order("created_at", { ascending: false });
   if (params?.property_id) q = q.eq("property_id", params.property_id);
   if (params?.status) q = q.eq("status", workOrderStatusToDb(params.status as WorkOrderStatus));
   else if (params?.open_only) q = q.in("status", [...WORK_ORDER_OPEN_STATUSES_DB]);
+  if (params?.closed_since) q = q.gte("closed_at", params.closed_since);
   if (params?.limit != null && params.limit > 0) q = q.limit(params.limit);
   const { data: rows, error } = await q;
   if (error) throwSb(error);

@@ -52,6 +52,7 @@ import { MessagesPage } from "./components/messages/messages-page";
 import { NotificationsHost } from "./components/messages/notifications-host";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
+import { useOwnerName } from "./components/landlord/use-owner-name";
 import { PaymentsPage } from "./components/payments";
 import {
   DEMO_ACCOUNTS,
@@ -119,6 +120,8 @@ export function App() {
     auth.gate.role.role === "maintenance" &&
     auth.gate.role.staff_id != null;
   const state = useAppState(ready, { isAdmin, isTenant, isLandlord, isMaintenance });
+  // Owners are greeted by the name on their Landlords record, not their role.
+  const ownerName = useOwnerName(isLandlord && auth.gate.state === "ready" ? auth.gate.role.landlord_id : null);
   // The viewer's own ids, so their own request-timeline entries read "You".
   const viewerIds =
     auth.gate.state === "ready"
@@ -393,7 +396,7 @@ export function App() {
     : navItemsForAudience(audience);
   const metaFullName = auth.gate.user.user_metadata?.full_name;
   const displayName =
-    typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : null;
+    typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : ownerName;
   const chrome = {
     email: auth.gate.user.email ?? "",
     role: auth.gate.role.role,

@@ -154,7 +154,7 @@ describe("landlord maintenance queue", () => {
       context: "#MR-000990 · Unit 1B · Reported by Raj Patel · 1 Nov",
     });
     expect(model.completedNotes).toEqual(["Birch House has no completed requests this month."]);
-    expect(model.completedSpendLine).toBe(`Spend: ${formatMoney(180)} this month · ${formatMoney(180)} this year`);
+    expect(model.completedSpendLine).toBe(`Billed: ${formatMoney(180)} this month · ${formatMoney(180)} this year`);
   });
 
   it("notes properties whose only completed requests are older than this month", () => {
@@ -263,7 +263,8 @@ describe("landlord maintenance queue view", () => {
     expect(html).toContain("Maintenance");
     expect(html).toContain("Track repairs across your properties and report anything new to Landlord Gopher.");
     expect(html).toContain("Open requests");
-    expect(html).toContain("Maintenance spend");
+    expect(html).toContain("Billed");
+    expect(html).not.toContain("Maintenance spend");
     expect(html).toContain("Kitchen faucet leaking");
     expect(html).toContain("High priority");
     expect(html).toContain("View Kitchen faucet leaking");

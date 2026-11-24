@@ -2,6 +2,7 @@ import {
   formatDocumentDate,
   landlordDocumentRowModel,
 } from "@/components/landlord";
+import { BILLED_LABEL, billedSpend, billedSpendText } from "@/lib/billed-spend";
 import { threadsFromWorkOrders } from "@/lib/messages";
 import { formatActivityStamp, priorityLevel, requestNextStep, toRequestStatus } from "@/lib/request-status";
 import { daysBetween, formatMoney, toIsoDate } from "@/lib/utils";
@@ -163,6 +164,8 @@ export type PropertyDetailModel = {
   details: { label: string; value: string }[];
   maintenance: {
     summary: string;
+    /** "Billed this year" — the shared figure from lib/billed-spend. */
+    spendLabel: string;
     spendValue: string;
     spendCaption: string;
     rows: RequestRowModel[];
@@ -262,7 +265,6 @@ export function filterPropertyCards(
 
 export function buildPropertyDetailModel(input: DetailInput): PropertyDetailModel {
   const now = input.now ?? new Date();
-  const period = periodKey(now);
   const month = monthName(now);
   const currency = input.currency ?? "USD";
   const units = input.units.slice().sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
@@ -273,6 +275,7 @@ export function buildPropertyDetailModel(input: DetailInput): PropertyDetailMode
     .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
   const openOrders = orders.filter((order) => order.status !== "closed");
   const closedOrders = orders.filter((order) => order.status === "closed");
+  const billedText = billedSpendText(billedSpend(closedOrders, now), currency);
   const onHold = openOrders.filter((order) => order.status === "on_hold").length;
   const occupied = units.filter((unit) => unit.status === "occupied").length;
   const rent = rentSummary(charges, units, month, currency, now);
@@ -329,8 +332,9 @@ export function buildPropertyDetailModel(input: DetailInput): PropertyDetailMode
     details: propertyDetailFields(input.property, units),
     maintenance: {
       summary: `${openOrders.length} open · ${onHold} on hold`,
-      spendValue: spendValue(closedOrders, now, currency),
-      spendCaption: spendCaption(closedOrders, period, currency),
+      spendLabel: `${BILLED_LABEL} this year`,
+      spendValue: billedText.yearAmount,
+      spendCaption: billedText.month,
       rows: openOrders.slice(0, 3).map((order) => requestRow(order)),
     },
     unitsHeading: `${plural(units.length, "unit")} · ${occupied} occupied`,
@@ -832,30 +836,6 @@ function completedLine(order: WorkOrder): string {
   return ["Completed", when, price, who].filter(Boolean).join(" · ");
 }
 
-function spendValue(closed: WorkOrder[], now: Date, currency: string): string {
-  const year = now.getFullYear();
-  const amounts = closed
-    .filter((order) => inYear(order.completed_at || order.created_at, year))
-    .map((order) => order.landlord_price)
-    .filter((price): price is number => price != null && Number.isFinite(price));
-  if (amounts.length === 0) return "—";
-  return formatMoney(amounts.reduce((sum, price) => sum + price, 0), currency);
-}
-
-function spendCaption(closed: WorkOrder[], period: string, currency: string): string {
-  const monthOrders = closed.filter((order) => (order.completed_at || order.created_at || "").slice(0, 7) === period);
-  const priced = monthOrders.filter((order) => order.landlord_price != null);
-  if (priced.length === 0) {
-    return closed.some((order) => order.landlord_price != null)
-      ? "Nothing billed this month"
-      : "No billed amount recorded";
-  }
-  const total = priced.reduce((sum, order) => sum + (order.landlord_price ?? 0), 0);
-  const latest = priced.slice().sort((a, b) => (b.completed_at || "").localeCompare(a.completed_at || ""))[0];
-  const where = [latest.title, latest.unit_name ? `Unit ${latest.unit_name}` : null].filter(Boolean).join(", ");
-  return `${formatMoney(total, currency)} this month · ${where}`;
-}
-
 function statusChip(status: ReturnType<typeof toRequestStatus>): FactChip {
   if (status === "Completed") return { label: status, tone: "success" };
   if (status === "On hold") return { label: status, tone: "neutral" };
@@ -887,15 +867,6 @@ function initials(name: string): string {
 
 function monthName(now: Date): string {
   return MONTHS[now.getMonth()];
-}
-
-function periodKey(now: Date): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function inYear(iso: string | null | undefined, year: number): boolean {
-  if (!iso) return false;
-  return Number(iso.slice(0, 4)) === year;
 }
 
 function weekdayDate(iso: string): string {
