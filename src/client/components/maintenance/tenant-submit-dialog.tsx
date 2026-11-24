@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import { X } from "lucide-react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
@@ -427,18 +428,7 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
             </div>
           </div>
 
-          <aside
-            className="rounded-sm border border-border bg-warning-tint px-4 py-3 text-warning"
-            role="note"
-          >
-            <p className="text-sm font-medium">
-              Immediate danger? Contact local emergency services.
-            </p>
-            <p className="mt-1 text-xs">
-              Do not wait for a response here. Manager emergency contact is not
-              configured.
-            </p>
-          </aside>
+          <SupportContactNotice variant="urgent" />
 
           <div className="space-y-1.5">
             <Label htmlFor="tenant-permission" className="text-xs font-semibold">

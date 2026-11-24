@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import { Inbox, Plus } from "lucide-react";
 import { useApp } from "@/context";
 import { createSingleFlightLoader, type DeepLinkProps } from "@/lib/deep-link";
@@ -296,10 +297,7 @@ export function TenantRequestsPage({
 
       {body()}
 
-      <aside className="rounded-sm bg-warning-tint px-4 py-3 text-sm text-warning" role="note">
-        <span className="font-medium">Immediate danger?</span> Contact local emergency services. Do
-        not wait for a portal response.
-      </aside>
+      <SupportContactNotice variant="urgent" />
 
       {/* Phone: primary action as a sticky bar above the bottom tabs (spec §6.2). */}
       <div className="sticky bottom-0 -mx-6 border-t border-border bg-background px-4 py-3 md:hidden">

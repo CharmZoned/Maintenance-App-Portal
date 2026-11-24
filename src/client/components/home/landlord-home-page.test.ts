@@ -334,7 +334,8 @@ describe("buildReadyHome", () => {
     expect(html).toContain("All clear");
     expect(html).toContain("No payments awaiting verification");
     expect(html).toContain("The rent roll isn't in this portal yet.");
-    expect(html).toContain("Support contact not configured.");
+    expect(html).toContain("Office phone:");
+    expect(html).toContain("To be confirmed");
     expect(html).not.toContain("Document shared");
   });
 

@@ -11,6 +11,12 @@ interface ImportMetaEnv {
   readonly VITE_BUILD_ID?: string;
   /** Optional git branch for preview ribbon label (`PREVIEW · <branch>`). */
   readonly VITE_GIT_BRANCH?: string;
+  /** Office phone shown for urgent help. Unset renders "To be confirmed". See src/client/lib/support-contact.ts. */
+  readonly VITE_SUPPORT_OFFICE_PHONE?: string;
+  /** Office email shown for urgent help. */
+  readonly VITE_SUPPORT_OFFICE_EMAIL?: string;
+  /** After-hours phone line shown for urgent help. */
+  readonly VITE_SUPPORT_AFTER_HOURS_PHONE?: string;
 }
 
 interface ImportMeta {

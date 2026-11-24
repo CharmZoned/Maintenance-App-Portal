@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useApp } from "@/context";
 import { Button } from "@/components/ui/button";
 import { PageShell } from "@/components/page-shell";
-import { ErrorRetry, SkeletonRow } from "@/components/patterns";
+import { ErrorRetry, SkeletonRow, SupportContactNotice } from "@/components/patterns";
 import { TenantSubmitDialog } from "@/components/maintenance/tenant-submit-dialog";
 import {
   countPropertyDocuments,
@@ -154,8 +154,6 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
         : `Request conversations preview · ${openCount} open request threads.`;
 
   // TODO(data-gap): No dedicated support-contact field — mock until Settings/staff proposal.
-  const supportConfigured = false;
-
   // TODO(data-gap): Property manager not in home context join — unwired, not blank contact fields.
   const propertyManagerLabel = "Manager contact is not available in the portal yet.";
 
@@ -249,7 +247,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
               />
 
               <div className="lg:hidden">
-                <SupportCard configured={supportConfigured} />
+                <SupportCard />
               </div>
 
               <p className="hidden text-xs leading-[1.125rem] text-muted-foreground lg:block">
@@ -268,7 +266,7 @@ export function TenantHomePage({ navigate }: { navigate: (to: string) => void })
                 label={maintenanceLabel}
                 onRequest={() => setSubmitOpen(true)}
               />
-              <SupportCard configured={supportConfigured} />
+              <SupportCard />
             </aside>
           </div>
         </div>
@@ -474,7 +472,7 @@ function UpdatesCard({
   );
 }
 
-function SupportCard({ configured }: { configured: boolean }) {
+function SupportCard() {
   return (
     <section className="rounded-lg border border-border bg-muted px-5 py-5">
       <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
@@ -484,13 +482,10 @@ function SupportCard({ configured }: { configured: boolean }) {
         <p className="text-sm font-medium leading-[1.375rem] text-foreground">
           Landlord Gopher support
         </p>
-        {!configured ? (
-          <p className="text-sm leading-[1.375rem] text-muted-foreground">
-            Support contact not configured.
-          </p>
-        ) : null}
+        <SupportContactNotice variant="list" />
         <p className="pt-2 text-sm leading-[1.375rem] text-muted-foreground">
-          Use Messages to reach an authorized contact when one is available.
+          Urgent repair? Call rather than message. In immediate danger, contact local emergency
+          services first.
         </p>
       </div>
     </section>

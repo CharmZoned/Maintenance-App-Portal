@@ -9,6 +9,7 @@ import { intentLoginLabel } from "@/lib/safe-redirect";
 import { AuthCard, AuthField, AuthNotice, AuthShell } from "./auth-card";
 import { PasswordInput } from "./password-input";
 import { cn } from "@/lib/utils";
+import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import type { QuickSignInProps } from "./quick-signin";
 
 export type SignupExtras = {
@@ -243,6 +244,10 @@ export function LoginPage({
               We’ll email a confirmation link. After you confirm, we review new accounts within one
               business day.
             </p>
+          ) : null}
+
+          {mode === "signup" ? (
+            <SupportContactNotice variant="urgent" lead="While your account is pending," />
           ) : null}
 
           <button

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import type { MouseEvent, ReactNode } from "react";
 import {
   Building2,
@@ -1083,8 +1084,8 @@ function SupportCard({ onMessage, className }: { onMessage: () => void; classNam
         A little help, when you need it.
       </h2>
       <p className="mt-3 hidden lg-body text-muted-foreground md:block">Your Landlord Gopher contact</p>
-      <p className="mt-2 lg-body text-foreground">Support contact not configured.</p>
-      <p className="mt-1 lg-caption text-muted-foreground">Message us and we&apos;ll get you connected.</p>
+      <SupportContactNotice variant="list" className="mt-2" />
+      <p className="mt-1 lg-caption text-muted-foreground">Or message us and we&apos;ll get you connected.</p>
       <Button type="button" variant="secondary" size="touch" className="mt-4 w-full" onClick={onMessage}>
         Message
       </Button>
