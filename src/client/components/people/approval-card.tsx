@@ -1,82 +1,104 @@
 import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/utils";
 import { PortalStatus } from "./portal-status";
 import type { UserAccountRow } from "@/lib/data";
+import { displayName, signupClaim } from "./account-labels";
 
-function roleClaim(user: UserAccountRow): string {
-  if (user.role === "tenant") return "Said they are: Tenant";
-  if (user.role === "landlord") return "Said they are: Property owner";
-  if (user.role === "maintenance") return "Said they are: Team member";
-  if (user.role === "admin") return "Said they are: Admin";
-  return "Said they are: (not set)";
-}
-
-function approveLabel(user: UserAccountRow): string {
-  if (user.role === "tenant") return "Approve as tenant";
-  if (user.role === "landlord") return "Approve as Owner";
-  if (user.role === "maintenance") return "Approve as Team member";
-  return "Approve";
-}
-
-/** Figma `Approval card` — pending signup summary + Approve / Reject. */
+/**
+ * Figma `Approval card` — who signed up (name, email, what they said they
+ * are, address) + Approve… / Reject. Approve opens the assign dialog, where
+ * the role and record are chosen; it is the one primary action on the card.
+ */
 export function ApprovalCard({
   user,
-  blockedReason,
-  softWarning,
   busy,
   onApprove,
   onReject,
-  onManageLinks,
+  onOpenInUsers,
 }: {
   user: UserAccountRow;
-  blockedReason?: string | null;
-  /** Non-blocking note (e.g. linked tenant has no unit). */
-  softWarning?: string | null;
   busy?: boolean;
   onApprove: () => void;
   onReject: () => void;
-  onManageLinks?: () => void;
+  onOpenInUsers?: () => void;
 }) {
-  const emailConfirmed =
+  const name = displayName(user);
+  const hasName = Boolean(user.full_name?.trim());
+  const unconfirmed = user.email_confirmed_at === null;
+  const emailLine =
     user.email_confirmed_at === undefined
-      ? "Email confirmed: (unknown)"
-      : user.email_confirmed_at
-        ? "Email confirmed: Yes"
-        : "Email confirmed: No — waiting on link";
+      ? null
+      : unconfirmed
+        ? "Email not confirmed yet — waiting on them to click the link"
+        : "Email confirmed";
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-border bg-card p-4">
+    <article
+      aria-label={`Sign-up from ${name}`}
+      className="flex flex-col gap-3 rounded-md border border-border bg-card p-4"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-base font-semibold text-foreground">
-            {user.email || "(no email)"}
-          </p>
-          <p className="truncate text-[13px] text-muted-foreground">
-            Portal signup · {user.role ?? "no role yet"}
-          </p>
+          <h3 className="truncate text-base font-semibold text-foreground">{name}</h3>
+          {hasName ? (
+            <p className="truncate text-[13px] text-muted-foreground">{user.email ?? "(no email)"}</p>
+          ) : null}
         </div>
         <PortalStatus status="pending" />
       </div>
-      <div className="space-y-1.5 text-[13px] text-foreground">
-        <p>{roleClaim(user)}</p>
-        <p className="text-muted-foreground">{emailConfirmed}</p>
-        {blockedReason ? <p className="text-warning">{blockedReason}</p> : null}
-        {!blockedReason && softWarning ? (
-          <p className="text-warning">{softWarning}</p>
+      <dl className="grid gap-1 text-[13px]">
+        <div className="flex flex-wrap gap-x-1.5">
+          <dt className="sr-only">Role</dt>
+          <dd className="font-medium text-foreground">{signupClaim(user)}</dd>
+        </div>
+        {user.signup_address ? (
+          <div className="flex flex-wrap gap-x-1.5">
+            <dt className="text-muted-foreground">Address:</dt>
+            <dd className="min-w-0 break-words text-foreground">{user.signup_address}</dd>
+          </div>
         ) : null}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button size="default" disabled={busy || Boolean(blockedReason)} onClick={onApprove}>
-          {approveLabel(user)}
+        {user.phone ? (
+          <div className="flex flex-wrap gap-x-1.5">
+            <dt className="text-muted-foreground">Phone:</dt>
+            <dd className="text-foreground">{user.phone}</dd>
+          </div>
+        ) : null}
+        <div className="flex flex-wrap gap-x-1.5 text-muted-foreground">
+          <dt className="sr-only">Signed up</dt>
+          <dd>
+            Signed up {formatDate(user.created_at)}
+            {emailLine ? (
+              <>
+                {" · "}
+                <span className={unconfirmed ? "text-warning" : undefined}>{emailLine}</span>
+              </>
+            ) : null}
+          </dd>
+        </div>
+      </dl>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="default"
+          disabled={busy || unconfirmed}
+          onClick={onApprove}
+          aria-describedby={unconfirmed ? `approve-hint-${user.user_id}` : undefined}
+        >
+          Approve…
         </Button>
         <Button size="default" variant="secondary" disabled={busy} onClick={onReject}>
           Reject
         </Button>
-        {onManageLinks ? (
-          <Button size="default" variant="ghost" disabled={busy} onClick={onManageLinks}>
-            Link role…
+        {onOpenInUsers ? (
+          <Button size="default" variant="ghost" disabled={busy} onClick={onOpenInUsers}>
+            Open in Users
           </Button>
         ) : null}
+        {unconfirmed ? (
+          <span id={`approve-hint-${user.user_id}`} className="sr-only">
+            Approve is available once they confirm their email.
+          </span>
+        ) : null}
       </div>
-    </div>
+    </article>
   );
 }
