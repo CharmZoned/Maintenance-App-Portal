@@ -173,9 +173,15 @@ describe("buildNotifications — the bell, from real events", () => {
     const old = build(tina, { statusEvents: [event(1, 5, "Closed", 24 * 40)] });
     expect(old).toEqual([]);
     const many = build(tina, {
-      statusEvents: Array.from({ length: 50 }, (_, i) => event(i + 1, 5, "Closed", i + 1)),
+      requests: Array.from({ length: 50 }, (_, i) => request({ id: 100 + i, title: `Job ${i}` })),
+      statusEvents: Array.from({ length: 50 }, (_, i) => event(i + 1, 100 + i, "Closed", i + 1)),
     });
     expect(many.length).toBe(30);
     expect(many[0]!.id).toBe("status:1");
+  });
+
+  it("shows one row per request and kind of change: the latest", () => {
+    const items = build(tina, { statusEvents: [event(1, 5, "Closed", 30), event(2, 5, "Closed", 5)] });
+    expect(items.map((i) => i.id)).toEqual(["status:2"]);
   });
 });

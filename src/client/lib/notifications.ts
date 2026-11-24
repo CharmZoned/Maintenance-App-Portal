@@ -284,10 +284,18 @@ export function buildNotifications(input: {
     messages += 1;
   }
 
-  for (const event of input.statusEvents) {
+  // One row per request and kind of change: a request closed twice (reopened
+  // in between) shows its latest completion only.
+  const seenStatus = new Set<string>();
+  const events = [...input.statusEvents].sort((a, b) => ms(b.created_at) - ms(a.created_at) || b.id - a.id);
+  for (const event of events) {
     if (ms(event.created_at) < since) continue;
+    const dedupe = `${event.maintenance_request_id}:${statusKind(event.to_status)}`;
+    if (seenStatus.has(dedupe)) continue;
     const item = statusItem(event, input.viewer, requests, propertyNames, now);
-    if (item) items.push(unreadAfterMarks(item));
+    if (!item) continue;
+    seenStatus.add(dedupe);
+    items.push(unreadAfterMarks(item));
   }
 
   if (input.viewer.role === "landlord") {
