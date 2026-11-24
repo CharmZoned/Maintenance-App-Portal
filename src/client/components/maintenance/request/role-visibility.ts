@@ -107,7 +107,10 @@ export function viewerRoleFrom(app: {
   return "maintenance";
 }
 
-/** Back link per role ("‹ My jobs" for workers). Every list lives at /maintenance. */
+/**
+ * Back link per role ("‹ My jobs" for workers). Every role's list lives at
+ * /maintenance (the worker shell renders My jobs there; there is no /my-jobs route).
+ */
 export function backLinkFor(role: RequestViewerRole): { label: string; to: string } {
   switch (role) {
     case "tenant":
@@ -116,5 +119,20 @@ export function backLinkFor(role: RequestViewerRole): { label: string; to: strin
       return { label: "My jobs", to: "/maintenance" };
     default:
       return { label: "Maintenance", to: "/maintenance" };
+  }
+}
+
+/**
+ * Primary button on the "This request isn't available" state (spec §3):
+ * admin → Dashboard, worker → My jobs, tenant / landlord → Home.
+ */
+export function notAvailableActionFor(role: RequestViewerRole): { label: string; to: string } {
+  switch (role) {
+    case "admin":
+      return { label: "Go to Dashboard", to: "/" };
+    case "maintenance":
+      return { label: "Go to My jobs", to: "/maintenance" };
+    default:
+      return { label: "Go to Home", to: "/home" };
   }
 }

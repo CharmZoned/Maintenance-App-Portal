@@ -35,6 +35,21 @@ export class StorageApi {
     this.blobs.clear();
   }
 
+  /**
+   * Store a file as the service role would (no RLS), owned by `ownerId`. For
+   * seeding sample files behind rows the seed inserted (demo photos).
+   */
+  async putObject(bucketId: string, name: string, bytes: Uint8Array, contentType: string, ownerId: string | null): Promise<void> {
+    const meta = JSON.stringify({ size: bytes.byteLength, mimetype: contentType });
+    await this.db.admin(
+      `insert into storage.objects (id, bucket_id, name, owner, owner_id, metadata)
+       values ($1, $2, $3, $4::uuid, $5, $6::jsonb)
+       on conflict (bucket_id, name) do update set metadata = excluded.metadata, updated_at = now()`,
+      [randomUUID(), bucketId, name, ownerId, ownerId, meta],
+    );
+    this.blobs.set(`${bucketId}/${name}`, { bytes, contentType });
+  }
+
   private async bucket(id: string): Promise<Bucket | null> {
     const rows = await this.db.admin<Bucket>(
       `select id, public, file_size_limit::float8 as file_size_limit, allowed_mime_types from storage.buckets where id = $1`,

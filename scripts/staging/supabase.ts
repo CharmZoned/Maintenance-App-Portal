@@ -6,6 +6,7 @@
 import { deflateSync } from "node:zlib";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { PERSONAS, type DemoWorld, type PersonaKey, type SeedAuth } from "../../tests/emulator/seed";
+import { demoPhotoBytes } from "../../tests/emulator/demo-photos";
 
 const NO_SESSION = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
 
@@ -209,15 +210,18 @@ export function samplePng(seed: string, width = 320, height = 240): Uint8Array {
 }
 
 /**
- * The world definition seeds MaintenanceRequestPhotos rows only. Put a
- * placeholder image at each row's storage path so the photos show on staging.
+ * The world definition seeds MaintenanceRequestPhotos rows only. Put an image
+ * at each row's storage path so the photos show on staging: the committed
+ * sample from tests/emulator/demo-photos/ when there is one, otherwise a
+ * generated placeholder.
  */
 export async function uploadDemoPhotos(admin: SupabaseClient, photos: DemoWorld["photos"]): Promise<UploadResult[]> {
   const results: UploadResult[] = [];
   for (const photo of photos) {
+    const bytes = demoPhotoBytes(photo.storage_path) ?? samplePng(photo.storage_path);
     const { error } = await admin.storage
       .from(PHOTOS_BUCKET)
-      .upload(photo.storage_path, samplePng(photo.storage_path), { contentType: photo.content_type, upsert: true });
+      .upload(photo.storage_path, bytes, { contentType: photo.content_type, upsert: true });
     results.push({ path: photo.storage_path, ok: !error, detail: error ? error.message : "uploaded" });
   }
   return results;

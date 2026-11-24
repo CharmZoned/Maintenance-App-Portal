@@ -1,9 +1,11 @@
+import { useRef, useState } from "react";
+import { ImageIcon, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { requestStatusFromDb } from "@/lib/request-status";
 import { formatDate } from "@/lib/utils";
 import type {
   CommentVisibility,
@@ -11,6 +13,7 @@ import type {
   MaintenancePhoto,
   MaintenanceStatusEvent,
 } from "@/types";
+import { PhotoLightbox } from "./request/photo-lightbox";
 import { MAX_MAINTENANCE_PHOTOS, takePhotoFiles } from "./work-order-status";
 
 interface PhotoPreview {
@@ -38,7 +41,12 @@ export interface WorkOrderMediaPanelProps {
   isLandlord: boolean;
 }
 
-/** Photos, status history, and comments — shared by staff edit and tenant/landlord detail. */
+/**
+ * Photos, status history, and comments inside the legacy work-order dialog.
+ * Photos: 72px thumbnails that open the shared PhotoLightbox, and a styled
+ * "Add photos" button over a hidden file input (no raw browser picker); picked
+ * files are staged with a remove "x" until "Upload n photos".
+ */
 export function WorkOrderMediaPanel({
   detailLoading,
   photos,
@@ -57,74 +65,120 @@ export function WorkOrderMediaPanel({
   isTenant,
   isLandlord,
 }: WorkOrderMediaPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const thumbRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
   return (
     <>
       <div className="border-t pt-3">
-        <Label>Photos</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label>Photos</Label>
+          {!detailLoading && (
+            <span className="text-xs text-muted-foreground">
+              {isLandlord
+                ? `${photos.length} ${photos.length === 1 ? "photo" : "photos"}`
+                : remainingPhotoSlots > 0
+                  ? `${MAX_MAINTENANCE_PHOTOS - remainingPhotoSlots} of ${MAX_MAINTENANCE_PHOTOS} · ${remainingPhotoSlots} more can be added`
+                  : `${MAX_MAINTENANCE_PHOTOS} of ${MAX_MAINTENANCE_PHOTOS}`}
+            </span>
+          )}
+        </div>
         {detailLoading ? (
-          <p className="text-xs text-muted-foreground">Loading…</p>
-        ) : photos.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No photos yet.</p>
-        ) : (
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            {photos.map((p) =>
-              p.url ? (
-                <a
-                  key={p.id}
-                  href={p.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block overflow-hidden rounded border"
-                >
-                  <img
-                    src={p.url}
-                    alt={p.caption || "Maintenance photo"}
-                    className="aspect-square w-full object-cover"
-                  />
-                </a>
-              ) : (
-                <div
-                  key={p.id}
-                  className="flex aspect-square items-center justify-center rounded border bg-muted text-xs text-muted-foreground"
-                >
-                  Unavailable
-                </div>
-              ),
-            )}
+          <div className="mt-2 flex gap-2" aria-hidden>
+            <div className="size-[72px] rounded-sm bg-muted" />
+            <div className="size-[72px] rounded-sm bg-muted" />
           </div>
+        ) : photos.length === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">No photos yet.</p>
+        ) : (
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {photos.map((p, index) => (
+              <li key={p.id}>
+                <button
+                  ref={(el) => {
+                    thumbRefs.current[index] = el;
+                  }}
+                  type="button"
+                  onClick={() => setOpenIndex(index)}
+                  className="relative block size-[72px] overflow-hidden rounded-sm border border-border bg-muted outline-none hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                  aria-label={`Open photo ${index + 1} of ${photos.length}`}
+                >
+                  <span className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                    <ImageIcon className="size-5" aria-hidden />
+                  </span>
+                  {p.url ? (
+                    <img
+                      src={p.url}
+                      alt={p.caption || "Maintenance photo"}
+                      loading="lazy"
+                      className="absolute inset-0 size-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
+        <PhotoLightbox
+          photos={photos}
+          index={openIndex}
+          onIndexChange={setOpenIndex}
+          returnFocusTo={(index) => thumbRefs.current[index]}
+        />
         {!isLandlord && remainingPhotoSlots > 0 && (
           <div className="mt-2 space-y-2">
-            <Input
+            <input
+              ref={fileInputRef}
               type="file"
               accept="image/*"
               multiple
-              onChange={(e) => onPhotoFilesChange(takePhotoFiles(e.target.files, remainingPhotoSlots))}
+              tabIndex={-1}
+              aria-hidden
+              className="sr-only"
+              data-testid="work-order-photos-input"
+              onChange={(e) => {
+                onPhotoFilesChange(takePhotoFiles([...photoFiles, ...Array.from(e.target.files ?? [])], remainingPhotoSlots));
+                e.target.value = "";
+              }}
             />
-            <p className="text-xs text-muted-foreground">
-              Up to {remainingPhotoSlots} more.
-            </p>
             {photoPreviews.length > 0 && (
-              <div className="grid grid-cols-3 gap-2">
+              <ul className="flex flex-wrap gap-2">
                 {photoPreviews.map((p) => (
-                  <img
-                    key={p.url}
-                    src={p.url}
-                    alt={p.file.name}
-                    className="aspect-square rounded border object-cover"
-                  />
+                  <li key={p.url} className="relative">
+                    <img
+                      src={p.url}
+                      alt={p.file.name}
+                      className="size-16 rounded-sm border border-border object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onPhotoFilesChange(photoFiles.filter((f) => f !== p.file))}
+                      className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-raised hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 outline-none"
+                      aria-label={`Remove ${p.file.name}`}
+                    >
+                      <X className="size-3" aria-hidden />
+                    </button>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
-            {photoFiles.length > 0 && (
-              <Button type="button" size="sm" variant="outline" onClick={() => onUploadPhotos()}>
-                Upload {photoFiles.length} photo{photoFiles.length === 1 ? "" : "s"}
-              </Button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {photoFiles.length < remainingPhotoSlots && (
+                <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                  <Upload aria-hidden />
+                  Add photos
+                </Button>
+              )}
+              {photoFiles.length > 0 && (
+                <Button type="button" size="sm" variant="secondary" onClick={() => onUploadPhotos()}>
+                  Upload {photoFiles.length} photo{photoFiles.length === 1 ? "" : "s"}
+                </Button>
+              )}
+            </div>
           </div>
-        )}
-        {!isLandlord && remainingPhotoSlots <= 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">Photo limit reached ({MAX_MAINTENANCE_PHOTOS}).</p>
         )}
       </div>
 
@@ -137,7 +191,9 @@ export function WorkOrderMediaPanel({
             {history.map((h) => (
               <li key={h.id} className="flex flex-wrap gap-x-2 text-muted-foreground">
                 <span className="font-medium text-foreground">
-                  {h.from_status ? `${h.from_status} → ${h.to_status}` : h.to_status}
+                  {h.from_status
+                    ? `${requestStatusFromDb(h.from_status)} → ${requestStatusFromDb(h.to_status)}`
+                    : requestStatusFromDb(h.to_status)}
                 </span>
                 <span>{formatDate(h.created_at)}</span>
                 {h.changed_by_role && <span>· {h.changed_by_role}</span>}
