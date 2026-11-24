@@ -184,10 +184,14 @@ function StaffMessagesPage({
     setState("loading");
     setLocalError(null);
     setPartialError(null);
-    const seq = ++officeSeqRef.current;
+    // A full load is authoritative: any quiet refresh still in flight is dropped.
+    officeSeqRef.current += 1;
     const [requests, inbox] = await Promise.allSettled([listWorkOrders(), loadOfficeInbox()]);
     if (requests.status === "fulfilled") setWorkOrders(requests.value);
-    if (inbox.status === "fulfilled" && seq === officeSeqRef.current) setOffice(inbox.value);
+    if (inbox.status === "fulfilled") {
+      officeSeqRef.current += 1;
+      setOffice(inbox.value);
+    }
 
     if (requests.status === "rejected" && inbox.status === "rejected") {
       const message = (requests.reason as Error).message;
