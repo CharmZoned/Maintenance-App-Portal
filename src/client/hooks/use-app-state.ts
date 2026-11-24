@@ -347,6 +347,8 @@ export function useAppState(
     canMutatePortfolio: isAdmin,
     /** Admin: full MR CRUD. Maintenance staff: update assigned only (RLS). Landlord: read-only. */
     canCreateWorkOrders: isAdmin,
+    /** Who can file a new maintenance request: admin (full form), tenant (own unit), landlord (own units / common areas). */
+    canSubmitRequest: isAdmin || isTenant || isLandlord,
     canDeleteWorkOrders: isAdmin,
     /** Admin-only Accept & schedule (status Scheduled / scheduled_for). */
     canAcceptAndSchedule: isAdmin,
