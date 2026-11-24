@@ -416,6 +416,7 @@ export function useAppState(
     listOfficeMessages: data.listOfficeMessages,
     sendOfficeMessage: data.sendOfficeMessage,
     markOfficeThreadRead: data.markOfficeThreadRead,
+    countUnreadOfficeThreads: data.countUnreadOfficeThreads,
     listUserAccounts: data.listUserAccounts,
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
     listStaff: data.listStaff,

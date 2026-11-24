@@ -170,10 +170,59 @@ describe("resolveStaffMessagesDeepLink", () => {
     });
   });
 
-  it("allows unknown office thread ids for new DMs", () => {
-    expect(resolveStaffMessagesDeepLink("?thread=office:brand-new", threads)).toEqual({
+  it("allows unknown office thread ids only for admins or the thread owner", () => {
+    expect(
+      resolveStaffMessagesDeepLink("?thread=office:brand-new", threads, { isAdmin: true }),
+    ).toEqual({
       kind: "thread",
       threadId: "office:brand-new",
     });
+    expect(
+      resolveStaffMessagesDeepLink("?thread=office:brand-new", threads, {
+        currentUserId: "brand-new",
+      }),
+    ).toEqual({
+      kind: "thread",
+      threadId: "office:brand-new",
+    });
+    expect(
+      resolveStaffMessagesDeepLink("?thread=office:brand-new", threads, {
+        currentUserId: "someone-else",
+      }),
+    ).toEqual({
+      kind: "not-found",
+      raw: "office:brand-new",
+    });
+  });
+});
+
+describe("officeMessageSenderLabel", () => {
+  it("marks outgoing by author_user_id, not shared admin role", async () => {
+    const { officeMessageSenderLabel } = await import("../../src/client/lib/messages");
+    const mine = officeMessageSenderLabel(
+      {
+        id: 1,
+        created_at: "2026-11-14T12:00:00.000Z",
+        thread_user_id: "u-sam",
+        author_user_id: "admin-a",
+        author_role: "admin",
+        body: "Hi",
+      },
+      { currentUserId: "admin-a", currentRole: "admin" },
+    );
+    const otherAdmin = officeMessageSenderLabel(
+      {
+        id: 2,
+        created_at: "2026-11-14T12:01:00.000Z",
+        thread_user_id: "u-sam",
+        author_user_id: "admin-b",
+        author_role: "admin",
+        body: "Also hi",
+      },
+      { currentUserId: "admin-a", currentRole: "admin" },
+    );
+    expect(mine.outgoing).toBe(true);
+    expect(otherAdmin.outgoing).toBe(false);
+    expect(otherAdmin.label).toBe("Landlord Gopher office");
   });
 });

@@ -177,6 +177,11 @@ export type MessagesDeepLink =
 export function resolveStaffMessagesDeepLink(
   search: string,
   threads: MessageThread[],
+  opts?: {
+    /** When set, unknown `office:<uuid>` deep links are allowed only for this user or admins. */
+    currentUserId?: string | null;
+    isAdmin?: boolean;
+  },
 ): MessagesDeepLink {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   const thread = params.get("thread");
@@ -184,10 +189,14 @@ export function resolveStaffMessagesDeepLink(
     if (threads.some((t) => t.id === thread)) {
       return { kind: "thread", threadId: thread };
     }
-    // Allow selecting an office thread the inbox has not listed yet (new DM).
+    // Soft-open an office thread the inbox has not listed yet (admin new DM, or own empty thread).
     const officeUser = parseOfficeThreadId(thread);
     if (officeUser) {
-      return { kind: "thread", threadId: thread };
+      const allowed =
+        Boolean(opts?.isAdmin) ||
+        (opts?.currentUserId != null && officeUser === opts.currentUserId);
+      if (allowed) return { kind: "thread", threadId: thread };
+      return { kind: "not-found", raw: thread };
     }
     const woId = parseWorkOrderThreadId(thread);
     if (woId != null) {
@@ -265,14 +274,16 @@ export function officeMessageSenderLabel(
   message: OfficeMessage,
   opts?: { currentUserId?: string | null; currentRole?: string | null },
 ): { label: string; outgoing: boolean } {
+  // Prefer author_user_id so two admins in one thread are not both "You".
+  // Fall back to role only when authorship was cleared (ON DELETE SET NULL).
   const byUser =
     opts?.currentUserId != null &&
     message.author_user_id != null &&
     message.author_user_id === opts.currentUserId;
-  const byRole =
-    !byUser &&
+  const byRoleFallback =
+    message.author_user_id == null &&
     Boolean(opts?.currentRole && message.author_role === opts.currentRole);
-  const outgoing = byUser || byRole;
+  const outgoing = byUser || byRoleFallback;
   const pretty =
     message.author_role === "admin"
       ? "Landlord Gopher office"

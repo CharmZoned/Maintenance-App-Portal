@@ -30,8 +30,8 @@ async function countPendingAccounts(): Promise<number | undefined> {
 }
 
 async function countUnreadOfficeThreads(): Promise<number | undefined> {
-  const threads = await data.listOfficeThreads();
-  return threads.filter((t) => t.unread).length;
+  // Slim scan (no message bodies) — see data.countUnreadOfficeThreads.
+  return data.countUnreadOfficeThreads();
 }
 
 /**

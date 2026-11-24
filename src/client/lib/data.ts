@@ -2861,13 +2861,17 @@ export interface OfficeMessage {
   body: string;
 }
 
+const OFFICE_THREAD_SCAN_LIMIT = 300;
+/** Cap per-conversation history so opening a thread cannot pull unbounded rows. */
+export const OFFICE_MESSAGE_PAGE_LIMIT = 200;
+
 /**
  * Latest office threads, newest first. Reads the most recent `messageLimit`
  * messages, so a thread whose last message is older than that window is not
  * listed (and not counted as unread). Empty threads (no messages yet) are not
  * returned — callers that need a blank own-thread inject one locally.
  */
-export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThreadSummary[]> {
+export async function listOfficeThreads(messageLimit = OFFICE_THREAD_SCAN_LIMIT): Promise<OfficeThreadSummary[]> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -2885,9 +2889,54 @@ export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThrea
   if (messages.error) throwSb(messages.error);
   if (reads.error) throwSb(reads.error);
 
-  const lastRead = new Map((reads.data ?? []).map((r) => [r.thread_user_id, Date.parse(r.last_read_at)]));
+  return summarizeOfficeThreads(messages.data ?? [], reads.data ?? [], myId);
+}
+
+/**
+ * Unread office-thread count without loading message bodies — for nav badges.
+ * Scans the same recent window as `listOfficeThreads` (id + authorship only).
+ */
+export async function countUnreadOfficeThreads(
+  messageLimit = OFFICE_THREAD_SCAN_LIMIT,
+): Promise<number> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const myId = user?.id ?? null;
+
+  const [messages, reads] = await Promise.all([
+    supabase
+      .from("OfficeMessages")
+      .select("created_at, thread_user_id, author_user_id, author_role")
+      .order("created_at", { ascending: false })
+      .limit(messageLimit),
+    supabase.from("OfficeThreadReads").select("thread_user_id, last_read_at"),
+  ]);
+  if (messages.error) throwSb(messages.error);
+  if (reads.error) throwSb(reads.error);
+
+  const summaries = summarizeOfficeThreads(
+    (messages.data ?? []).map((m) => ({ ...m, body: "", id: 0 })),
+    reads.data ?? [],
+    myId,
+  );
+  return summaries.filter((t) => t.unread).length;
+}
+
+function summarizeOfficeThreads(
+  messages: Array<{
+    created_at: string;
+    thread_user_id: string;
+    author_user_id: string | null;
+    author_role: AppRole;
+    body: string;
+  }>,
+  reads: Array<{ thread_user_id: string; last_read_at: string }>,
+  myId: string | null,
+): OfficeThreadSummary[] {
+  const lastRead = new Map(reads.map((r) => [r.thread_user_id, Date.parse(r.last_read_at)]));
   const threads = new Map<string, OfficeThreadSummary>();
-  for (const m of messages.data ?? []) {
+  for (const m of messages) {
     let thread = threads.get(m.thread_user_id);
     if (!thread) {
       // Rows arrive newest first, so the first row seen is the thread's latest message.
@@ -2910,15 +2959,23 @@ export async function listOfficeThreads(messageLimit = 300): Promise<OfficeThrea
   return [...threads.values()];
 }
 
-/** Messages in one office thread, oldest first. */
-export async function listOfficeMessages(threadUserId: string): Promise<OfficeMessage[]> {
+/**
+ * Messages in one office thread, oldest first.
+ * Returns at most `OFFICE_MESSAGE_PAGE_LIMIT` most recent rows (then reversed).
+ */
+export async function listOfficeMessages(
+  threadUserId: string,
+  limit = OFFICE_MESSAGE_PAGE_LIMIT,
+): Promise<OfficeMessage[]> {
   const { data, error } = await supabase
     .from("OfficeMessages")
     .select("id, created_at, thread_user_id, author_user_id, author_role, body")
     .eq("thread_user_id", threadUserId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: false })
+    .limit(limit);
   if (error) throwSb(error);
-  return (data ?? []).map((row) => ({
+  const rows = (data ?? []).slice().reverse();
+  return rows.map((row) => ({
     id: row.id,
     created_at: row.created_at,
     thread_user_id: row.thread_user_id,

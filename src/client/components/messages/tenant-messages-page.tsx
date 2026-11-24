@@ -13,9 +13,11 @@ import {
   mergeMessageThreads,
   officeMessageSenderLabel,
   parseOfficeThreadId,
+  parseWorkOrderThreadId,
   resolveStaffMessagesDeepLink,
   threadsFromOfficeSummaries,
   threadsFromWorkOrders,
+  workOrderThreadId,
   type MessageThread,
 } from "@/lib/messages";
 import type { OfficeMessage } from "@/lib/data";
@@ -51,6 +53,7 @@ export function TenantMessagesPage({
     sendOfficeMessage,
     markOfficeThreadRead,
     setError,
+    setNotice,
   } = useApp();
 
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
@@ -62,6 +65,8 @@ export function TenantMessagesPage({
   const [error, setLocalError] = useState<string | null>(null);
   const [openedIds, setOpenedIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Soft-open rows for `?thread=wo:` / own `office:` not yet in the loaded inbox. */
+  const [extraThreads, setExtraThreads] = useState<MessageThread[]>([]);
   const [mobileThread, setMobileThread] = useState(false);
   const [deepLinkMiss, setDeepLinkMiss] = useState<string | null>(null);
   const [comments, setComments] = useState<MaintenanceComment[]>([]);
@@ -117,7 +122,7 @@ export function TenantMessagesPage({
         : undefined,
     });
     // Prefer office title for the tenant's own thread.
-    return mergeMessageThreads(
+    const merged = mergeMessageThreads(
       direct.map((t) =>
         t.threadUserId === currentUserId
           ? { ...t, title: "Landlord Gopher office" }
@@ -125,7 +130,10 @@ export function TenantMessagesPage({
       ),
       requestThreads,
     );
-  }, [workOrders, officeSummaries, openedIds, currentUserId, loadScenario]);
+    const known = new Set(merged.map((t) => t.id));
+    const extras = extraThreads.filter((t) => !known.has(t.id));
+    return extras.length === 0 ? merged : mergeMessageThreads(merged, extras);
+  }, [workOrders, officeSummaries, openedIds, currentUserId, loadScenario, extraThreads]);
 
   const unread = useMemo(
     () => conversations.filter((c) => c.unread).length,
@@ -134,19 +142,69 @@ export function TenantMessagesPage({
 
   useEffect(() => {
     if (state !== "ready") return;
-    const link = resolveStaffMessagesDeepLink(search, conversations);
+    const link = resolveStaffMessagesDeepLink(search, conversations, {
+      currentUserId,
+      isAdmin: false,
+    });
 
     if (link.kind === "thread") {
+      const officeUser = parseOfficeThreadId(link.threadId);
+      if (
+        officeUser &&
+        currentUserId &&
+        officeUser === currentUserId &&
+        !conversations.some((t) => t.id === link.threadId)
+      ) {
+        setExtraThreads((prev) => {
+          if (prev.some((t) => t.id === link.threadId)) return prev;
+          return [
+            ...prev,
+            {
+              id: link.threadId,
+              kind: "direct",
+              title: "Landlord Gopher office",
+              preview: "Message the office — no messages yet.",
+              updatedAt: new Date().toISOString(),
+              unread: false,
+              threadUserId: officeUser,
+            },
+          ];
+        });
+      }
       setSelectedId(link.threadId);
-      setOpenedIds((prev) => new Set(prev).add(link.threadId));
+      setOpenedIds((prev) => {
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
+      });
       setMobileThread(true);
       setDeepLinkMiss(null);
       return;
     }
 
     if (link.kind === "request") {
+      if (!link.known) {
+        const id = workOrderThreadId(link.requestId);
+        setExtraThreads((prev) => {
+          if (prev.some((t) => t.id === id)) return prev;
+          return [
+            ...prev,
+            {
+              id,
+              kind: "request",
+              title: `Request ${link.requestId}`,
+              preview: "No messages yet.",
+              updatedAt: new Date().toISOString(),
+              unread: false,
+              requestId: link.requestId,
+            },
+          ];
+        });
+      }
       setSelectedId(link.threadId);
-      setOpenedIds((prev) => new Set(prev).add(link.threadId));
+      setOpenedIds((prev) => {
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
+      });
       setMobileThread(true);
       setDeepLinkMiss(null);
       return;
@@ -162,14 +220,26 @@ export function TenantMessagesPage({
     setDeepLinkMiss(null);
     setSelectedId((prev) => prev ?? conversations[0]?.id ?? null);
     setMobileThread(false);
-  }, [search, conversations, state]);
+  }, [search, conversations, state, currentUserId]);
 
-  const selected: MessageThread | undefined = conversations.find((c) => c.id === selectedId);
-  const selectedRequestId = selected?.kind === "request" ? (selected.requestId ?? null) : null;
+  const selected: MessageThread | undefined =
+    conversations.find((c) => c.id === selectedId) ??
+    extraThreads.find((c) => c.id === selectedId);
+  const selectedRequestId =
+    selected?.kind === "request"
+      ? (selected.requestId ?? null)
+      : selectedId
+        ? parseWorkOrderThreadId(selectedId)
+        : null;
   const selectedThreadUserId =
     selected?.kind === "direct"
       ? (selected.threadUserId ?? parseOfficeThreadId(selected.id))
-      : null;
+      : selectedId
+        ? (() => {
+            const uid = parseOfficeThreadId(selectedId);
+            return uid && currentUserId && uid === currentUserId ? uid : null;
+          })()
+        : null;
 
   const selectedRequestIdRef = useRef(selectedRequestId);
   selectedRequestIdRef.current = selectedRequestId;
@@ -219,8 +289,10 @@ export function TenantMessagesPage({
                 t.thread_user_id === selectedThreadUserId ? { ...t, unread: false } : t,
               ),
             );
-          } catch {
-            // best-effort
+          } catch (err) {
+            setNotice(
+              `Opened the conversation, but couldn’t mark it read: ${(err as Error).message}`,
+            );
           }
         })
         .catch((err) => {
@@ -246,6 +318,7 @@ export function TenantMessagesPage({
     listOfficeMessages,
     markOfficeThreadRead,
     setError,
+    setNotice,
   ]);
 
   const showMobileConversation = Boolean(mobileThread && (selected || deepLinkMiss));

@@ -82,6 +82,7 @@ function StaffMessagesPage({
     markOfficeThreadRead,
     listUserAccounts,
     setError,
+    setNotice,
     isAdmin,
     isTenant,
     isLandlord,
@@ -182,11 +183,17 @@ function StaffMessagesPage({
   // Deep-link ?thread=wo:… / office:… / ?request=
   useEffect(() => {
     if (state !== "ready") return;
-    const link = resolveStaffMessagesDeepLink(search, threads);
+    const link = resolveStaffMessagesDeepLink(search, threads, {
+      currentUserId,
+      isAdmin,
+    });
 
     if (link.kind === "thread") {
       const officeUser = parseOfficeThreadId(link.threadId);
-      if (officeUser && !threads.some((t) => t.id === link.threadId)) {
+      const canSynthesize =
+        officeUser != null &&
+        (isAdmin || (currentUserId != null && officeUser === currentUserId));
+      if (canSynthesize && !threads.some((t) => t.id === link.threadId)) {
         setExtraDirectThreads((prev) => {
           if (prev.some((t) => t.id === link.threadId)) return prev;
           return [
@@ -214,7 +221,10 @@ function StaffMessagesPage({
 
     if (link.kind === "request") {
       setSelectedId(link.threadId);
-      setOpenedIds((prev) => new Set(prev).add(link.threadId));
+      setOpenedIds((prev) => {
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
+      });
       setMobileThread(true);
       return;
     }
@@ -229,7 +239,7 @@ function StaffMessagesPage({
       setSelectedId(null);
       setMobileThread(false);
     }
-  }, [search, threads, state, accountTitles]);
+  }, [search, threads, state, accountTitles, currentUserId, isAdmin]);
 
   const selected: MessageThread | undefined =
     threads.find((t) => t.id === selectedId) ??
@@ -301,8 +311,11 @@ function StaffMessagesPage({
                 t.thread_user_id === selectedThreadUserId ? { ...t, unread: false } : t,
               ),
             );
-          } catch {
-            // Read marker is best-effort — still show the thread.
+          } catch (err) {
+            // Still show the thread; surface so unread does not look stuck forever.
+            setNotice(
+              `Opened the conversation, but couldn’t mark it read: ${(err as Error).message}`,
+            );
           }
         })
         .catch((err) => {
@@ -328,6 +341,7 @@ function StaffMessagesPage({
     listOfficeMessages,
     markOfficeThreadRead,
     setError,
+    setNotice,
     isLandlord,
   ]);
 
@@ -553,7 +567,8 @@ function StaffMessagesPage({
 
   const deepLinkMiss =
     state === "ready" &&
-    resolveStaffMessagesDeepLink(search, threads).kind === "not-found";
+    resolveStaffMessagesDeepLink(search, threads, { currentUserId, isAdmin }).kind ===
+      "not-found";
 
   return (
     <PageShell
