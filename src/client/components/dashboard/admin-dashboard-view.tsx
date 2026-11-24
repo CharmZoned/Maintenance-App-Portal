@@ -6,29 +6,26 @@ import type {
   DashboardIntroModel,
   DashboardNoticeModel,
 } from "./admin-dashboard-model";
-import { ActivityCard } from "./activity-card";
 import { AttentionCard } from "./attention-card";
 import { CalendarCard } from "./calendar-card";
 import { DashboardIntro } from "./dashboard-intro";
 import { DashboardNotice } from "./dashboard-primitives";
 import { DashboardEmpty, DashboardError, DashboardLoading } from "./dashboard-states";
 import { KpiGrid } from "./kpi-grid";
-import {
-  ListingsCard,
-  MaintenanceSnapshotCard,
-  MessagesCard,
-  PortfolioCard,
-  RentCard,
-} from "./side-cards";
+import { SnapshotCard } from "./side-cards";
 
 /**
  * Admin Dashboard layout (Figma "001 - Admin Pages" · AH — Dashboard).
  *
  * Presentational: takes the view state and reports intent through callbacks.
  *
- * - Desktop (≥1280): KPIs in one row of six, then a fluid main column beside a
- *   384px right column.
- * - Tablet (768–1279): KPIs three across, two equal columns.
+ * - Desktop (≥1280): fits one screen. A one-row intro, KPIs in one row of
+ *   six, then three columns that fill the rest of the viewport — Needs your
+ *   attention, Calendar (one week) and the tabbed Snapshot — each scrolling
+ *   inside itself. On a very short window the row keeps a minimum height and
+ *   the page scrolls instead of squashing the cards.
+ * - Tablet (768–1279): KPIs three across; attention and calendar stacked
+ *   beside the Snapshot card. The page scrolls.
  * - Phone (<768): one column, and the KPIs move below the calendar so "Needs
  *   your attention" leads the page.
  */
@@ -64,7 +61,10 @@ export function AdminDashboardView({
 
   return (
     <AdminPageShell section="Dashboard">
-      <div className="flex flex-col gap-6" data-dashboard-state={state.status}>
+      <div
+        className="flex flex-col gap-6 xl:h-full xl:gap-4"
+        data-dashboard-state={state.status}
+      >
         <DashboardIntro
           intro={intro}
           canCreateRequest={canCreateRequest}
@@ -97,29 +97,31 @@ export function AdminDashboardView({
           <>
             {isPhone ? null : <KpiGrid tiles={state.model.kpis} onNavigate={onNavigate} />}
 
-            <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_24rem]">
-              <div className="flex min-w-0 flex-col gap-6">
-                <AttentionCard attention={state.model.attention} onNavigate={onNavigate} />
+            <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2 xl:min-h-[30rem] xl:flex-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,19rem)] 2xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,22rem)] xl:items-stretch xl:gap-4">
+              <div className="flex min-w-0 flex-col gap-6 xl:contents">
+                <AttentionCard
+                  attention={state.model.attention}
+                  onNavigate={onNavigate}
+                  fill
+                />
                 <CalendarCard
                   calendar={state.model.calendar}
                   onNavigate={onNavigate}
+                  fill
                   defaultHiddenKinds={preview?.calendarHiddenKinds}
                   defaultSelectedDay={preview?.calendarSelectedDay}
                 />
                 {isPhone ? <KpiGrid tiles={state.model.kpis} onNavigate={onNavigate} /> : null}
-                <ActivityCard activity={state.model.activity} onNavigate={onNavigate} />
               </div>
 
-              <div className="flex min-w-0 flex-col gap-6">
-                <RentCard rent={state.model.rent} onNavigate={onNavigate} />
-                <MaintenanceSnapshotCard
-                  maintenance={state.model.maintenance}
-                  onNavigate={onNavigate}
-                />
-                <MessagesCard messages={state.model.messages} onNavigate={onNavigate} />
-                <ListingsCard listings={state.model.listings} onNavigate={onNavigate} />
-                <PortfolioCard portfolio={state.model.portfolio} />
-              </div>
+              <SnapshotCard
+                rent={state.model.rent}
+                maintenance={state.model.maintenance}
+                messages={state.model.messages}
+                activity={state.model.activity}
+                onNavigate={onNavigate}
+                fill
+              />
             </div>
           </>
         ) : null}

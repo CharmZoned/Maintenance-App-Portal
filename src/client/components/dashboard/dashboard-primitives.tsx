@@ -127,21 +127,45 @@ export const AdminButton = React.forwardRef<
 AdminButton.displayName = "AdminButton";
 
 /**
+ * A region that scrolls inside a card. It bleeds 8px into the card padding
+ * (and pads it back) so row hover fills and focus rings that reach past the
+ * text are not clipped by the scroll box.
+ */
+export const SCROLL_REGION = "overflow-y-auto overscroll-contain -mx-2 px-2 -my-1 py-1";
+
+/**
  * White card with a 1px border and 12px radius. `title` renders the section
- * heading (18/26) with an optional 12/18 muted summary line under it.
+ * heading (18/26) with an optional 12/18 muted summary line under it, and
+ * `actions` sits on the right of the heading.
+ *
+ * `fill`: from `xl` the card takes its grid cell's full height and its body
+ * scrolls inside it, so the dashboard fits one screen however long the lists
+ * are. `footer` stays pinned under the body. Below `xl` the card is as tall as
+ * its content. Pass `scrollBody={false}` when part of the body must stay put
+ * and the card scrolls a region of its own (use SCROLL_REGION for it).
+ *
  * The card is a container-query root (`@container`): lay out by the card's
- * own width, because the same card sits in a 760px column on desktop and a
- * ~360px column on tablet and phone.
+ * own width, because the same card sits in columns of very different widths.
  */
 export function DashboardCard({
   title,
   summary,
+  actions,
+  footer,
+  fill = false,
+  scrollBody = true,
+  bodyClassName,
   className,
   children,
   ...rest
 }: {
   title: string;
   summary?: React.ReactNode;
+  actions?: React.ReactNode;
+  footer?: React.ReactNode;
+  fill?: boolean;
+  scrollBody?: boolean;
+  bodyClassName?: string;
   className?: string;
   children: React.ReactNode;
 } & Omit<React.HTMLAttributes<HTMLElement>, "title">) {
@@ -151,17 +175,33 @@ export function DashboardCard({
       aria-labelledby={headingId}
       className={cn(
         "@container flex min-w-0 flex-col gap-4 rounded-md border border-border bg-card p-4",
+        fill && "xl:h-full xl:min-h-0",
         className,
       )}
       {...rest}
     >
-      <div className="flex flex-col gap-1">
-        <h2 id={headingId} className="lg-section text-foreground">
-          {title}
-        </h2>
-        {summary ? <p className="lg-caption text-muted-foreground">{summary}</p> : null}
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h2 id={headingId} className="lg-section text-foreground">
+            {title}
+          </h2>
+          {summary ? <p className="lg-caption text-muted-foreground">{summary}</p> : null}
+        </div>
+        {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
       </div>
-      {children}
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-4",
+          fill && "xl:min-h-0 xl:flex-1",
+          fill &&
+            scrollBody &&
+            "xl:overflow-y-auto xl:overscroll-contain xl:-mx-2 xl:px-2 xl:-my-1 xl:py-1",
+          bodyClassName,
+        )}
+      >
+        {children}
+      </div>
+      {footer}
     </section>
   );
 }

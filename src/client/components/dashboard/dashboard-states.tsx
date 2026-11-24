@@ -11,7 +11,7 @@ const STATE_CARD =
 function SkeletonTile({ className }: { className?: string }) {
   const bone = "rounded-xs bg-muted motion-safe:animate-pulse";
   return (
-    <div className={cn("flex h-[140px] min-w-0 flex-col gap-3 rounded-md bg-card p-4", className)}>
+    <div className={cn("flex h-[100px] min-w-0 flex-col gap-3 rounded-md bg-card p-4", className)}>
       <div className={cn(bone, "h-3 w-full")} />
       <div className={cn(bone, "h-8 w-[90px] max-w-full")} />
       <div className={cn(bone, "h-3 w-full")} />
@@ -21,7 +21,8 @@ function SkeletonTile({ className }: { className?: string }) {
 
 /**
  * Data-shaped skeletons (Figma "Loading" · "KPI placeholders" + "Dashboard
- * skeletons"): six KPI tiles, then six card placeholders. Never loading text
+ * skeletons"): six KPI tiles, then the three card columns of the ready
+ * layout (filling the screen from `xl`, like the cards). Never loading text
  * on screen — the label is for assistive technology only.
  */
 export function DashboardLoading() {
@@ -30,20 +31,27 @@ export function DashboardLoading() {
       role="status"
       aria-busy="true"
       aria-label="Loading dashboard"
-      className="flex min-w-0 flex-col gap-6"
+      className="flex min-w-0 flex-col gap-6 xl:min-h-0 xl:flex-1 xl:gap-4"
     >
       <span className="sr-only">Loading dashboard</span>
       <div
         aria-hidden
-        className="grid grid-cols-2 gap-x-3 gap-y-6 md:grid-cols-3 md:gap-3 xl:grid-cols-6"
+        className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"
       >
         {Array.from({ length: 6 }, (_, index) => (
           <SkeletonTile key={index} />
         ))}
       </div>
-      <div aria-hidden className="flex flex-col gap-4">
-        {Array.from({ length: 6 }, (_, index) => (
-          <div key={index} className="rounded-md border border-border bg-card p-4">
+      <div
+        aria-hidden
+        className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:min-h-[30rem] xl:flex-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,19rem)] xl:gap-4 2xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,22rem)]"
+      >
+        {Array.from({ length: 3 }, (_, index) => (
+          <div
+            key={index}
+            className="flex flex-col gap-2 rounded-md border border-border bg-card p-4 xl:h-full"
+          >
+            <SkeletonTile />
             <SkeletonTile />
           </div>
         ))}

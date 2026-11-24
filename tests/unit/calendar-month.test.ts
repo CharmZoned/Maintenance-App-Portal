@@ -17,6 +17,10 @@ import {
   monthWeeks,
   shiftMonth,
   toggleKindFilter,
+  countEventsOnDays,
+  weekDays,
+  weekRangeLabel,
+  weekStart,
 } from "@/components/dashboard/calendar-month";
 
 function event(id: string, kind: DashboardEventKind, day: string): DashboardCalendarEvent {
@@ -162,5 +166,38 @@ describe("calendar-month · keyboard", () => {
   test("other keys are ignored", () => {
     expect(dayForKey("2026-11-17", "Enter")).toBeNull();
     expect(dayForKey("2026-11-17", "a")).toBeNull();
+  });
+});
+
+describe("calendar-month · weeks", () => {
+  test("weeks start on Monday", () => {
+    expect(weekStart("2026-11-16")).toBe("2026-11-16"); // Monday
+    expect(weekStart("2026-11-22")).toBe("2026-11-16"); // Sunday
+    expect(weekStart("2026-12-02")).toBe("2026-11-30");
+    expect(weekDays("2026-11-18")).toEqual([
+      "2026-11-16",
+      "2026-11-17",
+      "2026-11-18",
+      "2026-11-19",
+      "2026-11-20",
+      "2026-11-21",
+      "2026-11-22",
+    ]);
+  });
+
+  test("week range label across month and year boundaries", () => {
+    expect(weekRangeLabel("2026-11-18")).toBe("16 – 22 Nov 2026");
+    expect(weekRangeLabel("2026-12-01")).toBe("30 Nov – 6 Dec 2026");
+    expect(weekRangeLabel("2026-12-31")).toBe("28 Dec 2026 – 3 Jan 2027");
+  });
+
+  test("counts events on the given days only", () => {
+    const byDay = groupEventsByDay([
+      event("a", "visit", "2026-11-16"),
+      event("b", "rent_due", "2026-11-16"),
+      event("c", "visit", "2026-11-23"),
+    ]);
+    expect(countEventsOnDays(byDay, weekDays("2026-11-16"))).toBe(2);
+    expect(countEventsOnDays(byDay, weekDays("2026-11-23"))).toBe(1);
   });
 });
