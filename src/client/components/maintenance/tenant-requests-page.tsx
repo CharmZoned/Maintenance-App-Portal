@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { withFrom } from "@/lib/back-link";
 import { SupportContactNotice } from "@/components/patterns/support-contact-notice";
 import { Inbox, Plus } from "lucide-react";
 import { useApp } from "@/context";
@@ -220,8 +221,11 @@ export function TenantRequestsPage({
   const noUnit = home != null && home.unit_id == null;
   const canReport = !noUnit;
 
+  /** The request page, told where to come back to (`?from=`, UX-09). */
+  const requestHref = (w: Pick<WorkOrder, "id">) => withFrom(`/maintenance/${w.id}`);
+
   function openRequest(w: WorkOrder) {
-    go(`/maintenance/${w.id}`);
+    go(requestHref(w));
   }
 
   function body() {
@@ -248,6 +252,7 @@ export function TenantRequestsPage({
       <RequestListTable
         items={items}
         onOpen={openRequest}
+        hrefFor={requestHref}
         thumbnails={thumbnails}
         dateColumn="reported"
         sort={sort}

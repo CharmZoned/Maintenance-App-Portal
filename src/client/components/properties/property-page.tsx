@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { withFrom } from "@/lib/back-link";
 import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
@@ -200,11 +201,11 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
               {workOrders.map((w) => (
                 <a
                   key={w.id}
-                  href={`/maintenance/${w.id}`}
+                  href={withFrom(`/maintenance/${w.id}`)}
                   onClick={(e) => {
                     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                     e.preventDefault();
-                    navigate(`/maintenance/${w.id}`);
+                    navigate(withFrom(`/maintenance/${w.id}`));
                   }}
                   className="flex items-center justify-between gap-4 p-4 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >

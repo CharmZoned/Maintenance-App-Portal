@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { withFrom } from "@/lib/back-link";
 import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
@@ -21,6 +22,7 @@ import {
   RequestSortMenu,
   scheduledDayFor,
   useRequestThumbnails,
+  visitMissed,
   type RequestListItem,
 } from "./request-list-row";
 import {
@@ -237,7 +239,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
   }, [deepLinkId, replace, navigate]);
 
   function openJob(order: WorkOrder) {
-    const to = jobPath(order);
+    const to = withFrom(jobPath(order));
     if (navigate) navigate(to);
     else replace?.(to);
   }
@@ -264,7 +266,11 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
   const offers = FEATURES.workerSelfClaim;
   const counted = offers ? orders : orders.filter((o) => jobSectionFor(o, now) !== "Job offers");
   const openCount = counted.filter((o) => o.status !== "closed").length;
-  const todayCount = sections.find((s) => s.label === "Today")?.items.length ?? 0;
+  const todayItems = sections.find((s) => s.label === "Today")?.items ?? [];
+  const todayCount = todayItems.length;
+  // Earlier-day and earlier-today visits nobody started sit under Today, so
+  // the count says how many of them are missed (each row says "(missed)").
+  const missedCount = todayItems.filter((o) => visitMissed(o, now)).length;
   const mineOpen = counted.filter((o) => o.status !== "closed" && jobSectionFor(o, now) !== "Job offers").length;
   const meta =
     loading || listError
@@ -272,7 +278,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
       : openCount === 0
         ? "No open jobs"
         : todayCount > 0
-          ? `${todayCount} today`
+          ? [`${todayCount} today`, missedCount > 0 ? `${missedCount} missed` : null].filter(Boolean).join(" · ")
           : mineOpen > 0
             ? `${mineOpen} open`
             : `${openCount} on offer`;
@@ -315,7 +321,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
                 <RequestListTable
                   items={items}
                   onOpen={openJob}
-                  hrefFor={jobPath}
+                  hrefFor={(order) => withFrom(jobPath(order))}
                   thumbnails={thumbnails}
                   showAssignee={false}
                   dateColumn="scheduled"

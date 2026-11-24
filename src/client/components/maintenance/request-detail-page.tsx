@@ -29,6 +29,7 @@ import { FEATURES } from "@/lib/feature-flags";
 import { officeMessageHref } from "@/lib/messages";
 import {
   formatActivityStamp,
+  formatVisit,
   requestDayInSentence,
   PRIORITY_OPTIONS,
   priorityLevel,
@@ -36,10 +37,13 @@ import {
   requestDayWord,
   requestNextStep,
   toRequestStatus,
+  visitChoiceFrom,
   type RequestStatus,
+  type VisitChoice,
 } from "@/lib/request-status";
+import { VisitWindowFields, visitPatchFor } from "./visit-window-fields";
 import { buildTimeline, type RequestViewerRole } from "@/lib/request-timeline";
-import { cn, toIsoDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import {
   MAINTENANCE_CATEGORIES,
   type MaintenanceComment,
@@ -648,7 +652,7 @@ function RequestDetailsCard({
         <ReadOnlyField
           label="Scheduled"
           // New = open with nobody assigned: never "scheduled", whatever scheduled_at holds (spec §1).
-          value={(status !== "New" && dayStamp(order.scheduled_at)) || "Not scheduled yet"}
+          value={(status !== "New" && formatVisit(order)) || "Not scheduled yet"}
         />
       </div>
       {completed ? (
@@ -869,7 +873,7 @@ export function RequestDetailPage({
 
   // Dialog fields.
   const [assignStaffId, setAssignStaffId] = useState<string>("");
-  const [assignDate, setAssignDate] = useState("");
+  const [assignVisit, setAssignVisit] = useState<VisitChoice>(() => visitChoiceFrom({ scheduled_at: null }));
   const [holdReason, setHoldReason] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
@@ -1114,7 +1118,7 @@ export function RequestDetailPage({
 
   function openAssign() {
     setAssignStaffId(current.assigned_staff_id != null ? String(current.assigned_staff_id) : "");
-    setAssignDate(current.scheduled_at?.slice(0, 10) || toIsoDate(new Date()));
+    setAssignVisit(visitChoiceFrom(current));
     setDialog("assign");
   }
 
@@ -1152,7 +1156,7 @@ export function RequestDetailPage({
           openAssign();
           return;
         }
-        void applyStatus("scheduled", {}, `${assignee ?? "Worker"} assigned for ${dayStamp(current.scheduled_at)}.`);
+        void applyStatus("scheduled", {}, `${assignee ?? "Worker"} assigned for ${formatVisit(current)}.`);
         return;
       case "open":
         // "New" means not assigned yet (spec §1), so clear the assignee.
@@ -1166,12 +1170,13 @@ export function RequestDetailPage({
 
   async function confirmAssign() {
     const staffId = Number(assignStaffId);
-    if (!staffId || !assignDate) return;
+    const visit = visitPatchFor(assignVisit);
+    if (!staffId || !visit) return;
     const name = assigneeName({ assigned_staff_id: staffId }, staffMap) ?? "Worker";
     await applyStatus(
       "scheduled",
-      { assigned_staff_id: staffId, scheduled_at: assignDate },
-      `${name} assigned for ${dayStamp(assignDate)}.`,
+      { assigned_staff_id: staffId, ...visit },
+      `${name} assigned for ${formatVisit({ ...visit, status: "scheduled", assigned_staff_id: staffId })}.`,
     );
   }
 
@@ -1534,7 +1539,7 @@ export function RequestDetailPage({
         title="Assign and schedule"
         description={dialogContext}
         primaryLabel="Assign"
-        primaryDisabled={!assignStaffId || !assignDate}
+        primaryDisabled={!assignStaffId || !visitPatchFor(assignVisit)}
         busy={busy}
         onPrimary={() => void confirmAssign()}
       >
@@ -1553,17 +1558,7 @@ export function RequestDetailPage({
             </SelectContent>
           </Select>
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="assign-date">Date</Label>
-          <Input
-            id="assign-date"
-            type="date"
-            className="h-11 md:h-8"
-            value={assignDate}
-            onChange={(e) => setAssignDate(e.target.value)}
-          />
-          <FieldHint>The tenant is told who is coming and when.</FieldHint>
-        </div>
+        <VisitWindowFields value={assignVisit} onChange={setAssignVisit} idPrefix="assign" />
       </ShortDialog>
 
       <ShortDialog

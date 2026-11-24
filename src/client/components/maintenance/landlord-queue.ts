@@ -3,7 +3,7 @@ import { formatDocumentDate } from "@/lib/landlord-documents";
 import { formatMoney } from "@/lib/utils";
 import type { WorkOrder, WorkOrderPriority } from "@/types";
 import type { RequestStatus } from "@/components/patterns/status-chip";
-import { parseWhenDate, toRequestStatus } from "./request-status";
+import { formatVisit, hasScheduledVisit, parseWhenDate, toRequestStatus } from "@/lib/request-status";
 
 /**
  * Landlord maintenance queue (Figma "001 - Landlord Pages", LM frames
@@ -303,10 +303,11 @@ function statusDetail(order: WorkOrder, now: Date): string {
     if (isToday(order.scheduled_at, now) || (!order.scheduled_at && isToday(order.created_at, now))) {
       return "Started today";
     }
-    const visit = queueDate(order.scheduled_at, now);
+    const visit = formatVisit(order, { now });
     return visit ? `Visit ${visit}` : "";
   }
-  const visit = queueDate(order.scheduled_at, now);
+  // A New request has no visit yet, whatever scheduled_at holds (pool offers).
+  const visit = hasScheduledVisit(order) ? formatVisit(order, { now }) : "";
   return visit ? `Visit ${visit}` : "";
 }
 

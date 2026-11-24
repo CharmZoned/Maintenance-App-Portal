@@ -166,3 +166,51 @@ export function requestPlaceLine(
       .join(" · ") || "—"
   );
 }
+
+// ── Queue state in the URL (UX-09) ─────────────────────────────────
+
+export type StaffQueueTab = "needs" | "active" | "completed" | "all";
+
+/** The admin queue's tab, filters and search, kept in the URL query. */
+export interface QueueState {
+  tab: StaffQueueTab;
+  /** Property id, or "all". */
+  property: string;
+  /** Staff id, "unassigned", or "all". */
+  assignee: string;
+  query: string;
+}
+
+export const DEFAULT_QUEUE_STATE: QueueState = { tab: "needs", property: "all", assignee: "all", query: "" };
+
+const QUEUE_TABS: readonly StaffQueueTab[] = ["needs", "active", "completed", "all"];
+
+/** Read `?tab=&property=&assignee=&q=`; anything unknown falls back to the default. */
+export function readQueueState(search: string): QueueState {
+  const p = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const tab = p.get("tab");
+  const property = p.get("property");
+  const assignee = p.get("assignee");
+  return {
+    tab: QUEUE_TABS.includes(tab as StaffQueueTab) ? (tab as StaffQueueTab) : DEFAULT_QUEUE_STATE.tab,
+    property: property && /^\d+$/.test(property) ? property : "all",
+    assignee: assignee === "unassigned" || (assignee && /^\d+$/.test(assignee)) ? assignee : "all",
+    query: p.get("q") ?? "",
+  };
+}
+
+/**
+ * The query string for `state`, keeping params the queue does not own
+ * (`focus`, …). Defaults are left out, so a fresh queue is plain `/maintenance`.
+ */
+export function queueStateSearch(search: string, state: QueueState): string {
+  const p = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  for (const key of ["tab", "property", "assignee", "q"]) p.delete(key);
+  if (state.tab !== DEFAULT_QUEUE_STATE.tab) p.set("tab", state.tab);
+  if (state.property !== "all") p.set("property", state.property);
+  if (state.assignee !== "all") p.set("assignee", state.assignee);
+  const q = state.query.trim();
+  if (q) p.set("q", q);
+  const out = p.toString();
+  return out ? `?${out}` : "";
+}

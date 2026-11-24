@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Inbox, Plus, SearchX } from "lucide-react";
 import { useApp } from "@/context";
 import {
@@ -24,6 +24,8 @@ import type { WorkOrder } from "@/types";
 import { PageShell } from "@/components/page-shell";
 import { EmptyState, ErrorRetry } from "@/components/patterns";
 import { staffQueueTab } from "@/lib/request-status";
+import { withFrom } from "@/lib/back-link";
+import { queueStateSearch, readQueueState, type QueueState, type StaffQueueTab } from "./maintenance-list";
 import {
   RequestListSkeleton,
   RequestListTab,
@@ -42,7 +44,7 @@ import {
   type RequestSort,
 } from "./request-list-sort";
 
-type StaffTab = "needs" | "active" | "completed" | "all";
+type StaffTab = StaffQueueTab;
 
 const LIST_ERROR = "We couldn't load the requests. Check your connection and try again.";
 
@@ -96,10 +98,41 @@ function StaffMaintenancePage({
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
-  const [staffTab, setStaffTab] = useState<StaffTab>("needs");
-  const [propertyFilter, setPropertyFilter] = useState<string>("all");
-  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
-  const [query, setQuery] = useState("");
+  // Tab, filters and search live in the URL query (replace, not push), so
+  // browser Back and the request page's back link come back to the same view.
+  const [initial] = useState(() => readQueueState(search));
+  const [staffTab, setStaffTab] = useState<StaffTab>(initial.tab);
+  const [propertyFilter, setPropertyFilter] = useState<string>(initial.property);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>(initial.assignee);
+  const [query, setQuery] = useState(initial.query);
+  const queueState: QueueState = { tab: staffTab, property: propertyFilter, assignee: assigneeFilter, query };
+  /** The query string this page last wrote, so its own writes are not read back. */
+  const writtenSearch = useRef(search);
+  const listPath = `/maintenance${queueStateSearch(search, queueState)}`;
+
+  useEffect(() => {
+    if (!replace) return;
+    const next = queueStateSearch(window.location.search, {
+      tab: staffTab,
+      property: propertyFilter,
+      assignee: assigneeFilter,
+      query,
+    });
+    if (next === window.location.search) return;
+    writtenSearch.current = next;
+    replace(`/maintenance${next}`);
+  }, [staffTab, propertyFilter, assigneeFilter, query, replace]);
+
+  // A link to /maintenance (rail, Back) with other params: show what it says.
+  useEffect(() => {
+    if (search === writtenSearch.current) return;
+    writtenSearch.current = search;
+    const next = readQueueState(search);
+    setStaffTab(next.tab);
+    setPropertyFilter(next.property);
+    setAssigneeFilter(next.assignee);
+    setQuery(next.query);
+  }, [search]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const sortKey = "maintenance-list-sort:admin";
   const [sort, setSortState] = useState<RequestSort | null>(() => readStoredSort(sortKey));
@@ -303,12 +336,15 @@ function StaffMaintenancePage({
     query.trim().length > 0 ||
     focusFilter != null;
 
+  /** The request page, told where to come back to (`?from=`, UX-09). */
+  const requestHref = (w: Pick<WorkOrder, "id">) => withFrom(`/maintenance/${w.id}`, listPath);
+
   function openOrder(w: WorkOrder) {
     if (navigate) {
-      navigate(`/maintenance/${w.id}`);
+      navigate(requestHref(w));
       return;
     }
-    window.location.assign(`/maintenance/${w.id}`);
+    window.location.assign(requestHref(w));
   }
 
   function openNewRequest() {
@@ -317,7 +353,8 @@ function StaffMaintenancePage({
 
   function selectStaffTab(tab: StaffTab) {
     setStaffTab(tab);
-    if (focusFilter) replace?.("/maintenance");
+    // Leaving a dashboard focus link (?focus=…) for a plain tab.
+    if (focusFilter) replace?.(`/maintenance${queueStateSearch("", { ...queueState, tab })}`);
   }
 
   /** Filtered-empty "Clear filter": resets search, filters and tab. */
@@ -326,7 +363,7 @@ function StaffMaintenancePage({
     setAssigneeFilter("all");
     setQuery("");
     setStaffTab("all");
-    if (focusFilter) replace?.("/maintenance");
+    if (focusFilter) replace?.("/maintenance?tab=all");
   }
 
   const canCreate = app.canCreateWorkOrders;
@@ -381,6 +418,7 @@ function StaffMaintenancePage({
       <RequestListTable
         items={items}
         onOpen={openOrder}
+        hrefFor={requestHref}
         thumbnails={thumbnails}
         dateColumn="opened"
         sort={sort}

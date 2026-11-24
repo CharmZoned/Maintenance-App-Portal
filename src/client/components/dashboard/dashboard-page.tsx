@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { withFrom } from "@/lib/back-link";
 import { useApp } from "@/context";
 import { useShellChrome } from "@/components/chrome/shell-chrome-context";
 import { AdminNewRequestDialog } from "@/components/maintenance/admin-new-request-dialog";
@@ -99,7 +100,8 @@ export function DashboardPage({ navigate }: { navigate: (to: string) => void }) 
         state={state}
         notice={notice}
         canCreateRequest={app.canCreateWorkOrders}
-        onNavigate={navigate}
+        // A request opened from the dashboard comes back here (?from=, UX-09).
+        onNavigate={(to) => navigate(/^\/maintenance\/\d+(\?|$)/.test(to) ? withFrom(to) : to)}
         onNewRequest={() => setDialog("request")}
         onQuickAdd={onQuickAdd}
         onRetry={() => void reload()}
