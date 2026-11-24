@@ -47,7 +47,7 @@ export function MessageBubble({
           </span>
         ) : null}
       </div>
-      <p className="text-sm text-foreground whitespace-pre-wrap">{body}</p>
+      <p className="text-sm text-foreground whitespace-pre-wrap break-words">{body}</p>
       <p className="text-[11px] text-muted-foreground">{time}</p>
     </div>
   );

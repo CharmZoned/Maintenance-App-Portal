@@ -10,6 +10,18 @@ const nav = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 /** The admin dashboard's page heading is its greeting. */
 const GREETING = /^Good (morning|afternoon|evening)/;
 const navLinks = async (page: Page) => (await nav(page).getByRole("link").allInnerTexts()).map((t) => t.trim());
+/**
+ * The landlord Documents page titles itself twice on purpose: once in the shell toolbar and once
+ * in the page's own intro, under the "Your property records" eyebrow. This is the intro's heading.
+ */
+const landlordDocumentsHeading = (page: Page) =>
+  page.locator("header", { hasText: "Your property records" }).getByRole("heading", { level: 1, name: "Documents", exact: true });
+/**
+ * A file on the landlord Documents page. Each row renders a phone and a desktop layout, so the
+ * title text is in the DOM twice; the row's Download button is the one accessible handle.
+ */
+const landlordDocument = (page: Page, title: string) =>
+  page.getByRole("button", { name: `Download ${title}`, exact: true });
 
 test.describe("[R8] Admin web portal — who sees what", () => {
   test.beforeAll(async () => {
@@ -95,11 +107,14 @@ test.describe("[R8] Admin web portal — who sees what", () => {
     await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/home");
     await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
     await expect(page.getByText("Read-only")).toHaveCount(0);
-    await expect(page.getByText("Maple Court")).toBeVisible();
+    // Their own property is listed under "Your properties"; the other landlord's is nowhere on the page.
+    const theirProperties = page.getByRole("region", { name: "Your properties" });
+    await expect(theirProperties.getByRole("heading", { name: "Maple Court", exact: true })).toBeVisible();
+    await expect(theirProperties.getByRole("listitem")).toHaveCount(1);
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);
     await expect(page.getByRole("button", { name: "New property" })).toHaveCount(0);
     await page.goto("/documents");
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+    await expect(landlordDocumentsHeading(page)).toBeVisible();
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await shot(page, testInfo, "Landlord portal");
   });
@@ -114,7 +129,7 @@ test.describe("[R1] Accounts and login — screens", () => {
   test("a wrong password shows an error and stays on the login page", async ({ page }, testInfo) => {
     await page.goto("/");
     await page.getByLabel("Email").fill("admin@test.local");
-    await page.getByLabel("Password").fill("definitely-wrong");
+    await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByText("Invalid login credentials")).toBeVisible();
     await expect(nav(page)).toHaveCount(0);
@@ -143,7 +158,7 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.getByRole("button", { name: "New here? Create an account" }).click();
     await page.getByLabel("Full name").fill("Nina Newcomer");
     await page.getByLabel("Email").fill("nina@signup.test");
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Create account", exact: true }).click();
     await expect(page.getByText("Check your email to verify your account")).toBeVisible();
     await shot(page, testInfo, "Sign-up confirmation message");
@@ -190,7 +205,7 @@ test.describe("[R2] Account approval — screens", () => {
   test("a pending user sees a review notice instead of the portal", async ({ page }, testInfo) => {
     await page.goto("/");
     await page.getByLabel("Email").fill("pending@test.local");
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
@@ -205,7 +220,7 @@ test.describe("[R2] Account approval — screens", () => {
     const theirPage = await waiting.newPage();
     await theirPage.goto("/");
     await theirPage.getByLabel("Email").fill("pending@test.local");
-    await theirPage.getByLabel("Password").fill(PASSWORD);
+    await theirPage.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await theirPage.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(
       theirPage.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
@@ -246,7 +261,7 @@ test.describe("[R2] Account approval — screens", () => {
 
     await signOut(page);
     await page.getByLabel("Email").fill("worker2@test.local");
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Your access is paused" })).toBeVisible();
   });
@@ -332,9 +347,9 @@ test.describe("[R5] Property documents — screens", () => {
     );
     await signIn(page, "landlord");
     await page.goto("/documents");
-    await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
-    await expect(page.getByText("Landlord lease copy", { exact: true })).toBeVisible();
-    await expect(page.getByText("House rules", { exact: true })).toBeVisible();
+    await expect(landlordDocumentsHeading(page)).toBeVisible();
+    await expect(landlordDocument(page, "Landlord lease copy")).toBeVisible();
+    await expect(landlordDocument(page, "House rules")).toBeVisible();
     await expect(page.getByText("Staff only binder")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await page.goto(`/properties/${world.property.id}`);
