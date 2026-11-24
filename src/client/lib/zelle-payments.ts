@@ -6,7 +6,17 @@
  * `confirm_zelle_payment`, which records a Payment against the charge.
  */
 import { supabase } from "./supabase";
-import { listPaymentsAwaitingVerification, type PaymentAwaitingVerification } from "./data";
+import {
+  listPaymentsAwaitingVerification,
+  PAYMENTS_AWAITING_VERIFICATION_LIMIT,
+  type PaymentAwaitingVerification,
+} from "./data";
+
+/**
+ * The list holds at most this many reports, oldest first. At this length there
+ * may be newer ones behind it, which appear as these are verified.
+ */
+export const REPORTED_ZELLE_PAGE_SIZE = PAYMENTS_AWAITING_VERIFICATION_LIMIT;
 
 function throwSb(error: { message: string } | null, fallback: string): never {
   throw new Error(error?.message || fallback);

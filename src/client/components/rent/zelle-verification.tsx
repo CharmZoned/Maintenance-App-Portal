@@ -5,6 +5,7 @@ import { cn, formatMoney, formatPeriod } from "@/lib/utils";
 import {
   confirmZellePayment,
   listReportedZellePayments,
+  REPORTED_ZELLE_PAGE_SIZE,
   type ReportedZellePayment,
 } from "@/lib/zelle-payments";
 import {
@@ -263,6 +264,11 @@ export function AwaitingVerificationSection({
         {missing ? (
           <p role="status" className="text-sm text-muted-foreground">
             The payment you opened is no longer awaiting verification. It may already have been verified.
+          </p>
+        ) : null}
+        {payments.length >= REPORTED_ZELLE_PAGE_SIZE ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Showing the {REPORTED_ZELLE_PAGE_SIZE} oldest reports. Newer ones appear as you verify these.
           </p>
         ) : null}
       </div>

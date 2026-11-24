@@ -2809,13 +2809,20 @@ export interface PaymentAwaitingVerification {
   charge: RentCharge | null;
 }
 
+/**
+ * How many reported payments one read returns. The list is oldest first, so a
+ * longer queue is worked from the front: verifying payments brings newer ones
+ * into view. Callers that show the list say so when it is this long.
+ */
+export const PAYMENTS_AWAITING_VERIFICATION_LIMIT = 100;
+
 export async function listPaymentsAwaitingVerification(): Promise<PaymentAwaitingVerification[]> {
   const { data, error } = await supabase
     .from("PaymentIntents")
     .select("id, charge_id, tenant_id, amount, method, updated_at")
     .eq("status", "zelle_reported")
     .order("updated_at", { ascending: true })
-    .limit(100);
+    .limit(PAYMENTS_AWAITING_VERIFICATION_LIMIT);
   if (error) throwSb(error);
   const rows = data ?? [];
   const charges = await loadChargesByIds(rows.map((r) => r.charge_id));
