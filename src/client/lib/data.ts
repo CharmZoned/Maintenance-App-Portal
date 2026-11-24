@@ -473,18 +473,20 @@ export async function deleteTenant(id: number): Promise<void> {
 export async function listLeases(params?: {
   tenant_id?: number;
   unit_id?: number;
+  /** One query for several units. Leases has no property_id column. */
+  unit_ids?: number[];
   status?: string;
   /** When set, only these lease ids are loaded (avoids full-table enrich for charge lists). */
   ids?: number[];
 }): Promise<Lease[]> {
+  if (params?.unit_ids !== undefined && params.unit_ids.length === 0) return [];
+  if (params?.ids !== undefined && params.ids.length === 0) return [];
   let q = supabase.from("Leases").select("*").order("start_date", { ascending: false });
   if (params?.unit_id) q = q.eq("unit_id", params.unit_id);
+  if (params?.unit_ids?.length) q = q.in("unit_id", params.unit_ids);
   if (params?.status) q = q.eq("status", params.status);
   if (params?.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
-  if (params?.ids !== undefined) {
-    if (params.ids.length === 0) return [];
-    q = q.in("id", params.ids);
-  }
+  if (params?.ids?.length) q = q.in("id", params.ids);
   const { data: leases, error } = await q;
   if (error) throwSb(error);
 
@@ -1112,10 +1114,16 @@ async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Pa
   return extras;
 }
 
-export async function listCharges(period?: string): Promise<RentCharge[]> {
+export async function listCharges(
+  period?: string,
+  params?: { lease_ids?: number[] },
+): Promise<RentCharge[]> {
+  // RentCharges has lease_id and period, not property_id.
+  if (params?.lease_ids !== undefined && params.lease_ids.length === 0) return [];
   const charges = await selectAllPages<Tables<"RentCharges">>((from, to) => {
     let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false }).range(from, to);
     if (period) q = q.eq("period", period);
+    if (params?.lease_ids?.length) q = q.in("lease_id", params.lease_ids);
     return q;
   });
 

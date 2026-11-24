@@ -194,6 +194,7 @@ export function useAppState(
   const listLeases = useCallback(async (params?: {
     tenant_id?: number;
     unit_id?: number;
+    unit_ids?: number[];
     status?: string;
   }): Promise<Lease[]> => {
     return data.listLeases(params);
@@ -219,8 +220,11 @@ export function useAppState(
     await refreshLookups();
   }, [refreshLookups, requireAdmin]);
 
-  const listCharges = useCallback(async (period?: string): Promise<RentCharge[]> => {
-    return data.listCharges(period);
+  const listCharges = useCallback(async (
+    period?: string,
+    params?: { lease_ids?: number[] },
+  ): Promise<RentCharge[]> => {
+    return data.listCharges(period, params);
   }, []);
 
   const generateCharges = useCallback(async (period: string) => {

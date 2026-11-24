@@ -30,14 +30,14 @@ import {
 import { cn, currentPeriod } from "@/lib/utils";
 import type { Lease, Property, PropertyDocument, RentCharge, Unit, WorkOrder } from "@/types";
 
-/** listLeases has unit and status filters, not a property id. Charges stay period-scoped. */
+/** Leases.unit_id can take several ids in one query. There is no property_id column. */
 async function listActiveLeases(
-  listLeases: (params?: { unit_id?: number; status?: string }) => Promise<Lease[]>,
+  listLeases: (params?: { unit_ids?: number[]; status?: string }) => Promise<Lease[]>,
   units: Unit[],
 ): Promise<Lease[]> {
-  if (units.length === 0) return [];
-  const groups = await Promise.all(units.map((unit) => listLeases({ unit_id: unit.id, status: "active" })));
-  return groups.flat();
+  const unitIds = [...new Set(units.map((unit) => unit.id))];
+  if (unitIds.length === 0) return [];
+  return listLeases({ unit_ids: unitIds, status: "active" });
 }
 
 export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (to: string) => void }) {
@@ -78,18 +78,22 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
       try {
         const nextProperty = await getProperty(id);
         const nextUnits = await listUnits(id);
-        const [nextLeases, nextCharges, nextOrders, nextDocs] = await Promise.all([
-          listActiveLeases(listLeases, nextUnits),
-          listCharges(currentPeriod()),
+        const nextLeases = await listActiveLeases(listLeases, nextUnits);
+        const leaseIds = nextLeases.map((lease) => lease.id);
+        const [nextCharges, nextOrders, nextDocs] = await Promise.all([
+          listCharges(currentPeriod(), { lease_ids: leaseIds }),
           listWorkOrders({ property_id: id, skip_staff_notes: true }),
           listPropertyDocuments({ property_id: id }),
         ]);
         if (cancelled) return;
         const unitIds = new Set(nextUnits.map((unit) => unit.id));
+        const leaseIdSet = new Set(leaseIds);
         setProperty(nextProperty);
         setUnits(nextUnits);
         setLeases(nextLeases.filter((lease) => unitIds.has(lease.unit_id) && lease.status === "active"));
-        setCharges(nextCharges.filter((charge) => charge.property_id === id));
+        setCharges(
+          nextCharges.filter((charge) => charge.property_id === id && leaseIdSet.has(charge.lease_id)),
+        );
         setOrders(nextOrders);
         setDocuments(nextDocs);
       } catch (err) {

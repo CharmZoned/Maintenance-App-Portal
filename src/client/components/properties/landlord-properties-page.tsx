@@ -34,6 +34,7 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
     error,
     refreshLookups,
     listUnits,
+    listLeases,
     listCharges,
     listWorkOrders,
     listPropertyDocuments,
@@ -57,15 +58,19 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
       setDetailLoading(true);
       setDetailError(null);
       try {
-        const [nextUnits, nextCharges, nextOrders, nextDocs] = await Promise.all([
+        const [nextUnits, nextOrders, nextDocs] = await Promise.all([
           listUnits(),
-          listCharges(currentPeriod()),
           listWorkOrders({ open_only: true, skip_staff_notes: true }),
           listPropertyDocuments(),
         ]);
+        const unitIds = [...new Set(nextUnits.map((unit) => unit.id))];
+        const leases = unitIds.length ? await listLeases({ unit_ids: unitIds }) : [];
+        const leaseIds = leases.map((lease) => lease.id);
+        const nextCharges = await listCharges(currentPeriod(), { lease_ids: leaseIds });
         if (cancelled) return;
+        const leaseIdSet = new Set(leaseIds);
         setUnits(nextUnits);
-        setCharges(nextCharges);
+        setCharges(nextCharges.filter((charge) => leaseIdSet.has(charge.lease_id)));
         setOrders(nextOrders);
         setDocuments(nextDocs);
       } catch (err) {
@@ -77,7 +82,7 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
     return () => {
       cancelled = true;
     };
-  }, [loading, listUnits, listCharges, listWorkOrders, listPropertyDocuments, reloadKey]);
+  }, [loading, listUnits, listLeases, listCharges, listWorkOrders, listPropertyDocuments, reloadKey]);
 
   const detailsReady = !detailLoading && !detailError;
   const cards = useMemo(
