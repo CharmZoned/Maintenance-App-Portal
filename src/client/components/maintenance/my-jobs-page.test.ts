@@ -100,7 +100,7 @@ describe("My jobs routes to the one request page", () => {
     expect(groups.map((g) => g.label)).toEqual(["Today", "Upcoming", "On hold", "Recently completed"]);
   });
 
-  it("puts an unaccepted pool offer under Job offers, not Upcoming", () => {
+  it("self-claim on: puts an unaccepted pool offer under Job offers, not Upcoming", () => {
     const now = new Date(2026, 10, 24, 12);
     const groups = groupJobs(
       [
@@ -109,11 +109,30 @@ describe("My jobs routes to the one request page", () => {
       ],
       { key: "scheduled", dir: "asc" },
       now,
+      { offers: true },
     );
     expect(groups.map((g) => [g.label, g.items.map((o) => o.id)])).toEqual([
       ["Upcoming", [1]],
       ["Job offers", [2]],
     ]);
+  });
+
+  it("self-claim off (launch default): no Job offers section at all", () => {
+    const now = new Date(2026, 10, 24, 12);
+    const orders = [
+      job({ id: 1, status: "scheduled", scheduled_at: "2099-01-01" }),
+      job({ id: 2, status: "open", assigned_staff_id: null, scheduled_at: "2099-01-02" }),
+    ];
+    const groups = groupJobs(orders, { key: "scheduled", dir: "asc" }, now, { offers: false });
+    expect(groups.map((g) => [g.label, g.items.map((o) => o.id)])).toEqual([["Upcoming", [1]]]);
+    // The flag defaults to off.
+    expect(groupJobs(orders, { key: "scheduled", dir: "asc" }, now).map((g) => g.label)).toEqual(["Upcoming"]);
+  });
+
+  it("an offer never names the tenant", () => {
+    expect(jobContextLine(job({ status: "open", assigned_staff_id: null }))).toBe(
+      "Maple Court · Unit 1A · OK to enter if absent",
+    );
   });
 });
 
