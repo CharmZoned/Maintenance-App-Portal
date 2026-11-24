@@ -153,6 +153,8 @@ not on Supabase. It is fixed with a new forward migration, then step 4 is run ag
 
 **Goal:** the staging site is live behind the Vercel login, with the four buttons.
 
+**Click-through script for testers:** [`CLICK_THROUGH.md`](CLICK_THROUGH.md)
+
 | # | Who | Task |
 |---|---|---|
 | 3.1 | Owner | Import the repo into Vercel (framework: Vite, output `dist`). Vercel builds `master` once on import; with no production variables set, that build only shows the app's "missing configuration" notice and cannot reach any database. It is configured in Phase 4. |
