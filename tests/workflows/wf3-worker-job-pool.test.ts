@@ -381,7 +381,10 @@ describe("[WF3] Worker job pool", () => {
     expect((await sam.from("Landlords").select("id")).data).toEqual([]);
     // Nothing changes for the people who are meant to have them.
     expect(await tenantRecordSeenBy(admin)).toEqual([{ first_name: "Tina", ...TENANT_CONTACT }]);
-    expect(await tenantRecordSeenBy(landlord)).toEqual([{ first_name: "Tina", ...TENANT_CONTACT }]);
+    // Owners get name, email and phone, never the emergency contact (20261124091000).
+    expect(await tenantRecordSeenBy(landlord)).toEqual([
+      { first_name: "Tina", ...TENANT_CONTACT, emergency_contact: null },
+    ]);
     expect(await tenantRecordSeenBy(tenant)).toEqual([{ first_name: "Tina", ...TENANT_CONTACT }]);
   });
 
