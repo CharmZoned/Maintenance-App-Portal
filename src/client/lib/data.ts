@@ -89,6 +89,9 @@ function throwSb(error: { message: string } | null): never {
 /** PostgREST default max-rows is 1000 — page so list/KPI paths are not silently truncated. */
 const REST_PAGE_SIZE = 1000;
 
+/** Chunk size for PostgREST `.in()` filters (URL length / practical batching). */
+const IN_FILTER_CHUNK = 200;
+
 async function selectAllPages<T>(
   fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
@@ -470,6 +473,53 @@ export async function deleteTenant(id: number): Promise<void> {
 
 // ── Leases ────────────────────────────────────────────────────────
 
+type LeaseListParams = {
+  tenant_id?: number;
+  unit_id?: number;
+  unit_ids?: number[];
+  status?: string;
+  ids?: number[];
+};
+
+async function listLeaseRows(params?: LeaseListParams): Promise<Tables<"Leases">[]> {
+  let q = supabase.from("Leases").select("*").order("start_date", { ascending: false });
+  if (params?.unit_id) q = q.eq("unit_id", params.unit_id);
+  if (params?.status) q = q.eq("status", params.status);
+  if (params?.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
+  if (params?.ids?.length) q = q.in("id", params.ids);
+  const { data, error } = await q;
+  if (error) throwSb(error);
+  return data ?? [];
+}
+
+/** Page each unit-id chunk. One `.in()` can both exceed the URL limit and the 1000-row cap. */
+async function listLeasesForUnitChunks(
+  unitIds: number[],
+  params: LeaseListParams,
+): Promise<Tables<"Leases">[]> {
+  const unique = [...new Set(unitIds)];
+  const rows: Tables<"Leases">[] = [];
+  for (let i = 0; i < unique.length; i += IN_FILTER_CHUNK) {
+    const chunk = unique.slice(i, i + IN_FILTER_CHUNK);
+    const page = await selectAllPages<Tables<"Leases">>((from, to) => {
+      let q = supabase
+        .from("Leases")
+        .select("*")
+        .order("start_date", { ascending: false })
+        .order("id", { ascending: true })
+        .in("unit_id", chunk)
+        .range(from, to);
+      if (params.status) q = q.eq("status", params.status);
+      if (params.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
+      if (params.unit_id) q = q.eq("unit_id", params.unit_id);
+      if (params.ids?.length) q = q.in("id", params.ids);
+      return q;
+    });
+    rows.push(...page);
+  }
+  return rows;
+}
+
 export async function listLeases(params?: {
   tenant_id?: number;
   unit_id?: number;
@@ -481,14 +531,9 @@ export async function listLeases(params?: {
 }): Promise<Lease[]> {
   if (params?.unit_ids !== undefined && params.unit_ids.length === 0) return [];
   if (params?.ids !== undefined && params.ids.length === 0) return [];
-  let q = supabase.from("Leases").select("*").order("start_date", { ascending: false });
-  if (params?.unit_id) q = q.eq("unit_id", params.unit_id);
-  if (params?.unit_ids?.length) q = q.in("unit_id", params.unit_ids);
-  if (params?.status) q = q.eq("status", params.status);
-  if (params?.tenant_id) q = q.eq("primary_tenant_id", params.tenant_id);
-  if (params?.ids?.length) q = q.in("id", params.ids);
-  const { data: leases, error } = await q;
-  if (error) throwSb(error);
+  const leases = params?.unit_ids?.length
+    ? await listLeasesForUnitChunks(params.unit_ids, params)
+    : await listLeaseRows(params);
 
   const unitIds = [...new Set((leases ?? []).map((l) => l.unit_id))];
   const tenantIds = [
@@ -1007,9 +1052,6 @@ async function enrichCharge(row: Tables<"RentCharges">): Promise<RentCharge> {
   });
 }
 
-/** Chunk size for PostgREST `.in()` filters (URL length / practical batching). */
-const IN_FILTER_CHUNK = 200;
-
 /** Slim lease→unit→property→tenant enrich for charges (no full listLeases graph). */
 async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Partial<RentCharge>>> {
   const extras = new Map<number, Partial<RentCharge>>();
@@ -1114,18 +1156,36 @@ async function loadChargeLeaseExtras(leaseIds: number[]): Promise<Map<number, Pa
   return extras;
 }
 
+async function listChargePage(period?: string, leaseIds?: number[]): Promise<Tables<"RentCharges">[]> {
+  return selectAllPages<Tables<"RentCharges">>((from, to) => {
+    let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false }).range(from, to);
+    if (period) q = q.eq("period", period);
+    if (leaseIds?.length) q = q.in("lease_id", leaseIds);
+    return q;
+  });
+}
+
+async function listChargesForLeaseChunks(
+  period: string | undefined,
+  leaseIds: number[],
+): Promise<Tables<"RentCharges">[]> {
+  const unique = [...new Set(leaseIds)];
+  const rows: Tables<"RentCharges">[] = [];
+  for (let i = 0; i < unique.length; i += IN_FILTER_CHUNK) {
+    rows.push(...(await listChargePage(period, unique.slice(i, i + IN_FILTER_CHUNK))));
+  }
+  return rows;
+}
+
 export async function listCharges(
   period?: string,
   params?: { lease_ids?: number[] },
 ): Promise<RentCharge[]> {
   // RentCharges has lease_id and period, not property_id.
   if (params?.lease_ids !== undefined && params.lease_ids.length === 0) return [];
-  const charges = await selectAllPages<Tables<"RentCharges">>((from, to) => {
-    let q = supabase.from("RentCharges").select("*").order("due_date", { ascending: false }).range(from, to);
-    if (period) q = q.eq("period", period);
-    if (params?.lease_ids?.length) q = q.in("lease_id", params.lease_ids);
-    return q;
-  });
+  const charges = params?.lease_ids?.length
+    ? await listChargesForLeaseChunks(period, params.lease_ids)
+    : await listChargePage(period);
 
   const leaseIds = [...new Set(charges.map((c) => c.lease_id))];
   const leaseExtras = await loadChargeLeaseExtras(leaseIds);
