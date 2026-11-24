@@ -6,16 +6,22 @@ name: Smoke staging site
 # For each role it clicks the staging quick sign-in button, checks the landing
 # page, then opens that role's main screens. It fails on a Supabase API call
 # answering 4xx/5xx, an uncaught page error, an image that did not load, or an
-# error boundary / missing configuration notice. It creates, changes and
-# deletes nothing, so it can be run as often as you like.
+# error boundary / missing configuration notice. It saves nothing (opening a
+# request page can move that demo user's own "read up to" mark, as a person
+# viewing it would), so it can be run as often as you like.
 # Specs: tests/smoke/ (config: playwright.smoke.config.ts).
 #
 # Needs (Settings -> Secrets and variables -> Actions):
 #   Variable STAGING_SITE_URL                 staging address, e.g. https://staging.example.com
-#                                             (or type a URL when starting the run)
+#                                             (or type a URL when starting the run; a typed
+#                                             URL must be on that host or on one listed in
+#                                             the optional variable STAGING_SMOKE_EXTRA_HOSTS,
+#                                             because the bypass secret is sent to it)
 #   Secret   VERCEL_AUTOMATION_BYPASS_SECRET  Vercel -> Project -> Settings -> Deployment
 #                                             Protection -> Protection Bypass for Automation
-# If either is missing the run ends green with a notice saying what to set.
+# If either is missing the run ends green, titled "skipped (not configured)",
+# with a notice and step summary saying what to set. Green with only the
+# configuration step means nothing was tested.
 on:
   workflow_dispatch:
     inputs:
@@ -42,28 +48,45 @@ jobs:
         env:
           INPUT_URL: ${{ inputs.url }}
           VAR_URL: ${{ vars.STAGING_SITE_URL }}
+          EXTRA_HOSTS: ${{ vars.STAGING_SMOKE_EXTRA_HOSTS }}
           HAS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET != '' }}
         run: |
-          url="${INPUT_URL:-$VAR_URL}"
-          url="$(printf '%s' "$url" | tr -d '[:space:]')"
+          host_of() { printf '%s' "$1" | sed -E 's#^https://([^/:?#]+).*$#\1#' | tr '[:upper:]' '[:lower:]'; }
+          is_https() { printf '%s' "$1" | grep -Eq '^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[^[:space:]]*)?$'; }
+
+          var_url="$(printf '%s' "$VAR_URL" | tr -d '[:space:]')"
+          url="$(printf '%s' "${INPUT_URL:-$var_url}" | tr -d '[:space:]')"
           missing=()
           if [ -z "$url" ]; then
             missing+=("the STAGING_SITE_URL repository variable (Settings -> Secrets and variables -> Actions -> Variables), or a URL typed when starting the run")
-          elif ! printf '%s' "$url" | grep -Eq '^https://[^/[:space:]]+(/.*)?$'; then
-            echo "::error::The site address must start with https:// (got: ${url})."
+          elif ! is_https "$url"; then
+            echo "::error::The site address must be an https:// URL (got: ${url}). Nothing was tested."
             exit 1
+          elif [ -n "$INPUT_URL" ]; then
+            # The bypass secret is sent to whatever site is tested, so a typed URL may only
+            # name an approved host: STAGING_SITE_URL's, or one listed in STAGING_SMOKE_EXTRA_HOSTS.
+            allowed=" $(printf '%s' "$EXTRA_HOSTS" | tr ',[:upper:]' ' [:lower:]') "
+            if is_https "$var_url"; then allowed="${allowed} $(host_of "$var_url") "; fi
+            host="$(host_of "$url")"
+            case "$allowed" in
+              *" ${host} "*) ;;
+              *)
+                echo "::error::${host} is not an approved host for the staging smoke test. Use the host of the STAGING_SITE_URL variable, or add ${host} to the STAGING_SMOKE_EXTRA_HOSTS variable (space- or comma-separated). Nothing was tested."
+                exit 1
+                ;;
+            esac
           fi
           if [ "$HAS_SECRET" != "true" ]; then
             missing+=("the VERCEL_AUTOMATION_BYPASS_SECRET repository secret (Vercel -> Project -> Settings -> Deployment Protection -> Protection Bypass for Automation)")
           fi
           if [ "${#missing[@]}" -gt 0 ]; then
             for m in "${missing[@]}"; do
-              echo "::notice title=Staging smoke skipped::Set ${m}, then run this workflow again. Nothing was tested."
+              echo "::notice title=Staging smoke skipped (not configured)::Set ${m}, then run this workflow again. Nothing was tested."
             done
             {
-              echo "### Staging smoke skipped"
+              echo "### Staging smoke skipped: not configured"
               echo ""
-              echo "Nothing was tested. Set the following, then run the workflow again:"
+              echo "This green run tested nothing. Set the following, then run the workflow again:"
               for m in "${missing[@]}"; do echo "- ${m}"; done
             } >> "$GITHUB_STEP_SUMMARY"
             echo "ready=false" >> "$GITHUB_OUTPUT"

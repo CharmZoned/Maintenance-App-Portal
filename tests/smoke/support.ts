@@ -6,7 +6,7 @@
  * tests sign in with the quick sign-in buttons and open pages, nothing more.
  */
 import { test as base, expect, type Page, type Request } from "@playwright/test";
-import { DEMO_ACCOUNTS, type DemoRoleKey } from "../../src/client/lib/demo-accounts";
+import { DEMO_ACCOUNTS, DEMO_ROLE_ORDER, homePathForDemoRole, type DemoRoleKey } from "../../src/client/lib/demo-accounts";
 
 export { expect };
 export type { DemoRoleKey };
@@ -19,13 +19,19 @@ const BYPASS_SECRET = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim() || und
 /** Requests to the Supabase API (REST, auth, storage, functions), wherever it is hosted. */
 const SUPABASE_API = /\/(rest|auth|storage|functions|graphql)\/v1\//;
 
-/** Expected role homes (BUILD_PLAN Phase 3 checks). */
-export const ROLE_HOME: Record<DemoRoleKey, RegExp> = {
-  admin: /\/dashboard$/,
-  landlord: /\/home$/,
-  tenant: /\/home$/,
-  maintenance: /\/maintenance$/,
-};
+export const ROLES: DemoRoleKey[] = DEMO_ROLE_ORDER;
+
+/**
+ * Expected role homes, from the app's own table (BUILD_PLAN Phase 3 checks: Admin /dashboard,
+ * Landlord and Tenant /home, Maintenance /maintenance). The pathname must match exactly.
+ */
+export const ROLE_HOME = Object.fromEntries(
+  DEMO_ROLE_ORDER.map((role) => [role, (url: URL) => url.pathname === homePathForDemoRole(role)]),
+) as Record<DemoRoleKey, (url: URL) => boolean>;
+
+export function roleLabel(role: DemoRoleKey): string {
+  return DEMO_ACCOUNTS[role].roleLabel;
+}
 
 /** Things that went wrong on the page since the last check. */
 export type Problems = {
@@ -93,6 +99,8 @@ export const test = base.extend<{ problems: Problems }>({
 
     await use(page);
     expect(toRealSupabase, "the browser tried to reach a real Supabase project").toEqual([]);
+    // Anything that went wrong after the test's last screen check still fails the test.
+    expect(problems.list, "failed Supabase calls or page errors after the last screen check").toEqual([]);
   },
 });
 
@@ -120,30 +128,33 @@ export async function quickSignIn(page: Page, role: DemoRoleKey): Promise<void> 
   await expect(page).toHaveURL(ROLE_HOME[role]);
 }
 
-/** The content each role's home must show once it has loaded. */
-export async function expectRoleHome(page: Page, role: DemoRoleKey): Promise<void> {
-  await expect(page).toHaveURL(ROLE_HOME[role]);
+/**
+ * The content each role's home must show once it has loaded. With `withinMs`, every wait shares
+ * that one deadline (no per-step floor), so a slow paint fails rather than stretching the budget.
+ */
+export async function expectRoleHome(page: Page, role: DemoRoleKey, withinMs?: number): Promise<void> {
+  const deadline = withinMs === undefined ? undefined : Date.now() + withinMs;
+  // Playwright reads timeout 0 as "no limit", so an exhausted budget becomes 1 ms, not 0.
+  const t = () => (deadline === undefined ? {} : { timeout: Math.max(1, deadline - Date.now()) });
+  await expect(page).toHaveURL(ROLE_HOME[role], t());
   const greeting = page.getByRole("heading", { level: 1, name: /^Good (morning|afternoon|evening)/ });
   switch (role) {
     case "admin":
-      await expect(greeting).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible();
+      await expect(greeting).toBeVisible(t());
+      await expect(page.getByRole("heading", { name: "Needs your attention" })).toBeVisible(t());
       break;
     case "landlord":
-      await expect(greeting).toBeVisible();
-      await expect(page.getByRole("region", { name: "Your properties" })).toBeVisible();
+      await expect(greeting).toBeVisible(t());
+      await expect(page.getByRole("region", { name: "Your properties" })).toBeVisible(t());
       break;
     case "tenant":
-      await expect(page.getByRole("heading", { name: "Home" }).first()).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Home" }).first()).toBeVisible(t());
       break;
     case "maintenance":
-      await expect(page.getByRole("heading", { name: "My jobs" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "My jobs" })).toBeVisible(t());
       break;
   }
-}
-
-export function personaName(role: DemoRoleKey): string {
-  return DEMO_ACCOUNTS[role].name;
+  await expect(page.getByRole("navigation", { name: "Primary" }).first()).toBeVisible(t());
 }
 
 /**
@@ -162,8 +173,9 @@ export async function visit(page: Page, problems: Problems, path: string): Promi
 export async function settle(page: Page): Promise<void> {
   await expect(page.getByRole("navigation", { name: "Primary" }).first()).toBeVisible();
   // The app keeps no long-lived connections open, so the network goes quiet once the page has loaded.
+  // Best effort only: a screen that polls may never go fully quiet. The Loading check below is the hard one.
   await page.waitForLoadState("networkidle", { timeout: REMOTE ? 20_000 : 10_000 }).catch(() => undefined);
-  await expect(page.getByText(/^Loading/).first()).toHaveCount(0, { timeout: REMOTE ? 15_000 : 8_000 }).catch(() => undefined);
+  await expect(page.getByText(/^Loading/), "the screen is still loading").toHaveCount(0, { timeout: REMOTE ? 15_000 : 8_000 });
 }
 
 export async function checkScreen(page: Page, problems: Problems, label: string): Promise<void> {

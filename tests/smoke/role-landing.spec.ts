@@ -3,9 +3,8 @@
  * within three seconds (Phase 3 checks). Also `/login?as=<role>` and the
  * ribbon's role switcher. Read-only, so it is safe against staging too.
  */
-import { expect, expectRoleHome, openLogin, quickSignIn, REMOTE, ROLE_HOME, test, type DemoRoleKey } from "./support";
+import { expect, expectRoleHome, openLogin, quickSignIn, REMOTE, roleLabel, ROLES, settle, test } from "./support";
 
-const ROLES: DemoRoleKey[] = ["admin", "landlord", "tenant", "maintenance"];
 /** The Phase 3 budget; a deployed site gets extra slack for a cold function or slow network. */
 const LANDING_MS = REMOTE ? 6_000 : 3_000;
 
@@ -15,12 +14,9 @@ test.describe("Quick sign-in · each button lands on its role's home", () => {
       await openLogin(page);
       const started = Date.now();
       await page.locator(`[data-quick-signin-role="${role}"]`).click();
-      await expect(page).toHaveURL(ROLE_HOME[role], { timeout: LANDING_MS });
-      await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible({
-        timeout: Math.max(500, LANDING_MS - (Date.now() - started)),
-      });
-      expect(Date.now() - started, `${role} landed within ${LANDING_MS} ms`).toBeLessThanOrEqual(LANDING_MS);
-      await expectRoleHome(page, role);
+      // The timer covers the address change and the home content, not just the shell.
+      await expectRoleHome(page, role, LANDING_MS);
+      expect(Date.now() - started, `${role} home rendered within ${LANDING_MS} ms`).toBeLessThanOrEqual(LANDING_MS);
       // The quick sign-in leaves no `?as=` or login leftovers on the address.
       expect(new URL(page.url()).search).toBe("");
     });
@@ -37,14 +33,29 @@ test.describe("Quick sign-in · /login?as=<role>", () => {
   }
 
   test("an unknown role does nothing", async ({ page }) => {
+    const signInCalls: string[] = [];
+    page.on("request", (req) => {
+      if (req.url().includes("/auth/v1/token")) signInCalls.push(req.url());
+    });
     await openLogin(page, "login?as=superuser");
-    await page.waitForTimeout(1_000);
+    // A real ?as= starts signing in right after the card mounts (it lands well under a second
+    // locally), so hold the page for a moment: no sign-in call, the buttons stay usable, still on login.
+    const admin = page.locator('[data-quick-signin-role="admin"]');
+    for (let i = 0; i < 6; i++) {
+      await expect(admin).toBeEnabled();
+      await page.waitForTimeout(250);
+    }
+    expect(signInCalls, "no sign-in attempt for an unknown role").toEqual([]);
     await expect(page.getByRole("navigation", { name: "Primary" })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/login\?as=superuser$/);
   });
 });
 
+// Each home is left to finish loading before the next switch, as a person would. Switching while the
+// bell is still loading makes its later queries go out signed-out (401); see the PR #106 notes.
 test("Staging ribbon · the role switcher moves between all four roles", async ({ page }) => {
   await quickSignIn(page, "admin");
+  await settle(page);
   const ribbon = page.locator("[data-staging-ribbon]");
   await expect(ribbon).toBeVisible();
   await expect(page).toHaveTitle(/^\[STAGING\]/);
@@ -54,9 +65,6 @@ test("Staging ribbon · the role switcher moves between all four roles", async (
     await ribbon.getByRole("menuitem", { name: new RegExp(`^${roleLabel(role)}\\b`) }).click();
     await expectRoleHome(page, role);
     await expect(ribbon.getByRole("button", { name: `Viewing as ${roleLabel(role)} ▾` })).toBeVisible();
+    await settle(page);
   }
 });
-
-function roleLabel(role: DemoRoleKey): string {
-  return { admin: "Admin", landlord: "Landlord", tenant: "Tenant", maintenance: "Maintenance" }[role];
-}
