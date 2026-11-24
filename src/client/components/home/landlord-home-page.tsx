@@ -458,7 +458,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
   }
 
   return (
-    <PageShell title="Home" width="max-w-none">
+    <PageShell title="Home" width="max-w-none" titleIsPageHeading={false}>
       <div className="pb-24 md:pb-0">{body}</div>
       <PhoneActions onMessage={onMessage} />
     </PageShell>

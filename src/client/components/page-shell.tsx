@@ -16,6 +16,7 @@ export function PageShell({
   meta,
   actions,
   width = "max-w-7xl",
+  titleIsPageHeading = true,
   children,
 }: {
   title: React.ReactNode;
@@ -24,6 +25,11 @@ export function PageShell({
   /** Page-specific actions (primary CTA belongs last / use brand variant). */
   actions?: React.ReactNode;
   width?: string;
+  /**
+   * False when the page renders its own `<h1>` (e.g. LandlordPageIntro): the
+   * band title is then plain text, so the page has exactly one h1.
+   */
+  titleIsPageHeading?: boolean;
   children: React.ReactNode;
 }) {
   const chrome = useShellChrome();
@@ -44,7 +50,11 @@ export function PageShell({
           </button>
         ) : null}
         <div className="min-w-0 flex-1 leading-none">
-          <h1 className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
+          {titleIsPageHeading ? (
+            <h1 className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</h1>
+          ) : (
+            <p className="truncate text-[1.375rem] font-semibold tracking-[-0.01em]">{title}</p>
+          )}
           {meta ? (
             <div className="mt-0.5 truncate text-sm leading-snug text-muted-foreground">{meta}</div>
           ) : null}

@@ -93,9 +93,10 @@ test.describe("[R8] Admin web portal — who sees what", () => {
       "Documents",
     ]);
     await expect(page.getByRole("link", { name: "Landlord Gopher" })).toHaveAttribute("href", "/home");
-    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    // Home's one h1 is the greeting (the toolbar "Home" is a label, not a second h1).
+    await expect(page.getByRole("heading", { level: 1, name: GREETING })).toBeVisible();
     await expect(page.getByText("Read-only")).toHaveCount(0);
-    await expect(page.getByText("Maple Court")).toBeVisible();
+    await expect(page.getByText("Maple Court").first()).toBeVisible();
     await expect(page.getByText("Birch House"), "another landlord's property").toHaveCount(0);
     await expect(page.getByRole("button", { name: "New property" })).toHaveCount(0);
     await page.goto("/documents");
@@ -114,7 +115,7 @@ test.describe("[R1] Accounts and login — screens", () => {
   test("a wrong password shows an error and stays on the login page", async ({ page }, testInfo) => {
     await page.goto("/");
     await page.getByLabel("Email").fill("admin@test.local");
-    await page.getByLabel("Password").fill("definitely-wrong");
+    await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByText("Invalid login credentials")).toBeVisible();
     await expect(nav(page)).toHaveCount(0);
@@ -143,7 +144,7 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.getByRole("button", { name: "New here? Create an account" }).click();
     await page.getByLabel("Full name").fill("Nina Newcomer");
     await page.getByLabel("Email").fill("nina@signup.test");
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Create account", exact: true }).click();
     await expect(page.getByText("Check your email to verify your account")).toBeVisible();
     await shot(page, testInfo, "Sign-up confirmation message");
@@ -190,7 +191,7 @@ test.describe("[R2] Account approval — screens", () => {
   test("a pending user sees a review notice instead of the portal", async ({ page }, testInfo) => {
     await page.goto("/");
     await page.getByLabel("Email").fill("pending@test.local");
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
@@ -205,7 +206,7 @@ test.describe("[R2] Account approval — screens", () => {
     const theirPage = await waiting.newPage();
     await theirPage.goto("/");
     await theirPage.getByLabel("Email").fill("pending@test.local");
-    await theirPage.getByLabel("Password").fill(PASSWORD);
+    await theirPage.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await theirPage.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(
       theirPage.getByRole("heading", { name: "Thanks — we’re reviewing your account" }),
@@ -246,7 +247,7 @@ test.describe("[R2] Account approval — screens", () => {
 
     await signOut(page);
     await page.getByLabel("Email").fill("worker2@test.local");
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Your access is paused" })).toBeVisible();
   });
@@ -260,7 +261,7 @@ test.describe("[R3] Properties and units — screens", () => {
   test("an admin sees the portfolio on the Properties page", async ({ page }, testInfo) => {
     await signIn(page, "admin");
     await page.goto("/properties");
-    await expect(page.getByText("Maple Court")).toBeVisible();
+    await expect(page.getByText("Maple Court").first()).toBeVisible();
     await expect(page.getByText("Birch House")).toBeVisible();
     await shot(page, testInfo, "Properties list");
   });
@@ -333,8 +334,9 @@ test.describe("[R5] Property documents — screens", () => {
     await signIn(page, "landlord");
     await page.goto("/documents");
     await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
-    await expect(page.getByText("Landlord lease copy", { exact: true })).toBeVisible();
-    await expect(page.getByText("House rules", { exact: true })).toBeVisible();
+    // Rows render a phone and a desktop layout (one is display:none), so match the visible one.
+    await expect(page.getByText("Landlord lease copy", { exact: true }).filter({ visible: true })).toBeVisible();
+    await expect(page.getByText("House rules", { exact: true }).filter({ visible: true })).toBeVisible();
     await expect(page.getByText("Staff only binder")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Upload" })).toHaveCount(0);
     await page.goto(`/properties/${world.property.id}`);
