@@ -6,6 +6,7 @@ import {
   countUnreadConversations,
   createInboxReadMarker,
   hasRequestConversations,
+  INBOX_CHANGED_EVENT,
   loadInbox,
   markConversationRead,
   officeKey,
@@ -119,6 +120,19 @@ export function usePortalInbox({
   inboxRef.current = inbox;
   const viewerRef = useRef(viewer);
   viewerRef.current = viewer;
+
+  // Reads saved elsewhere (the bell's "Mark all read", another tab's reply)
+  // refresh the rows quietly, so this page agrees with the badge and the bell.
+  useEffect(() => {
+    if (scenario) return;
+    const onChange = () => {
+      const me = viewerRef.current;
+      if (!me.userId) return;
+      void loadInbox(me).then(setInbox, () => undefined);
+    };
+    window.addEventListener(INBOX_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(INBOX_CHANGED_EVENT, onChange);
+  }, [scenario]);
 
   const [reads] = useState(() =>
     createInboxReadMarker({

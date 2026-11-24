@@ -50,6 +50,8 @@ export function MessageComposer({
       if (!field || field.disabled) return;
       field.focus();
       field.setSelectionRange(field.value.length, field.value.length);
+      // Keep the caret's line in view in the short field.
+      field.scrollTop = field.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
   }, [resetKey, initialValue]);

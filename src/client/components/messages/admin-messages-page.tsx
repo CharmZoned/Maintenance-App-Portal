@@ -9,6 +9,7 @@ import {
   announceInboxChanged,
   countUnreadConversations,
   createInboxReadMarker,
+  INBOX_CHANGED_EVENT,
   listOfficeMessages,
   loadAdminInbox,
   officeKey,
@@ -133,6 +134,13 @@ export function AdminMessagesPage({
 
   const inboxRef = useRef(inbox);
   inboxRef.current = inbox;
+
+  // Reads saved elsewhere (the bell's "Mark all read") refresh the rows quietly.
+  useEffect(() => {
+    const onChange = () => void loadAdminInbox().then(setInbox, () => undefined);
+    window.addEventListener(INBOX_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(INBOX_CHANGED_EVENT, onChange);
+  }, []);
 
   /**
    * Records conversations as read for this admin, then lets the rail badge
@@ -327,7 +335,11 @@ export function AdminMessagesPage({
   const threadPane = selected ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-[100px] shrink-0 items-center gap-2 border-b border-border px-4 md:px-5">
-        <button type="button" className="text-sm font-medium text-foreground md:hidden" onClick={closeMobileThread}>
+        <button
+          type="button"
+          className="-ml-2 inline-flex min-h-11 min-w-11 items-center px-2 text-sm font-medium text-foreground md:hidden"
+          onClick={closeMobileThread}
+        >
           ← Back
         </button>
         <div className="min-w-0 flex-1">

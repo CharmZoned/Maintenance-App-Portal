@@ -19,7 +19,8 @@ export function MessageThreadRow({
   onSelect?: () => void;
   now?: Date;
 }) {
-  const time = formatMessageTime(thread.updatedAt, now);
+  // An empty thread has no message to date it by.
+  const time = thread.empty ? "" : formatMessageTime(thread.updatedAt, now);
   const heading = thread.counterpart ? `${thread.counterpart} — ${thread.title}` : thread.title;
   const when = time ? `. ${time}` : "";
   const accessibleName = thread.unread

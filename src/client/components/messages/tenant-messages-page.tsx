@@ -63,7 +63,7 @@ export function TenantMessagesPage({
       <button
         type="button"
         onClick={inbox.closeThread}
-        className="text-sm font-medium text-brand-text hover:underline"
+        className="-ml-2 inline-flex min-h-11 items-center px-2 text-sm font-medium text-brand-text hover:underline"
       >
         ← Back to inbox
       </button>
@@ -84,7 +84,8 @@ export function TenantMessagesPage({
       </div>
       <ul className="border-t border-border">
         {conversations.map((c) => {
-          const time = formatMessageTime(c.updatedAt);
+          // An empty thread has no message to date it by.
+          const time = c.empty ? "" : formatMessageTime(c.updatedAt);
           const when = time ? `. ${time}` : "";
           return (
             <li key={c.id}>
