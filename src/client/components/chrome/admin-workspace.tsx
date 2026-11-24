@@ -93,13 +93,15 @@ export function AdminWorkspace({
   }, []);
   const account = onAccount ?? chrome?.onAccount;
   const signOut = onSignOut ?? chrome?.onSignOut;
+  const section = items.find((item) => item.id === active)?.label;
 
   const pageChrome = useMemo<ShellChromeValue>(
     () => ({
       ...(chrome ?? { email: "", role: "", onSignOut: signOut ?? (() => {}), onAccount: account }),
       onOpenNav: openNav,
+      section,
     }),
-    [chrome, openNav, account, signOut],
+    [chrome, openNav, account, signOut, section],
   );
 
   const navigateFromDrawer = useCallback(

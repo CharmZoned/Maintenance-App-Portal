@@ -1,8 +1,13 @@
-import { Wrench } from "lucide-react";
+import { MessageSquare, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMessageTime, type MessageThread } from "@/lib/messages";
 
-/** Figma `Message thread row` — unread dot, optional wrench, title + preview + time. */
+/**
+ * Figma `Message thread row` — unread dot, optional wrench, title + preview + time.
+ * With `thread.counterpart` (admin inbox) the row leads with who the
+ * conversation is with; the request reference / thread kind moves to a second
+ * line above the preview.
+ */
 export function MessageThreadRow({
   thread,
   selected,
@@ -15,9 +20,10 @@ export function MessageThreadRow({
   now?: Date;
 }) {
   const time = formatMessageTime(thread.updatedAt, now);
+  const heading = thread.counterpart ? `${thread.counterpart} — ${thread.title}` : thread.title;
   const accessibleName = thread.unread
-    ? `${thread.title}, unread. ${thread.preview}. ${time}`
-    : `${thread.title}. ${thread.preview}. ${time}`;
+    ? `${heading}, unread. ${thread.preview}. ${time}`
+    : `${heading}. ${thread.preview}. ${time}`;
 
   return (
     <button
@@ -37,18 +43,36 @@ export function MessageThreadRow({
           <span className="size-2 rounded-full bg-brand" aria-hidden />
         ) : null}
       </div>
-      <div className="min-w-0 flex-1" aria-hidden>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {thread.kind === "request" ? (
-              <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            ) : null}
-            <span className="truncate text-sm font-semibold text-foreground">{thread.title}</span>
+      {thread.counterpart ? (
+        <div className="min-w-0 flex-1" aria-hidden>
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-semibold text-foreground">{thread.counterpart}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
           </div>
-          <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-foreground/80">
+            {thread.kind === "request" ? (
+              <Wrench className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            ) : (
+              <MessageSquare className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            )}
+            <span className="truncate">{thread.title}</span>
+          </div>
+          <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{thread.preview}</p>
         </div>
-        <p className="mt-1 truncate text-[13px] text-muted-foreground">{thread.preview}</p>
-      </div>
+      ) : (
+        <div className="min-w-0 flex-1" aria-hidden>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              {thread.kind === "request" ? (
+                <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              ) : null}
+              <span className="truncate text-sm font-semibold text-foreground">{thread.title}</span>
+            </div>
+            <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+          </div>
+          <p className="mt-1 truncate text-[13px] text-muted-foreground">{thread.preview}</p>
+        </div>
+      )}
     </button>
   );
 }

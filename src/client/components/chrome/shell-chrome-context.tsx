@@ -14,6 +14,12 @@ export type ShellChromeValue = {
    * rail is hidden below `lg` — page headers show a menu button when present.
    */
   onOpenNav?: () => void;
+  /**
+   * Label of the active rail item ("Properties"), for the admin header's
+   * "Admin workspace / {section}" breadcrumb. Set only inside the admin
+   * workspace.
+   */
+  section?: string;
 };
 
 const ShellChromeContext = createContext<ShellChromeValue | null>(null);

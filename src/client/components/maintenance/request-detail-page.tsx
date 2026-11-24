@@ -411,7 +411,7 @@ export function RequestDetailView({
     );
 
   return (
-    <PageShell title={shellTitle}>
+    <PageShell title={shellTitle} titleIsPageHeading={role !== "landlord"}>
       {/* Phone content is p-4 (16px): pull the shell's 24px padding in by 8px. */}
       <div className="flex flex-col gap-4 max-md:-mx-2 max-md:-mt-2 md:gap-6">
         <RequestHeader
@@ -888,10 +888,11 @@ export function RequestDetailPage({
   }, [accounts, viewerUserId, staff, staffMap, tenantIdOfOrder, tenantNameOfOrder, role, myStaffId]);
 
   const unresolvedTitle = role === "landlord" ? landlordRequestShellTitle() : "Request";
+  const unresolvedHeading = role !== "landlord";
 
   if (loading) {
     return (
-      <PageShell title={unresolvedTitle}>
+      <PageShell title={unresolvedTitle} titleIsPageHeading={unresolvedHeading}>
         <RequestLoadingState withActionsPanel={sectionsForRole(role).actionsPanel} />
       </PageShell>
     );
@@ -899,7 +900,7 @@ export function RequestDetailPage({
 
   if (loadError) {
     return (
-      <PageShell title={unresolvedTitle}>
+      <PageShell title={unresolvedTitle} titleIsPageHeading={unresolvedHeading}>
         <RequestErrorState backLabel={back.label} onBack={goBack} onRetry={() => void load()} />
       </PageShell>
     );
@@ -908,7 +909,7 @@ export function RequestDetailPage({
   if (!order) {
     const action = notAvailableActionFor(role);
     return (
-      <PageShell title={unresolvedTitle}>
+      <PageShell title={unresolvedTitle} titleIsPageHeading={unresolvedHeading}>
         <RequestNotAvailableState
           backLabel={back.label}
           onBack={goBack}

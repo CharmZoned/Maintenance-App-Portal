@@ -1,10 +1,20 @@
 import * as React from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
-  formatDayShort,
-  formatMonthYear,
-  relativeDayHeading,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  addDays,
+  dayDiff,
+  formatWeekdayDayMonth,
   relativeDayLabel,
+  weekdayShort,
 } from "@/lib/admin-dates";
 import { cn } from "@/lib/utils";
 import type {
@@ -16,20 +26,23 @@ import type {
 import {
   EVENT_KINDS,
   activeFilterKinds,
-  countEventsInMonth,
+  countEventsOnDays,
   dayButtonLabel,
   dayForKey,
   eventCountLabel,
-  firstDayOfMonth,
   groupEventsByDay,
-  isDayInMonth,
-  monthOfDay,
-  monthWeeks,
-  shiftMonth,
   toggleKindFilter,
-  type CalendarMonth,
+  weekDays,
+  weekRangeLabel,
+  weekStart,
 } from "./calendar-month";
-import { AdminButton, AdminIcon, DashboardCard, navProps } from "./dashboard-primitives";
+import {
+  AdminButton,
+  AdminIcon,
+  DashboardCard,
+  SCROLL_REGION,
+  navProps,
+} from "./dashboard-primitives";
 
 const KIND_META: Record<DashboardEventKind, { label: string; icon: AdminIconName }> = {
   visit: { label: "Scheduled visit", icon: "calendar" },
@@ -40,100 +53,109 @@ const KIND_META: Record<DashboardEventKind, { label: string; icon: AdminIconName
   move_in: { label: "Move-in", icon: "login" },
 };
 
-const WEEKDAYS = [
-  { short: "M", long: "Monday" },
-  { short: "T", long: "Tuesday" },
-  { short: "W", long: "Wednesday" },
-  { short: "T", long: "Thursday" },
-  { short: "F", long: "Friday" },
-  { short: "S", long: "Saturday" },
-  { short: "S", long: "Sunday" },
-] as const;
-
 /**
- * Dashboard "Calendar" card (Figma "AH — Dashboard" · Calendar): month
- * navigation, six event-type filters, a Monday-first month grid ("AD /
- * Calendar day") and the selected day's agenda ("AD / Calendar event").
+ * Dashboard "Calendar" card: one week at a time, so it stays short.
  *
- * The filters are "show only" chips: none pressed shows every kind; pressed
- * chips (tinted, 2px ring) narrow the dots and the agenda to those kinds.
- * The card lays out by its own width: grid beside agenda when wide, grid
- * above agenda when narrow.
+ * - Header: previous / next week and Today.
+ * - The week's range and event count, with a "Show only" filter menu (the
+ *   six event types; none ticked shows everything).
+ * - A seven-day strip: a dot marks days with events; today has a ring, the
+ *   selected day is tinted. Choosing a day scrolls the agenda to it.
+ * - The agenda: every day of the week with its events, in a region that
+ *   scrolls inside the card (it fills the card on desktop, and is capped at
+ *   about 22rem on smaller screens), with sticky day headings.
+ * - "Open full calendar" for the month view.
  */
 export function CalendarCard({
   calendar,
   onNavigate,
   className,
+  fill,
   defaultHiddenKinds,
   defaultSelectedDay,
 }: {
   calendar: DashboardCalendarModel;
   onNavigate: (href: string) => void;
   className?: string;
+  /** Fill the grid cell from `xl`; the agenda takes the spare height. */
+  fill?: boolean;
   /** Preview/testing only: start with these event kinds switched off. */
   defaultHiddenKinds?: DashboardEventKind[];
   /** Preview/testing only: initially selected day (`YYYY-MM-DD`). */
   defaultSelectedDay?: string;
 }) {
   const { today, events } = calendar;
-  const [month, setMonth] = React.useState<CalendarMonth>(() => monthOfDay(today));
   const [selectedDay, setSelectedDay] = React.useState(defaultSelectedDay ?? today);
+  const [week, setWeek] = React.useState(() => weekStart(defaultSelectedDay ?? today));
   const [hiddenKinds, setHiddenKinds] = React.useState<DashboardEventKind[]>(
     defaultHiddenKinds ?? [],
   );
-  // Roving tab stop inside the grid: the day the arrow keys last moved to.
+  // Roving tab stop in the strip: the day the arrow keys last moved to.
   const [cursorDay, setCursorDay] = React.useState(selectedDay);
 
-  const gridRef = React.useRef<HTMLDivElement>(null);
+  const stripRef = React.useRef<HTMLDivElement>(null);
+  const agendaRef = React.useRef<HTMLDivElement>(null);
   const pendingFocusDay = React.useRef<string | null>(null);
-  const monthLabelId = React.useId();
+  const firstScroll = React.useRef(true);
+  const weekLabelId = React.useId();
 
+  const days = React.useMemo(() => weekDays(week), [week]);
   const allByDay = React.useMemo(() => groupEventsByDay(events), [events]);
   const visibleByDay = React.useMemo(
     () => groupEventsByDay(events, hiddenKinds),
     [events, hiddenKinds],
   );
-  const weeks = React.useMemo(() => monthWeeks(month), [month]);
 
   const isFiltered = hiddenKinds.length > 0;
   const pressedKinds = activeFilterKinds(hiddenKinds);
-  const monthTotal = countEventsInMonth(allByDay, month);
-  const monthVisible = countEventsInMonth(visibleByDay, month);
-  /** The filters hide every event of the visible month. */
-  const monthFilteredEmpty = isFiltered && monthTotal > 0 && monthVisible === 0;
+  const weekTotal = countEventsOnDays(allByDay, days);
+  const weekVisible = countEventsOnDays(visibleByDay, days);
+  /** The filters hide every event of the week on screen. */
+  const weekFilteredEmpty = isFiltered && weekTotal > 0 && weekVisible === 0;
 
-  const dayEvents = visibleByDay.get(selectedDay) ?? [];
-  /** The selected day has events, but none of the kinds being shown. */
-  const dayFilteredEmpty =
-    isFiltered && dayEvents.length === 0 && (allByDay.get(selectedDay)?.length ?? 0) > 0;
-
-  const tabStopDay =
-    [cursorDay, selectedDay, today].find((day) => isDayInMonth(day, month)) ??
-    firstDayOfMonth(month);
+  const inWeek = (day: string) => days.includes(day);
+  const tabStopDay = [cursorDay, selectedDay, today].find(inWeek) ?? days[0];
 
   // Move keyboard focus once the target day's button is on screen (after a
-  // month change from the arrow keys, or when the grid comes back).
+  // week change from the arrow keys).
   React.useEffect(() => {
     const day = pendingFocusDay.current;
     if (!day) return;
     pendingFocusDay.current = null;
-    gridRef.current?.querySelector<HTMLButtonElement>(`[data-day="${day}"]`)?.focus();
+    stripRef.current?.querySelector<HTMLButtonElement>(`[data-day="${day}"]`)?.focus();
   });
+
+  // Bring the selected day's agenda to the top of the scroll region. Only the
+  // region scrolls (never the page), and the first scroll is instant.
+  React.useEffect(() => {
+    const region = agendaRef.current;
+    const group = region?.querySelector<HTMLElement>(`[data-agenda-day="${selectedDay}"]`);
+    if (!region || !group) return;
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    region.scrollTo({
+      // The region is `relative`, so the group's offsetTop is measured from it.
+      top: group.offsetTop,
+      behavior: firstScroll.current || reduce ? "auto" : "smooth",
+    });
+    firstScroll.current = false;
+  }, [selectedDay, week, weekFilteredEmpty]);
 
   const selectDay = (day: string) => {
     setSelectedDay(day);
     setCursorDay(day);
   };
 
-  const goToToday = () => {
-    setMonth(monthOfDay(today));
-    selectDay(today);
+  const showWeek = (day: string, select: string = day) => {
+    setWeek(weekStart(day));
+    selectDay(select);
   };
 
-  const clearFilters = () => {
-    setHiddenKinds([]);
-    // The "Clear filters" button goes away with the empty block.
-    pendingFocusDay.current = tabStopDay;
+  const stepWeek = (delta: number) => {
+    const target = addDays(days[0], delta * 7);
+    // Land on today when stepping back into this week; otherwise on Monday.
+    showWeek(target, weekDays(target).includes(today) ? today : target);
   };
 
   const onDayKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, day: string) => {
@@ -142,181 +164,198 @@ export function CalendarCard({
     if (!target) return;
     event.preventDefault();
     setCursorDay(target);
-    if (!isDayInMonth(target, month)) setMonth(monthOfDay(target));
+    if (!inWeek(target)) setWeek(weekStart(target));
     pendingFocusDay.current = target;
   };
 
-  const monthLabel = formatMonthYear(month.year, month.monthIndex);
-  const monthSummary =
-    isFiltered && monthTotal > 0
-      ? `${monthVisible} of ${eventCountLabel(monthTotal).toLowerCase()} shown`
-      : eventCountLabel(monthTotal).toLowerCase();
+  const weekLabel = weekRangeLabel(week);
+  const countLine =
+    isFiltered && weekTotal > 0
+      ? `${weekVisible} of ${eventCountLabel(weekTotal).toLowerCase()}`
+      : eventCountLabel(weekTotal);
 
-  const filterLabels = pressedKinds.map((kind) => KIND_META[kind].label).join(", ");
-  const selectedDayLine = `${relativeDayLabel(selectedDay, today)}, ${formatDayShort(selectedDay)}`;
-  const emptyContext = (scope: string) => (filterLabels ? `${filterLabels} · ${scope}` : scope);
-
-  const openFullCalendar = (
-    <AdminButton asChild className="min-w-[11.5rem] self-start">
-      <a {...navProps(calendar.href, onNavigate)}>Open full calendar</a>
-    </AdminButton>
-  );
+  const filterLabel =
+    pressedKinds.length === 0
+      ? "All types"
+      : pressedKinds.length === 1
+        ? KIND_META[pressedKinds[0]].label
+        : `${pressedKinds.length} types`;
 
   return (
     <DashboardCard
       title="Calendar"
-      summary="Visits, follow-ups, rent and lease dates in one place."
       className={className}
+      fill={fill}
+      scrollBody={false}
+      bodyClassName="gap-3"
+      actions={
+        <>
+          <StepButton label="Previous week" onClick={() => stepWeek(-1)}>
+            <ChevronLeft aria-hidden size={18} strokeWidth={2.5} absoluteStrokeWidth />
+          </StepButton>
+          <StepButton label="Next week" onClick={() => stepWeek(1)}>
+            <ChevronRight aria-hidden size={18} strokeWidth={2.5} absoluteStrokeWidth />
+          </StepButton>
+          <AdminButton type="button" className="h-9 px-3" onClick={() => showWeek(today)}>
+            Today
+          </AdminButton>
+        </>
+      }
+      footer={
+        <AdminButton asChild className="h-9 self-start px-3">
+          <a {...navProps(calendar.href, onNavigate)}>Open full calendar</a>
+        </AdminButton>
+      }
     >
-      {/* Month navigation */}
-      <div className="flex items-center gap-1">
+      {/* Week and filter */}
+      <div className="flex min-w-0 items-center gap-2">
         <p
-          id={monthLabelId}
+          id={weekLabelId}
           aria-live="polite"
           aria-atomic="true"
-          className="lg-body-medium min-w-0 flex-1 text-foreground"
+          className="flex min-w-0 flex-1 flex-col"
         >
-          {monthLabel}
-          <span className="sr-only">, {monthSummary}</span>
+          <span className="lg-body-medium truncate text-foreground">{weekLabel}</span>
+          <span className="lg-caption text-muted-foreground">{countLine}</span>
         </p>
-        <MonthStepButton label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}>
-          <ChevronLeft aria-hidden size={20} strokeWidth={2.5} absoluteStrokeWidth />
-        </MonthStepButton>
-        <MonthStepButton label="Next month" onClick={() => setMonth(shiftMonth(month, 1))}>
-          <ChevronRight aria-hidden size={20} strokeWidth={2.5} absoluteStrokeWidth />
-        </MonthStepButton>
-        <AdminButton type="button" className="min-w-[4.25rem] px-3" onClick={goToToday}>
-          Today
-        </AdminButton>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <AdminButton
+              type="button"
+              className={cn("h-9 max-w-[11rem] gap-1 px-3", isFiltered && "border-ring bg-brand-tint")}
+              aria-label={`Show only: ${pressedKinds.length === 0 ? "all event types" : pressedKinds.map((k) => KIND_META[k].label).join(", ")}`}
+            >
+              <span className="truncate">{filterLabel}</span>
+              <ChevronDown aria-hidden size={16} strokeWidth={2} absoluteStrokeWidth />
+            </AdminButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" sideOffset={6} className="lg-admin w-56">
+            <DropdownMenuLabel className="lg-label text-muted-foreground">Show only</DropdownMenuLabel>
+            {EVENT_KINDS.map((kind) => (
+              <DropdownMenuCheckboxItem
+                key={kind}
+                checked={pressedKinds.includes(kind)}
+                onSelect={(event) => event.preventDefault()}
+                onCheckedChange={() => setHiddenKinds((hidden) => toggleKindFilter(hidden, kind))}
+                className="min-h-9 gap-2 text-foreground"
+              >
+                <AdminIcon name={KIND_META[kind].icon} size={16} />
+                {KIND_META[kind].label}
+              </DropdownMenuCheckboxItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={!isFiltered}
+              onSelect={() => setHiddenKinds([])}
+              className="min-h-9 text-foreground"
+            >
+              Show all types
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
-      {/* Event filters */}
-      <div role="group" aria-label="Show only these event types" className="grid grid-cols-2 gap-x-2 gap-y-4">
-        {EVENT_KINDS.map((kind) => {
-          const pressed = pressedKinds.includes(kind);
+      {/* Week strip */}
+      <div
+        ref={stripRef}
+        role="group"
+        aria-labelledby={weekLabelId}
+        className="grid grid-cols-7 gap-1"
+      >
+        {days.map((day) => {
+          const count = visibleByDay.get(day)?.length ?? 0;
+          const isToday = day === today;
+          const isSelected = day === selectedDay;
           return (
             <button
-              key={kind}
+              key={day}
               type="button"
-              aria-pressed={pressed}
-              onClick={() => setHiddenKinds((hidden) => toggleKindFilter(hidden, kind))}
+              data-day={day}
+              tabIndex={day === tabStopDay ? 0 : -1}
+              aria-label={dayButtonLabel(day, count)}
+              aria-pressed={isSelected}
+              aria-current={isToday ? "date" : undefined}
+              onClick={() => selectDay(day)}
+              onKeyDown={(event) => onDayKeyDown(event, day)}
               className={cn(
-                "lg-caption flex min-h-11 min-w-0 items-center gap-2 rounded-sm border px-2 py-1 text-left text-foreground transition-colors duration-150",
-                pressed
-                  ? "border-ring bg-brand-tint shadow-[inset_0_0_0_1px_var(--ring)]"
-                  : "border-border hover:bg-muted",
+                "flex min-h-14 min-w-0 flex-col items-center justify-center gap-0.5 rounded-sm text-foreground transition-colors duration-150",
+                isToday && "border-2 border-ring",
+                isSelected ? "bg-brand-tint" : "hover:bg-muted",
               )}
             >
-              <AdminIcon name={KIND_META[kind].icon} />
-              <span className="min-w-0 flex-1">{KIND_META[kind].label}</span>
+              <span aria-hidden className="lg-label text-muted-foreground">
+                {weekdayShort(day).slice(0, 1)}
+              </span>
+              <span aria-hidden className="lg-body-medium">
+                {Number(day.slice(8))}
+              </span>
+              <span
+                aria-hidden
+                className={cn("size-1 rounded-full", count > 0 ? "bg-foreground" : "bg-transparent")}
+              />
             </button>
           );
         })}
       </div>
 
-      {monthFilteredEmpty ? (
-        <>
-          {openFullCalendar}
-          <FilteredEmpty
-            context={emptyContext(isDayInMonth(selectedDay, month) ? selectedDayLine : monthLabel)}
-            onClear={clearFilters}
-          />
-        </>
+      {/* Agenda */}
+      {weekFilteredEmpty ? (
+        <FilteredEmpty
+          context={`${pressedKinds.map((k) => KIND_META[k].label).join(", ")} · ${weekLabel}`}
+          onClear={() => {
+            setHiddenKinds([]);
+            pendingFocusDay.current = tabStopDay;
+          }}
+        />
       ) : (
-        <>
-          {/* Month and agenda */}
-          <div className="flex flex-col gap-6 @[35rem]:flex-row @[35rem]:items-start">
-            <div
-              ref={gridRef}
-              role="grid"
-              aria-labelledby={monthLabelId}
-              className="flex w-full max-w-[19.25rem] flex-col @[35rem]:w-[19.25rem] @[35rem]:shrink-0"
-            >
-              <div role="row" className="grid grid-cols-7">
-                {WEEKDAYS.map((weekday) => (
-                  <div
-                    key={weekday.long}
-                    role="columnheader"
-                    className="lg-label text-center text-muted-foreground"
-                  >
-                    <span aria-hidden>{weekday.short}</span>
-                    <span className="sr-only">{weekday.long}</span>
-                  </div>
-                ))}
-              </div>
-              {weeks.map((week, weekIndex) => (
-                <div key={weekIndex} role="row" className="grid grid-cols-7">
-                  {week.map((day, dayIndex) => {
-                    if (!day) return <div key={dayIndex} role="gridcell" className="min-h-11" />;
-                    const count = visibleByDay.get(day)?.length ?? 0;
-                    const isToday = day === today;
-                    const isSelected = day === selectedDay;
-                    return (
-                      <div key={day} role="gridcell">
-                        <button
-                          type="button"
-                          data-day={day}
-                          tabIndex={day === tabStopDay ? 0 : -1}
-                          aria-label={dayButtonLabel(day, count)}
-                          aria-pressed={isSelected}
-                          aria-current={isToday ? "date" : undefined}
-                          onClick={() => selectDay(day)}
-                          onKeyDown={(event) => onDayKeyDown(event, day)}
-                          className={cn(
-                            "lg-body-medium flex min-h-11 w-full flex-col items-center justify-center gap-1 rounded-sm text-foreground transition-colors duration-150",
-                            isToday && "border-2 border-ring",
-                            isSelected ? "bg-brand-tint" : "hover:bg-muted",
-                          )}
-                        >
-                          {Number(day.slice(8))}
-                          {count > 0 ? (
-                            <span aria-hidden className="size-1 rounded-full bg-foreground" />
-                          ) : null}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-
-            {/* Selected day agenda */}
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
-              {dayFilteredEmpty ? (
-                <FilteredEmpty context={emptyContext(selectedDayLine)} onClear={clearFilters} />
-              ) : (
-                <>
-                  <h3 className="lg-body-medium text-foreground">
-                    {relativeDayHeading(selectedDay, today)}
-                  </h3>
-                  {dayEvents.length > 0 ? (
-                    <ul className="flex flex-col gap-3">
-                      {dayEvents.map((event, index) => (
-                        <AgendaEvent
-                          key={event.id}
-                          event={event}
-                          today={today}
-                          onNavigate={onNavigate}
-                          className={index > 0 ? "border-t border-border pt-3" : undefined}
-                        />
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="lg-caption text-muted-foreground">Nothing scheduled.</p>
+        <div
+          ref={agendaRef}
+          aria-label={`Agenda, ${weekLabel}`}
+          role="region"
+          className={cn(
+            SCROLL_REGION,
+            "relative max-h-[22rem] border-t border-border",
+            fill && "xl:max-h-none xl:min-h-0 xl:flex-1",
+          )}
+        >
+          {days.map((day) => {
+            const dayEvents = visibleByDay.get(day) ?? [];
+            const hiddenHere = isFiltered && dayEvents.length === 0 && (allByDay.get(day)?.length ?? 0) > 0;
+            return (
+              <section key={day} data-agenda-day={day} aria-label={formatWeekdayDayMonth(day)}>
+                <h3
+                  className={cn(
+                    "lg-label sticky top-0 z-10 bg-card pb-1 pt-3 uppercase",
+                    day === selectedDay ? "text-foreground" : "text-muted-foreground",
                   )}
-                </>
-              )}
-            </div>
-          </div>
-          {openFullCalendar}
-        </>
+                >
+                  {formatWeekdayDayMonth(day)}
+                  {Math.abs(dayDiff(today, day)) <= 1 ? (
+                    <span> · {relativeDayLabel(day, today)}</span>
+                  ) : null}
+                </h3>
+                {dayEvents.length > 0 ? (
+                  <ul className="flex flex-col">
+                    {dayEvents.map((event) => (
+                      <AgendaEvent key={event.id} event={event} onNavigate={onNavigate} />
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="lg-caption pb-1 text-muted-foreground">
+                    {hiddenHere ? "Nothing of the types shown." : "Nothing scheduled."}
+                  </p>
+                )}
+              </section>
+            );
+          })}
+        </div>
       )}
     </DashboardCard>
   );
 }
 
-/** 44px bordered chevron button in the month navigation. */
-function MonthStepButton({
+/** 36px bordered chevron button in the card header. */
+function StepButton({
   label,
   onClick,
   children,
@@ -330,7 +369,7 @@ function MonthStepButton({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="inline-flex size-11 shrink-0 items-center justify-center rounded-sm border border-border bg-card text-foreground transition-colors duration-150 hover:bg-muted"
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-sm border border-border bg-card text-foreground transition-colors duration-150 hover:bg-muted"
     >
       {children}
     </button>
@@ -338,62 +377,53 @@ function MonthStepButton({
 }
 
 /**
- * "AD / Calendar event": the event type icon beside its title, record and
- * relative + absolute date, then the people/place lines and the action link.
+ * One agenda row ("AD / Calendar event", compact): the event type icon, the
+ * title and record, then the people/place lines. The whole row links to the
+ * record; its action ("Open request") leads the accessible name.
  */
 function AgendaEvent({
   event,
-  today,
   onNavigate,
-  className,
 }: {
   event: DashboardCalendarEvent;
-  today: string;
   onNavigate: (href: string) => void;
-  className?: string;
 }) {
-  const recordId = React.useId();
   return (
-    <li className={cn("flex flex-col gap-3", className)}>
-      <div className="flex min-h-[5.5rem] items-start gap-3 py-3">
-        <AdminIcon name={KIND_META[event.kind].icon} className="mt-px text-foreground" />
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <p className="lg-body-medium text-foreground">{event.title}</p>
-          <p id={recordId} className="lg-body text-foreground">
-            {event.record}
-          </p>
-          <p className="lg-caption text-muted-foreground">{relativeDayHeading(event.day, today)}</p>
-        </div>
-      </div>
-      {event.details.length > 0 ? (
-        <div className="lg-caption text-muted-foreground">
-          {event.details.map((line, index) => (
-            <p key={index}>{line}</p>
-          ))}
-        </div>
-      ) : null}
-      <AdminButton asChild className="min-w-[9.25rem] self-start">
-        <a {...navProps(event.href, onNavigate)} aria-describedby={recordId}>
-          {event.actionLabel}
-        </a>
-      </AdminButton>
+    <li className="min-w-0">
+      <a
+        {...navProps(event.href, onNavigate)}
+        className="-mx-2 flex items-start gap-3 rounded-sm px-2 py-2 transition-colors duration-150 hover:bg-muted active:bg-muted"
+      >
+        <AdminIcon name={KIND_META[event.kind].icon} size={16} className="mt-[3px] text-foreground" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="sr-only">{event.actionLabel}: </span>
+          <span className="lg-body-medium break-words text-foreground">{event.title}</span>
+          <span className="lg-caption break-words text-foreground">{event.record}</span>
+          {event.details.length > 0 ? (
+            <span className="lg-caption break-words text-muted-foreground">
+              {event.details.join(" · ")}
+            </span>
+          ) : null}
+        </span>
+      </a>
     </li>
   );
 }
 
 /**
- * "Filtered calendar empty": shown in place of the events the filters leave
- * out. `context` is the "Follow-up due · Tomorrow, Tue 17 Nov 2026" line.
+ * "Filtered calendar empty": shown in place of the agenda when the filters
+ * leave nothing in the week. `context` is the "Follow-up due · 16 – 22 Nov
+ * 2026" line.
  */
 function FilteredEmpty({ context, onClear }: { context: string; onClear: () => void }) {
   return (
-    <div className="flex w-full flex-col items-start gap-4 rounded-md border border-border bg-card p-4">
-      <h3 className="lg-section text-foreground">No matching events</h3>
-      <div className="lg-body text-foreground">
+    <div className="flex w-full flex-col items-start gap-3 rounded-md border border-border bg-card p-4">
+      <h3 className="lg-body-medium text-foreground">No matching events</h3>
+      <div className="lg-caption text-muted-foreground">
         <p>{context}</p>
-        <p>No events match these filters. Clear the filter or choose another day.</p>
+        <p>No events this week match these filters.</p>
       </div>
-      <AdminButton type="button" className="min-w-40" onClick={onClear}>
+      <AdminButton type="button" className="h-9 px-3" onClick={onClear}>
         Clear filters
       </AdminButton>
     </div>

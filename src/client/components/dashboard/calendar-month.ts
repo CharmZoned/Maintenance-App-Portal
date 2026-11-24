@@ -1,4 +1,6 @@
 import { addDays, formatDayLong, parseDay, toDay } from "@/lib/admin-dates";
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 import type { DashboardCalendarEvent, DashboardEventKind } from "./admin-dashboard-model";
 
 /**
@@ -62,6 +64,41 @@ export function monthWeeks(month: CalendarMonth): (string | null)[][] {
   const weeks: (string | null)[][] = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   return weeks;
+}
+
+/** The Monday of the week a day falls in (weeks start on Monday). */
+export function weekStart(day: string): string {
+  return addDays(day, -((parseDay(day).getDay() + 6) % 7));
+}
+
+/** The seven days, Monday to Sunday, of the week a day falls in. */
+export function weekDays(day: string): string[] {
+  const monday = weekStart(day);
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+}
+
+/**
+ * "16 – 22 Nov 2026", "30 Nov – 6 Dec 2026", "28 Dec 2026 – 3 Jan 2027" for
+ * the week a day falls in.
+ */
+export function weekRangeLabel(day: string): string {
+  const days = weekDays(day);
+  const a = parseDay(days[0]);
+  const b = parseDay(days[6]);
+  const end = `${b.getDate()} ${MONTHS_SHORT[b.getMonth()]} ${b.getFullYear()}`;
+  if (a.getFullYear() !== b.getFullYear()) {
+    return `${a.getDate()} ${MONTHS_SHORT[a.getMonth()]} ${a.getFullYear()} – ${end}`;
+  }
+  if (a.getMonth() !== b.getMonth()) return `${a.getDate()} ${MONTHS_SHORT[a.getMonth()]} – ${end}`;
+  return `${a.getDate()} – ${end}`;
+}
+
+/** How many grouped events fall on the given days. */
+export function countEventsOnDays(
+  byDay: ReadonlyMap<string, readonly DashboardCalendarEvent[]>,
+  days: readonly string[],
+): number {
+  return days.reduce((sum, day) => sum + (byDay.get(day)?.length ?? 0), 0);
 }
 
 /**

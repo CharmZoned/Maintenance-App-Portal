@@ -22,6 +22,8 @@ import { RequestDetailPage } from "./components/maintenance/request-detail-page"
 import { CalendarPage } from "./components/calendar/calendar-page";
 import { TenantDocumentsPage } from "./components/documents/tenant-documents-page";
 import { LandlordDocumentsPage } from "./components/documents/landlord-documents-page";
+import { AdminDocumentsPage } from "./components/documents/admin-documents-page";
+import { ListingsPage } from "./components/listings/listings-page";
 import { SettingsPage } from "./components/settings/settings-page";
 import { LandlordsPage } from "./components/landlords/landlords-page";
 import { ApplicationsPage } from "./components/applications/applications-page";
@@ -29,7 +31,6 @@ import { UsersPage } from "./components/users/users-page";
 import { LoginPage } from "./components/auth/login-page";
 import { ResetRequestPage, ResetConfirmPage } from "./components/auth/reset-password-page";
 import { BlockedPage } from "./components/auth/blocked-page";
-import { StubPage } from "./components/stub-page";
 import { AccountPage } from "./components/account/account-page";
 import { PageShell } from "./components/page-shell";
 import {
@@ -463,7 +464,7 @@ export function App() {
             {!isLandlordAllowedRoute(route) && (
               <Placeholder
                 title="Landlord portal"
-                message="View your properties, maintenance, and documents. Editing lands in later screen PRs."
+                message="That page isn’t part of your portal. Use the menu to view your properties, maintenance, messages and documents."
               />
             )}
           </>
@@ -511,20 +512,8 @@ export function App() {
             {route.name === "messages" && (
               <MessagesPage search={search} navigate={navigate} replace={replace} />
             )}
-            {route.name === "documents" && (
-              <StubPage
-                title="Documents"
-                meta="Portfolio files"
-                message="Admin documents land in a later Lists screen PR."
-              />
-            )}
-            {route.name === "listings" && (
-              <StubPage
-                title="Website listings"
-                meta="Homes advertised on the website"
-                message="Listing management isn’t built yet, so there is nothing to show or change here."
-              />
-            )}
+            {route.name === "documents" && <AdminDocumentsPage navigate={navigate} />}
+            {route.name === "listings" && <ListingsPage navigate={navigate} />}
             {route.name === "account" && (
               <AccountPage
                 userId={auth.gate.user.id}

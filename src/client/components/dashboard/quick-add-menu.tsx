@@ -9,16 +9,16 @@ import {
 import { AdminButton } from "./dashboard-primitives";
 
 /**
- * The six office shortcuts in the Quick add menu, in Figma order
+ * The office shortcuts in the Quick add menu, in Figma order
  * ("AD / Quick add menu"). Ids are stable: the page maps them to routes and
- * dialogs.
+ * dialogs. The design's "New listing" is left out until listings can be
+ * published from the portal: every entry here must do what it says.
  */
 export const QUICK_ADD_ACTIONS = [
   { id: "add-property", label: "Add property" },
   { id: "add-tenant", label: "Add tenant" },
   { id: "record-payment", label: "Record payment" },
   { id: "upload-document", label: "Upload document" },
-  { id: "new-listing", label: "New listing" },
   { id: "new-message", label: "New message" },
 ] as const satisfies readonly { id: string; label: string }[];
 
@@ -26,7 +26,7 @@ export type QuickAddActionId = (typeof QUICK_ADD_ACTIONS)[number]["id"];
 
 /**
  * "Quick add" button and its menu (Figma "AD / Quick add menu" and the
- * "Quick add open" frame): a 260px panel of six 44px shortcuts with a
+ * "Quick add open" frame): a 260px panel of 44px shortcuts with a
  * "Dismiss Quick add" close button beside it. The menu portals to `body`, so
  * its content carries the `lg-admin` scope.
  */

@@ -1,25 +1,30 @@
 import * as React from "react";
 import type { ActivityGroup, ActivityItem, ActivityModel } from "./admin-dashboard-model";
-import { AdminIcon, DashboardCard, navProps } from "./dashboard-primitives";
+import { AdminIcon, navProps } from "./dashboard-primitives";
 
 /**
- * "Recent activity" card (Figma AH — Dashboard · Main column).
+ * "Recent activity" (Figma AH — Dashboard), shown in the Snapshot card's
+ * Activity tab.
  *
  * What happened across the portfolio, newest first, grouped by day: an
  * uppercase day label, then "LH / Activity item" rows (round icon, sentence,
  * context line). A row with an `href` is a link to the record it is about.
  */
-export function ActivityCard({
+export function ActivityList({
   activity,
   onNavigate,
-  className,
 }: {
   activity: ActivityModel;
   onNavigate: (href: string) => void;
-  className?: string;
 }) {
   return (
-    <DashboardCard title="Recent activity" summary={activity.summaryLine} className={className}>
+    <>
+      <div className="flex flex-col gap-1">
+        <h3 className="lg-body-medium text-foreground">Recent activity</h3>
+        {activity.summaryLine ? (
+          <p className="lg-caption text-muted-foreground">{activity.summaryLine}</p>
+        ) : null}
+      </div>
       {activity.groups.length === 0 ? (
         <p className="lg-caption text-muted-foreground">No recent activity yet.</p>
       ) : (
@@ -27,7 +32,7 @@ export function ActivityCard({
           <ActivityDay key={group.id} group={group} onNavigate={onNavigate} />
         ))
       )}
-    </DashboardCard>
+    </>
   );
 }
 
@@ -41,11 +46,11 @@ function ActivityDay({
 }) {
   const headingId = React.useId();
   return (
-    <section className="flex min-w-0 flex-col gap-4">
-      <h3 id={headingId} className="lg-label uppercase text-muted-foreground">
+    <section className="flex min-w-0 flex-col gap-2">
+      <h4 id={headingId} className="lg-label uppercase text-muted-foreground">
         {group.label}
-      </h3>
-      <ul aria-labelledby={headingId} className="flex flex-col gap-4">
+      </h4>
+      <ul aria-labelledby={headingId} className="flex flex-col gap-1">
         {group.items.map((item) => (
           <li key={item.id} className="min-w-0">
             <ActivityRow item={item} onNavigate={onNavigate} />

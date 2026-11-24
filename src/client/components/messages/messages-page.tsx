@@ -14,6 +14,7 @@ import { MessageThreadRow } from "./message-thread-row";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
 import { TenantMessagesPage } from "./tenant-messages-page";
+import { AdminMessagesPage } from "./admin-messages-page";
 import {
   commentSenderLabel,
   formatMessageTime,
@@ -48,10 +49,15 @@ export function MessagesPage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const { isTenant } = useApp();
+  const { isTenant, isAdmin } = useApp();
 
   if (isTenant) {
     return <TenantMessagesPage search={search} navigate={navigate} replace={replace} />;
+  }
+
+  // The office inbox: direct threads + request threads with real read state.
+  if (isAdmin) {
+    return <AdminMessagesPage search={search} navigate={navigate} replace={replace} />;
   }
 
   return (
@@ -603,7 +609,7 @@ function StaffMessagesPage({
       }
     >
       {state === "loading" ? (
-        <div className="-mx-6 -mt-2 border-y border-border">
+        <div className="-mx-[var(--page-gutter,1.5rem)] -mt-2 border-y border-border">
           <SkeletonRow />
           <SkeletonRow />
           <SkeletonRow />
@@ -620,7 +626,7 @@ function StaffMessagesPage({
           onAction={() => (replace ? replace("/messages") : navigate("/messages"))}
         />
       ) : (
-        <div className="-mx-6 -mb-6 -mt-2 flex min-h-[calc(100vh-8rem)] border-t border-border md:min-h-[calc(100vh-7rem)]">
+        <div className="-mx-[var(--page-gutter,1.5rem)] -mb-6 -mt-2 flex min-h-[calc(100vh-var(--page-content-top,8rem))] border-t border-border md:min-h-[calc(100vh-var(--page-content-top,7rem))]">
           <div
             className={
               mobileThread && (selected || selectedId)
