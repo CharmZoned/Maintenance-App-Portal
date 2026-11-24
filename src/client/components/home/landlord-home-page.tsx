@@ -1715,9 +1715,12 @@ function firstName(displayName: string | null | undefined, email: string): strin
   if (named) return named;
   const local = email.split("@")[0] ?? "";
   const bit = local.split(/[._-]+/).filter(Boolean)[0];
-  if (!bit) return null;
+  // "landlord@…" is a role, not a name: greet without one rather than "Landlord".
+  if (!bit || ROLE_WORDS.has(bit.toLowerCase())) return null;
   return bit.charAt(0).toUpperCase() + bit.slice(1);
 }
+
+const ROLE_WORDS = new Set(["landlord", "owner", "admin", "office", "info", "tenant", "maintenance", "staff"]);
 
 async function loadPendingPayments(): Promise<PendingPayment[] | null> {
   try {

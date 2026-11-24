@@ -404,6 +404,22 @@ describe("LandlordHomePage states", () => {
     expect(html).not.toContain("Report an issue");
   });
 
+  it("does not greet the owner by a role-word email while their name loads", () => {
+    const html = visibleText(
+      renderToStaticMarkup(
+        createElement(AppContext.Provider, {
+          value: { loading: true, error: null, properties: [] } as unknown as AppStateValue,
+          children: createElement(ShellChromeProvider, {
+            value: { email: "landlord@example.com", role: "landlord", displayName: null, onSignOut: () => undefined },
+            children: createElement(LandlordHomePage, { navigate: () => undefined }),
+          }),
+        }),
+      ),
+    );
+    expect(html).not.toContain(", Landlord.");
+    expect(html).toMatch(/Good (morning|afternoon|evening)\./);
+  });
+
   it("shows the portfolio error copy and a retry", () => {
     const html = visibleText(renderPage({ loading: false, error: "offline", properties: [] }));
     expect(html).toContain(
