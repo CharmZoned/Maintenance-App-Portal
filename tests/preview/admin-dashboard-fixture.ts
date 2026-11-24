@@ -239,7 +239,7 @@ export const fixtureModel: AdminDashboardModel = {
         id: "1000",
         heading: "#MR-001000 · Kitchen faucet leaking",
         context: "Maple Court · 1A · Tina Renter, tenant",
-        statusLine: "High priority · Assigned → Attend scheduled visit",
+        statusLine: "High · Assigned → Attend scheduled visit",
         meta: "Sam Fixit, team · Tomorrow, Tue 17 Nov 2026",
         href: "/maintenance/1000",
       },

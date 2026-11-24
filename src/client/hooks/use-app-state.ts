@@ -415,6 +415,11 @@ export function useAppState(
     },
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
     listStaff: data.listStaff,
+    acceptMaintenanceRequest: async (requestId: number) => {
+      if (!isMaintenance) throw new Error("Only a worker can accept jobs.");
+      return data.acceptMaintenanceRequest(requestId);
+    },
+    listAvailableJobLocations: data.listAvailableJobLocations,
     getTenantHomeContext: data.getTenantHomeContext,
     listPropertyDocuments: data.listPropertyDocuments,
     getPropertyDocumentDownloadUrl: data.getPropertyDocumentDownloadUrl,

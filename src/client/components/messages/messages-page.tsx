@@ -234,7 +234,7 @@ function StaffMessagesPage({
           <button
             type="button"
             className="shrink-0 text-[13px] font-medium text-brand-text hover:underline"
-            onClick={() => navigate(`/maintenance?wo=${selectedRequestId}`)}
+            onClick={() => navigate(`/maintenance/${selectedRequestId}`)}
           >
             Open request
           </button>

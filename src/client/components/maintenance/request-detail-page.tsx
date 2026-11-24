@@ -231,6 +231,8 @@ export interface RequestDetailViewProps {
   onSend?: (body: string, internal: boolean) => void | Promise<void>;
   /** Admin: Reopen on the completed strip. */
   onReopen?: () => void;
+  /** Worker: accept a job offered to the pool. */
+  onAcceptJob?: () => void;
   /** Extra nodes (dialogs, banners) rendered inside the page. */
   children?: ReactNode;
 }
@@ -264,6 +266,7 @@ export function RequestDetailView({
   onAddPhotos,
   onSend,
   onReopen,
+  onAcceptJob,
   children,
 }: RequestDetailViewProps) {
   const visibility = sectionsForRole(role);
@@ -321,6 +324,7 @@ export function RequestDetailView({
       onEditCost={onEditCost}
       onEdit={onEdit}
       onDelete={onDelete}
+      onAcceptJob={onAcceptJob}
     />
   ) : null;
 
@@ -396,6 +400,7 @@ export function RequestDetailView({
           busy={busy}
           onAssign={onAssign}
           onChangeStatus={onChangeStatus}
+          onAcceptJob={onAcceptJob}
         />
       </div>
       {children}
@@ -466,6 +471,7 @@ function PhoneActionBar({
   busy,
   onAssign,
   onChangeStatus,
+  onAcceptJob,
 }: {
   role: RequestViewerRole;
   visibility: RequestSectionVisibility;
@@ -473,6 +479,7 @@ function PhoneActionBar({
   busy: boolean;
   onAssign?: () => void;
   onChangeStatus?: (next: WorkOrderStatus) => void;
+  onAcceptJob?: () => void;
 }) {
   let control: ReactNode = null;
   if (visibility.changeStatus) {
@@ -491,7 +498,13 @@ function PhoneActionBar({
       );
   } else if (visibility.workerStatusActions && role === "maintenance") {
     const primary = workerPrimaryAction(status);
-    if (primary) {
+    if (status === "New" && onAcceptJob) {
+      control = (
+        <Button size="touch" className="w-full" disabled={busy} onClick={onAcceptJob}>
+          Accept job
+        </Button>
+      );
+    } else if (primary) {
       control = (
         <Button
           size="touch"
@@ -651,6 +664,7 @@ export function RequestDetailPage({
   const listComments = app.listMaintenanceComments;
   const listHistory = app.listMaintenanceStatusHistory;
   const listStaff = app.listStaff;
+  const listJobLocations = app.listAvailableJobLocations;
 
   // No single-id API: listWorkOrders (RLS-trimmed per role) then find. A row the
   // viewer may not read is simply absent → "not available", not an error.
@@ -665,7 +679,24 @@ export function RequestDetailPage({
       try {
         const list = await listWorkOrders();
         if (loadSeq.current !== mine) return;
-        const found = list.find((w) => w.id === id) ?? null;
+        let found = list.find((w) => w.id === id) ?? null;
+        if (found && isWorker && found.status === "open" && found.assigned_staff_id == null && !found.property_name) {
+          // Pooled job: Units/Properties stay closed until accepted; the RPC gives the address.
+          const pooledId = found.id;
+          try {
+            const spot = (await listJobLocations()).find((l) => l.maintenance_request_id === pooledId);
+            if (spot) {
+              found = {
+                ...found,
+                property_name: spot.property_name ?? spot.street_address ?? null,
+                unit_name: spot.unit_label ?? null,
+              };
+            }
+          } catch {
+            /* address is a nicety */
+          }
+          if (loadSeq.current !== mine) return;
+        }
         if (!found) {
           setOrder(null);
           setPhotos([]);
@@ -701,7 +732,7 @@ export function RequestDetailPage({
         if (loadSeq.current === mine && !opts.silent) setLoading(false);
       }
     },
-    [id, isAdmin, listWorkOrders, listPhotos, listComments, listHistory, listStaff],
+    [id, isAdmin, isWorker, listJobLocations, listWorkOrders, listPhotos, listComments, listHistory, listStaff],
   );
 
   const retryPhotos = useCallback(async () => {
@@ -988,6 +1019,21 @@ export function RequestDetailPage({
     }
   }
 
+  async function acceptJob() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await app.acceptMaintenanceRequest(current.id);
+      success("Job accepted.");
+      refresh();
+    } catch (err) {
+      const raw = (err as Error)?.message ?? "";
+      failure(/taken/i.test(raw) ? "Someone else has already taken this job." : "Couldn't accept the job. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function reopen() {
     if (busy) return;
     void applyStatus(current.assigned_staff_id != null ? "scheduled" : "open", {}, "Request reopened.");
@@ -1034,6 +1080,9 @@ export function RequestDetailPage({
       onAddPhotos={visibility.addPhotos ? (files) => void addPhotos(files) : undefined}
       onSend={visibility.composer ? send : undefined}
       onReopen={visibility.changeStatus ? reopen : undefined}
+      onAcceptJob={
+        isWorker && current.status === "open" && current.assigned_staff_id == null ? () => void acceptJob() : undefined
+      }
       nameForUserId={nameForUserId}
       photosError={photosError}
       onRetryPhotos={() => void retryPhotos()}

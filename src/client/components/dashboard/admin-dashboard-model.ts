@@ -160,7 +160,7 @@ export interface RequestSummary {
   heading: string;
   /** "Maple Court · 1A · Tina Renter, tenant" */
   context: string;
-  /** Status, always followed by the next step: "High priority · Assigned → Attend scheduled visit". */
+  /** Status, always followed by the next step: "High · Assigned → Attend scheduled visit". */
   statusLine: string;
   /** "Sam Fixit, team · Tomorrow, Tue 17 Nov 2026" */
   meta: string;

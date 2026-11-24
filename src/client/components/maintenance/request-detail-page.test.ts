@@ -217,6 +217,41 @@ describe("one request page for every role", () => {
     expect(html).toContain("This request is completed. Messages are closed.");
   });
 
+  it("admin completed: the locked strip offers Reopen", () => {
+    const html = render({
+      order: order({ status: "closed", completed_at: "2026-11-24T10:00:00.000Z" }),
+      onReopen: () => undefined,
+    });
+    expect(html).toContain("Reopen");
+  });
+
+  it("worker, pooled job: Accept job instead of a Start work that would fail", () => {
+    const html = render({
+      role: "maintenance",
+      order: order({ status: "open", assigned_staff_id: null }),
+      onAcceptJob: () => undefined,
+    });
+    expect(html).toContain("Accept job");
+    expect(html).not.toContain("Start work");
+    expect(html).not.toContain("Offered to workers");
+  });
+
+  it("names the person behind a status change, and the viewer as You", () => {
+    const withUser = history.map((h) => (h.id === 3 ? { ...h, changed_by_user_id: "u-sam" } : h));
+    const html = render({
+      role: "maintenance",
+      history: withUser,
+      nameForUserId: (uid) => (uid === "u-sam" ? "You" : null),
+    });
+    expect(html).toContain("You started work");
+  });
+
+  it("photos fail on their own with Retry, the rest of the page still shows", () => {
+    const html = render({ photos: [], photosError: "We couldn't load the photos.", onRetryPhotos: () => undefined });
+    expect(html).toMatch(/load the photos/);
+    expect(html).toContain("Timeline");
+  });
+
   it("unassigned: Not assigned yet, never a placeholder name", () => {
     const html = render({ role: "tenant", order: order({ status: "open", assigned_staff_id: null, scheduled_at: null }) });
     expect(html).toContain("New");

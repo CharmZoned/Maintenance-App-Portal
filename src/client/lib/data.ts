@@ -2020,6 +2020,33 @@ export async function listMaintenanceStatusHistory(
   }));
 }
 
+// ── Worker job pool (RPCs from 20261118190000_worker_job_pool.sql) ──
+
+/** Worker: take a job offered to the pool. The RPC assigns it and sets status Scheduled. */
+export async function acceptMaintenanceRequest(requestId: number): Promise<void> {
+  const { error } = await supabase.rpc("accept_maintenance_request", { p_request_id: requestId });
+  if (error) throwSb(error);
+}
+
+export interface AvailableJobLocation {
+  maintenance_request_id: number;
+  unit_label: string | null;
+  property_name: string | null;
+  street_address: string | null;
+}
+
+/** Worker: address fields for the pooled jobs they may accept (Units/Properties stay closed until then). */
+export async function listAvailableJobLocations(): Promise<AvailableJobLocation[]> {
+  const { data, error } = await supabase.rpc("list_available_job_locations");
+  if (error) throwSb(error);
+  return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    maintenance_request_id: Number(row.maintenance_request_id),
+    unit_label: (row.unit_label as string | null) ?? null,
+    property_name: (row.property_name as string | null) ?? null,
+    street_address: (row.street_address as string | null) ?? null,
+  }));
+}
+
 // ── Dashboard ─────────────────────────────────────────────────────
 
 type DashboardChargeRow = {

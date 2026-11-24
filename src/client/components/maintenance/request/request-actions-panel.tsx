@@ -93,6 +93,8 @@ export interface RequestActionsPanelProps {
   onEditCost?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  /** Worker, job offered to the pool (New, unassigned): take it. */
+  onAcceptJob?: () => void;
 }
 
 export function RequestActionsPanel(props: RequestActionsPanelProps) {
@@ -115,17 +117,26 @@ export function RequestActionsPanel(props: RequestActionsPanelProps) {
 
 // ── Worker ─────────────────────────────────────────────────────────
 
-function WorkerActions({ status, busy, onChangeStatus, costLabel, visibility }: RequestActionsPanelProps) {
+function WorkerActions({ status, busy, onChangeStatus, onAcceptJob, costLabel, visibility }: RequestActionsPanelProps) {
   const primary = workerPrimaryAction(status);
   const canHold = workerCanHold(status);
+  const canAccept = status === "New" && Boolean(onAcceptJob);
   const note =
     status === "New"
-      ? "This job isn't assigned to you yet."
+      ? canAccept
+        ? "Accept this job to add it to your schedule."
+        : "This job isn't assigned to you yet."
       : status === "Completed"
         ? "This job is completed."
         : null;
   return (
     <>
+      {canAccept ? (
+        // Phone: the sticky bar carries the primary.
+        <Button className="hidden w-full md:inline-flex" disabled={busy} onClick={onAcceptJob}>
+          Accept job
+        </Button>
+      ) : null}
       {primary ? (
         // Phone: the sticky bar carries the primary.
         <Button

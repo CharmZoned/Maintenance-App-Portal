@@ -173,7 +173,8 @@ export function TenantRequestsPage({
     items: orders,
     loadList: () => flight.load(),
     onList: setOrders,
-    onFound: (found) => go(`/maintenance/${found.id}`),
+    // Replace (not push) so Back does not bounce through `/maintenance?wo=…`.
+    onFound: (found) => (replace ? replace(`/maintenance/${found.id}`) : go(`/maintenance/${found.id}`)),
     onMiss: () => replace?.("/maintenance"),
   });
 
