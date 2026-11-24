@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Building2, Search } from "lucide-react";
 import { useApp } from "@/context";
-import { LandlordPageIntro } from "@/components/landlord";
+import { LandlordPageIntro, StatusBanner, ToneBadge } from "@/components/landlord";
 import { PageShell } from "@/components/page-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -22,11 +21,10 @@ import {
   filterPropertyCards,
   portfolioDescription,
   showingPropertiesLabel,
-  type FactChip,
   type PropertyCardModel,
   type RentFilter,
 } from "@/lib/landlord-properties";
-import { cn, currentPeriod } from "@/lib/utils";
+import { currentPeriod } from "@/lib/utils";
 import type { PropertyDocument, RentCharge, Unit, WorkOrder } from "@/types";
 
 export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) => void }) {
@@ -62,7 +60,7 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
         const [nextUnits, nextCharges, nextOrders, nextDocs] = await Promise.all([
           listUnits(),
           listCharges(currentPeriod()),
-          listWorkOrders({ skip_staff_notes: true }),
+          listWorkOrders({ open_only: true, skip_staff_notes: true }),
           listPropertyDocuments(),
         ]);
         if (cancelled) return;
@@ -81,6 +79,7 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
     };
   }, [loading, listUnits, listCharges, listWorkOrders, listPropertyDocuments, reloadKey]);
 
+  const detailsReady = !detailLoading && !detailError;
   const cards = useMemo(
     () =>
       buildPortfolioCards({
@@ -90,20 +89,17 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
         workOrders: orders,
         documents,
         currency: settings.currency,
-        unitsLoaded: !detailLoading && !detailError,
+        unitsLoaded: detailsReady,
       }),
-    [properties, units, charges, orders, documents, settings.currency, detailLoading, detailError],
+    [properties, units, charges, orders, documents, settings.currency, detailsReady],
   );
   const visible = useMemo(() => filterPropertyCards(cards, { query, rent }), [cards, query, rent]);
   const unitCount = properties.reduce((sum, property) => sum + (property.unit_count ?? 0), 0);
   const occupied = properties.reduce((sum, property) => sum + (property.occupied_count ?? 0), 0);
-  const detailsReady = !detailLoading && !detailError;
   const description = portfolioDescription({
     properties: properties.length,
     units: detailsReady ? units.length : unitCount,
-    occupied: detailsReady
-      ? units.filter((unit) => unit.status === "occupied").length
-      : occupied,
+    occupied: detailsReady ? units.filter((unit) => unit.status === "occupied").length : occupied,
   });
 
   function messageGopher() {
@@ -271,10 +267,6 @@ export function PropertyCard({ card, onOpen }: { card: PropertyCardModel; onOpen
   );
 }
 
-function ToneBadge({ chip }: { chip: FactChip }) {
-  return <Badge variant={chip.tone}>{chip.label}</Badge>;
-}
-
 function EmptyProperties({ onMessage }: { onMessage: () => void }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-sm border border-border bg-card px-6 py-12 text-center">
@@ -290,26 +282,6 @@ function EmptyProperties({ onMessage }: { onMessage: () => void }) {
   );
 }
 
-export function StatusBanner({
-  title,
-  body,
-  actions,
-}: {
-  title: string;
-  body: string;
-  actions: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-4 rounded-sm border border-border bg-card p-5 md:flex-row md:items-center" role="alert">
-      <div className="min-w-0 flex-1">
-        <p className="lg-body-medium text-foreground">{title}</p>
-        <p className="mt-1 lg-body text-muted-foreground">{body}</p>
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row">{actions}</div>
-    </div>
-  );
-}
-
 function PropertiesSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2" aria-busy="true" aria-label="Loading properties">
@@ -317,8 +289,4 @@ function PropertiesSkeleton() {
       <div className="h-[368px] animate-pulse rounded-md bg-muted" />
     </div>
   );
-}
-
-export function sectionCardClass(className?: string) {
-  return cn("flex flex-col gap-3 rounded-sm border border-border bg-card p-6", className);
 }

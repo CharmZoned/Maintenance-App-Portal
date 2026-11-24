@@ -5,14 +5,15 @@ import {
   LandlordDocumentRow,
   LandlordPageIntro,
   LandlordScopeHeading,
+  StatusBanner,
+  ToneBadge,
   documentScopeGroupLabel,
   groupLandlordDocuments,
   landlordDocumentRowModel,
+  sectionCardClass,
 } from "@/components/landlord";
 import { PageShell } from "@/components/page-shell";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatusBanner, sectionCardClass } from "@/components/properties/landlord-properties-page";
 import {
   PROPERTY_ERROR,
   PROPERTY_UNAVAILABLE,
@@ -28,6 +29,16 @@ import {
 } from "@/lib/landlord-properties";
 import { cn, currentPeriod } from "@/lib/utils";
 import type { Lease, Property, PropertyDocument, RentCharge, Unit, WorkOrder } from "@/types";
+
+/** listLeases has unit and status filters, not a property id. Charges stay period-scoped. */
+async function listActiveLeases(
+  listLeases: (params?: { unit_id?: number; status?: string }) => Promise<Lease[]>,
+  units: Unit[],
+): Promise<Lease[]> {
+  if (units.length === 0) return [];
+  const groups = await Promise.all(units.map((unit) => listLeases({ unit_id: unit.id, status: "active" })));
+  return groups.flat();
+}
 
 export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (to: string) => void }) {
   const {
@@ -55,17 +66,20 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
   useEffect(() => {
+    setTab("overview");
+  }, [id]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setMissing(false);
       setLoadError(null);
-      setTab("overview");
       try {
         const nextProperty = await getProperty(id);
         const nextUnits = await listUnits(id);
         const [nextLeases, nextCharges, nextOrders, nextDocs] = await Promise.all([
-          listLeases(),
+          listActiveLeases(listLeases, nextUnits),
           listCharges(currentPeriod()),
           listWorkOrders({ property_id: id, skip_staff_notes: true }),
           listPropertyDocuments({ property_id: id }),
@@ -74,7 +88,7 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
         const unitIds = new Set(nextUnits.map((unit) => unit.id));
         setProperty(nextProperty);
         setUnits(nextUnits);
-        setLeases(nextLeases.filter((lease) => unitIds.has(lease.unit_id)));
+        setLeases(nextLeases.filter((lease) => unitIds.has(lease.unit_id) && lease.status === "active"));
         setCharges(nextCharges.filter((charge) => charge.property_id === id));
         setOrders(nextOrders);
         setDocuments(nextDocs);
@@ -472,7 +486,7 @@ function UnitCard({
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="secondary" size="touch" onClick={onMessage}>
-          Message tenant
+          Message Landlord Gopher
         </Button>
         <Button type="button" variant="secondary" size="touch" onClick={onDocuments}>
           Share document
@@ -767,10 +781,6 @@ function Unavailable({ onHome, onProperties }: { onHome: () => void; onPropertie
       </div>
     </div>
   );
-}
-
-function ToneBadge({ chip }: { chip: FactChip }) {
-  return <Badge variant={chip.tone}>{chip.label}</Badge>;
 }
 
 function statusChip(status: RequestRowModel["status"]): FactChip {

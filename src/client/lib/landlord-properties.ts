@@ -865,8 +865,7 @@ function statusChip(status: ReturnType<typeof toRequestStatus>): FactChip {
 }
 
 function activeLease(leases: Lease[], unitId: number): Lease | null {
-  const rows = leases.filter((lease) => lease.unit_id === unitId);
-  return rows.find((lease) => lease.status === "active") ?? rows[0] ?? null;
+  return leases.find((lease) => lease.unit_id === unitId && lease.status === "active") ?? null;
 }
 
 function requestNumber(order: WorkOrder): string {

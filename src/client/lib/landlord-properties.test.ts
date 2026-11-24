@@ -180,6 +180,37 @@ describe("landlord properties view model", () => {
     ]);
   });
 
+  it("keeps ended leases off a vacant unit", () => {
+    const model = buildPropertyDetailModel({
+      now,
+      property: property(),
+      units: [unit({ status: "vacant", active_tenant_name: null })],
+      charges: [],
+      leases: [
+        {
+          id: 8,
+          unit_id: 10,
+          primary_tenant_id: 3,
+          start_date: "2024-01-01",
+          end_date: "2025-01-01",
+          monthly_rent: 1200,
+          deposit: 0,
+          rent_due_day: 1,
+          late_fee: 0,
+          status: "ended",
+          notes: null,
+          created_at: "2024-01-01T00:00:00Z",
+          tenant_first_name: "Old",
+          tenant_last_name: "Tenant",
+        },
+      ],
+      workOrders: [],
+      documents: [],
+    });
+    expect(model.units[0]?.person).toBe("Vacant");
+    expect(model.units[0]?.leaseLine).toBeNull();
+  });
+
   it("summarises one property without a rent roll", () => {
     const lease: Lease = {
       id: 7,
