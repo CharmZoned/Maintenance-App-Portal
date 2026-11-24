@@ -37,7 +37,15 @@ export function NotificationItem({
         ) : null}
       </div>
       <div className={cn("min-w-0 flex-1", landlord && "flex flex-col gap-1")}>
-        <p className={cn("text-sm text-foreground", landlord && "leading-normal")}>{item.sentence}</p>
+        <p className={cn("text-sm text-foreground", landlord && "leading-normal", item.unread && "font-medium")}>
+          {item.unread ? <span className="sr-only">Unread: </span> : null}
+          {item.sentence}
+        </p>
+        {item.detail ? (
+          <p className={cn("line-clamp-2 text-[13px] text-muted-foreground", landlord ? "leading-normal" : "mt-0.5")}>
+            {item.detail}
+          </p>
+        ) : null}
         <p className={cn("text-xs text-muted-foreground", landlord ? "leading-normal" : "mt-1")}>
           {item.time}
         </p>

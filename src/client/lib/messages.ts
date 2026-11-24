@@ -453,36 +453,6 @@ export function resolvePortalMessagesLink(
   }
 }
 
-export function notificationsFromWorkOrders(
-  workOrders: WorkOrder[],
-  opts?: { now?: Date },
-): NotificationItemData[] {
-  const now = opts?.now ?? new Date();
-  return workOrders
-    .filter((wo) => wo.status !== "closed")
-    .slice(0, 8)
-    .map((wo) => {
-      const who =
-        wo.tenant_first_name || wo.tenant_last_name
-          ? `${wo.tenant_first_name ?? ""} ${wo.tenant_last_name ?? ""}`.trim()
-          : "A tenant";
-      const sentence =
-        wo.status === "in_progress"
-          ? `Work started on ${workOrderThreadTitle(wo)}.`
-          : wo.status === "scheduled"
-            ? `${workOrderThreadTitle(wo)} was scheduled.`
-            : `${who} has an open request · ${wo.title}.`;
-      return {
-        id: `notif-wo-${wo.id}`,
-        sentence,
-        time: formatMessageTime(wo.created_at, now),
-        unread: true,
-        href: `/messages?thread=${workOrderThreadId(wo.id)}`,
-        stub: true,
-      };
-    });
-}
-
 export function commentSenderLabel(
   comment: MaintenanceComment,
   opts?: { currentRole?: string | null },
