@@ -162,7 +162,9 @@ not on Supabase. It is fixed with a new forward migration, then step 4 is run ag
 | 3.5 ✅ | Agent | Build the quick sign-in card: four buttons, lazy-loaded only outside production, on the login page below the normal form. |
 | 3.6 ✅ | Agent | Build `/login?as=<role>`, the staging ribbon with build id and role switcher, the `[STAGING]` tab title, and `noindex`. Previews show `PREVIEW · <branch>`. (Alternate favicon still optional.) |
 | 3.7 ✅ | Agent | Wire the same card into `pnpm dev:local` so it is testable without staging. |
-| 3.8 | Agent | Tests: unit tests for the environment guard (done) + demo-account alignment; a browser test that clicks each button on the emulator and lands on the right home (still open); a CI step that builds for production and fails if `data-quick-signin` appears in `dist/` (done). |
+| 3.8 ✅ | Agent | Tests: environment guard and demo-account unit tests; the production-bundle `data-quick-signin` CI check; and `pnpm test:smoke` (`tests/smoke/`), which clicks each quick sign-in button on the emulator, checks the landing page within three seconds (plus `?as=` and the ribbon switcher), then opens every role's main screens read-only. It runs in CI as **browser smoke (emulator)**. **Done 2026-11-24.** |
+
+The same smoke runs against the deployed staging site from **Actions → "Smoke staging site" → Run workflow** (`staging-smoke.yml`, read-only, safe to repeat). It needs the repository variable `STAGING_SITE_URL` (or a URL typed at run time) and the secret `VERCEL_AUTOMATION_BYPASS_SECRET` (the bypass token from 3.3). Without them it ends green with a notice naming what to set.
 
 **Checks**
 

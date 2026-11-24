@@ -56,6 +56,48 @@ jobs:
       - name: Test
         run: pnpm test
 
+  # BUILD_PLAN 3.8: the quick sign-in buttons land on each role's home, and every
+  # role's main screens load cleanly (tests/smoke/, playwright.smoke.config.ts).
+  # Local emulator + a VITE_APP_ENV=local build only; nothing here reaches staging.
+  # The same specs run against the deployed staging site in staging-smoke.yml.
+  smoke:
+    name: browser smoke (emulator)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Quick sign-in landing + screen smoke
+        run: pnpm test:smoke
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-results
+          path: tests/.results/playwright-smoke
+          retention-days: 7
+
   # Production (main) only ever receives the release pull request from staging.
   # See docs/adr/0001-environments-and-promotion.md.
   release-source:

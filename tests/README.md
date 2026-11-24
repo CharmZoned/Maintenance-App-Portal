@@ -14,6 +14,7 @@ and triggers in an in-process Postgres — no Docker, no accounts, no network.
 | `pnpm test:ui` | Open the dashboard at http://localhost:4600 — run suites with a button, watch the log, browse results |
 | `pnpm test` | Unit + requirement + workflow tests (vitest, ~25s) |
 | `pnpm test:browser` | Browser tests: the real UI in Chromium (Playwright, ~2 min) |
+| `pnpm test:smoke` | Quick sign-in landing + read-only screen smoke for every role (`tests/smoke/`, ~1 min). `SMOKE_BASE_URL=<site>` points it at a deployed staging site instead of the emulator |
 | `pnpm test:all` | Everything, then writes `tests/.results/report.html` (a single file you can share) |
 | `pnpm dev:local` | Run the portal at http://localhost:5198 against the emulator with demo data and one login per role |
 | `pnpm typecheck:tests` | Type-check the test code |
