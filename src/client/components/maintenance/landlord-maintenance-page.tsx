@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { withFrom } from "@/lib/back-link";
 import { LandlordPageIntro, LandlordPortalTitle, LandlordPropertyHeading } from "@/components/landlord";
 import { StatusChip } from "@/components/patterns";
 import { PageShell } from "@/components/page-shell";
@@ -126,7 +127,7 @@ export function LandlordMaintenancePage({
   const phase: Phase = loading ? "loading" : listError ? "error" : "ready";
 
   function openRequest(id: number) {
-    if (navigate) navigate(`/maintenance/${id}`);
+    if (navigate) navigate(withFrom(`/maintenance/${id}`));
   }
 
   function clearFilter() {

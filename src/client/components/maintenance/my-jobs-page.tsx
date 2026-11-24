@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { withFrom } from "@/lib/back-link";
 import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
@@ -216,7 +217,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
   }, [deepLinkId, replace, navigate]);
 
   function openJob(order: WorkOrder) {
-    const to = jobPath(order);
+    const to = withFrom(jobPath(order));
     if (navigate) navigate(to);
     else replace?.(to);
   }
@@ -296,7 +297,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
                 <RequestListTable
                   items={items}
                   onOpen={openJob}
-                  hrefFor={jobPath}
+                  hrefFor={(order) => withFrom(jobPath(order))}
                   thumbnails={thumbnails}
                   showAssignee={false}
                   dateColumn="scheduled"

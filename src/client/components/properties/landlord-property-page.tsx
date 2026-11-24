@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { withFrom } from "@/lib/back-link";
 import { AlertTriangle, Building2, Calendar, ChevronLeft, Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import {
@@ -206,7 +207,7 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
           onDownload={(doc) => void downloadDoc(doc)}
           onMessage={messageGopher}
           onMaintenance={() => navigate("/maintenance")}
-          onRequest={(requestId) => navigate(`/maintenance/${requestId}`)}
+          onRequest={(requestId) => navigate(withFrom(`/maintenance/${requestId}`))}
         />
       )}
     </PageShell>
