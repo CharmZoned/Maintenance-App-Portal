@@ -5,7 +5,8 @@
  *   Worker:   a pooled job opens with its address and an Accept job button.
  *   Worker:   a job they may not see is "isn't available" with a way back to My jobs.
  */
-import { expect, resetWorld, sql, signIn, test, type World } from "./support";
+import { E2E_EMULATOR_URL } from "../support/ports";
+import { expect, sql, signIn, test, type World } from "./support";
 
 const EMERGENCY = "Bedroom radiator stays cold"; // In progress, Riley, DB priority urgent
 const POOLED_ELECTRICAL = "Bathroom outlet sparks when used"; // offered to the pool, Electrical
@@ -14,6 +15,18 @@ test.describe.configure({ mode: "serial" });
 
 let world: World;
 
+/** The demo world (what `pnpm dev:local` and staging show), not the standard one. */
+async function resetDemoWorld(): Promise<World> {
+  const res = await fetch(`${E2E_EMULATOR_URL}/__emulator/reset`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ seed: true, demo: true }),
+  });
+  const json = (await res.json()) as { world: World; message?: string };
+  if (!res.ok) throw new Error(`emulator /reset: ${json.message ?? res.status}`);
+  return json.world;
+}
+
 async function requestId(title: string): Promise<number> {
   const [row] = await sql<{ id: number }>(`select id from public."MaintenanceRequests" where title = $1`, [title]);
   return Number(row.id);
@@ -21,7 +34,7 @@ async function requestId(title: string): Promise<number> {
 
 test.describe("Request page · per role", () => {
   test.beforeAll(async () => {
-    world = await resetWorld();
+    world = await resetDemoWorld();
     expect(world).toBeTruthy();
   });
 

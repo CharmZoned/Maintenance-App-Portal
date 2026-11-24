@@ -30,7 +30,7 @@ export function StatusChip({
     <div className={cn("flex flex-col items-start gap-1", className)}>
       <span
         className={cn(
-          "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium",
+          "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium",
           STATUS_STYLES[status],
         )}
       >
