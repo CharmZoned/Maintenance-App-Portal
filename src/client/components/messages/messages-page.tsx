@@ -19,6 +19,7 @@ import {
   commentSenderLabel,
   formatMessageTime,
   mergeMessageThreads,
+  officeDraftFromSearch,
   officeMessageSenderLabel,
   officeThreadId,
   officeThreadTitleFromAccount,
@@ -563,6 +564,11 @@ function StaffMessagesPage({
       </div>
       <MessageComposer
         resetKey={selected?.id ?? selectedId}
+        initialValue={
+          isDirect && currentUserId != null && selectedId === officeThreadId(currentUserId)
+            ? (officeDraftFromSearch(search) ?? "")
+            : ""
+        }
         disabled={composerDisabled}
         placeholder={
           isDirect

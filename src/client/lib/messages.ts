@@ -183,6 +183,35 @@ export type MessagesDeepLink =
   | { kind: "not-found"; raw: string }
   | { kind: "none" };
 
+/**
+ * Link that opens the signed-in user's own office conversation with a draft
+ * that already names what it is about, e.g. a property, unit or request.
+ * Use it for every "message the office about this" action so staff never have
+ * to ask which property a message concerns (audit UX-10, UX-16).
+ *
+ *   navigate(officeMessageHref({ about: ["Maple Court", "Unit 1A"] }))
+ *   → /messages?office=me&about=Maple%20Court%20%C2%B7%20Unit%201A
+ */
+export function officeMessageHref(context?: { about?: Array<string | null | undefined> }): string {
+  const about = (context?.about ?? [])
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+  const params = new URLSearchParams({ office: "me" });
+  if (about) params.set("about", about.slice(0, OFFICE_ABOUT_MAX));
+  return `/messages?${params.toString()}`;
+}
+
+export const OFFICE_ABOUT_MAX = 160;
+
+/** Prefilled composer text for an `officeMessageHref` link, or null when there is none. */
+export function officeDraftFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  if (params.get("office") !== "me") return null;
+  const about = params.get("about")?.trim().slice(0, OFFICE_ABOUT_MAX);
+  return about ? `About: ${about}\n\n` : null;
+}
+
 export function resolveStaffMessagesDeepLink(
   search: string,
   threads: MessageThread[],
@@ -193,6 +222,14 @@ export function resolveStaffMessagesDeepLink(
   },
 ): MessagesDeepLink {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  // `?office=me` (officeMessageHref): the signed-in user's own office thread.
+  // Admins have no thread of their own; for them it is a no-op.
+  if (params.get("office") === "me" && !params.get("thread")) {
+    if (!opts?.isAdmin && opts?.currentUserId) {
+      return { kind: "thread", threadId: officeThreadId(opts.currentUserId) };
+    }
+    return { kind: "none" };
+  }
   const thread = params.get("thread");
   if (thread) {
     if (threads.some((t) => t.id === thread)) {

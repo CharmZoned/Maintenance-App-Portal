@@ -21,6 +21,7 @@ export function MessageComposer({
   className,
   /** Active conversation id — draft clears whenever this changes (thread switch / deep-link). */
   resetKey = null,
+  initialValue = "",
 }: {
   disabled?: boolean;
   placeholder?: string;
@@ -31,14 +32,16 @@ export function MessageComposer({
   onSend?: (body: string, visibility: CommentVisibility) => Promise<void> | void;
   className?: string;
   resetKey?: string | number | null;
+  /** Text the draft starts with whenever `resetKey` changes, e.g. "About: Maple Court". */
+  initialValue?: string;
 }) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState(initialValue);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setValue("");
+    setValue(initialValue);
     setBusy(false);
-  }, [resetKey]);
+  }, [resetKey, initialValue]);
 
   async function submit() {
     const body = value.trim();

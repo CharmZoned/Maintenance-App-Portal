@@ -11,7 +11,9 @@ import {
   commentSenderLabel,
   formatMessageTime,
   mergeMessageThreads,
+  officeDraftFromSearch,
   officeMessageSenderLabel,
+  officeThreadId,
   parseOfficeThreadId,
   parseWorkOrderThreadId,
   resolveStaffMessagesDeepLink,
@@ -580,6 +582,11 @@ export function TenantMessagesPage({
       <div className="shrink-0">
         <MessageComposer
           resetKey={selected.id}
+          initialValue={
+            isDirect && currentUserId != null && selected.id === officeThreadId(currentUserId)
+              ? (officeDraftFromSearch(search) ?? "")
+              : ""
+          }
           placeholder="Write a message…"
           onSend={async (body) => {
             if (isDirect) await sendOnOffice(body);

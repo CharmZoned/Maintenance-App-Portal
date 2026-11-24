@@ -17,6 +17,8 @@ interface ImportMetaEnv {
   readonly VITE_SUPPORT_OFFICE_EMAIL?: string;
   /** After-hours phone line shown for urgent help. */
   readonly VITE_SUPPORT_AFTER_HOURS_PHONE?: string;
+  /** "true" turns on technician self-claim (Job offers, Claim, Release). Off by default. See src/client/lib/feature-flags.ts. */
+  readonly VITE_FEATURE_WORKER_SELF_CLAIM?: string;
 }
 
 interface ImportMeta {
