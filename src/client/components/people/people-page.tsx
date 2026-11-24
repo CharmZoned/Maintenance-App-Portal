@@ -93,13 +93,18 @@ export function PeoplePage({
   const fetchTenants = useCallback(() => listTenants(), [listTenants]);
   const tenants = useResource(fetchTenants, [], true);
   const staff = useResource(data.listStaff, EMPTY_STAFF, isAdmin);
-  const openJobs = useResource(data.countOpenJobsByStaff, EMPTY_JOBS, isAdmin);
   // Landlords and vendors load here too, so a failure shows as an error with
   // Retry instead of "No landlords yet" (which invites a duplicate record).
   const landlordList = useResource(data.listLandlords, EMPTY_LANDLORDS, true);
   const vendorList = useResource(data.listVendors, EMPTY_VENDORS, true);
 
   const [tab, setTab] = useState<PeopleTabId>("tenants");
+  // Open-job counts scan open requests; load them the first time Team is shown.
+  const [teamOpened, setTeamOpened] = useState(false);
+  useEffect(() => {
+    if (tab === "team") setTeamOpened(true);
+  }, [tab]);
+  const openJobs = useResource(data.countOpenJobsByStaff, EMPTY_JOBS, isAdmin && teamOpened);
   const [tenantDialog, setTenantDialog] = useState(false);
   const [landlordDialog, setLandlordDialog] = useState(false);
   const [editingLandlord, setEditingLandlord] = useState<Landlord | undefined>();

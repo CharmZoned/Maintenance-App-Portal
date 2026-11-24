@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import type { BilledRow } from "./billed-spend";
 import {
   mapLandlord,
   mapProperty,
@@ -1423,6 +1424,39 @@ async function loadPricesByRequestIds(
     read("MaintenanceRequestLandlordPrices", landlord),
   ]);
   return { worker, landlord };
+}
+
+/**
+ * Completed requests since `closedSince` with their landlord price only, for
+ * billed spend. Slim on purpose: no joins, no notes, no worker prices; RLS
+ * scopes the rows (an owner sees only their properties' requests and their
+ * own price table).
+ */
+export async function listBilledRequests(closedSince: string): Promise<BilledRow[]> {
+  const { data, error } = await supabase
+    .from("MaintenanceRequests")
+    .select("id, property_id, closed_at, created_at")
+    .eq("status", workOrderStatusToDb("closed"))
+    .gte("closed_at", closedSince);
+  if (error) throwSb(error);
+  const rows = data ?? [];
+  const prices = new Map<number, number>();
+  if (rows.length > 0) {
+    const { data: priced, error: priceError } = await supabase
+      .from("MaintenanceRequestLandlordPrices")
+      .select("maintenance_request_id, amount")
+      .in("maintenance_request_id", rows.map((r) => r.id));
+    if (priceError) throwSb(priceError);
+    for (const p of priced ?? []) prices.set(p.maintenance_request_id, Number(p.amount));
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    property_id: r.property_id,
+    status: "closed" as const,
+    landlord_price: prices.get(r.id) ?? null,
+    completed_at: r.closed_at,
+    created_at: r.created_at,
+  }));
 }
 
 /** Admin-only (RLS). null removes the price. */

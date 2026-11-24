@@ -33,7 +33,8 @@ import {
   landlordDocumentRowModel,
   type LandlordDocumentRowModel,
 } from "@/lib/landlord-documents";
-import { billedSpend, billedSpendText, billedYearStart } from "@/lib/billed-spend";
+import { billedSpend, billedSpendText, billedYearStart, type BilledRow } from "@/lib/billed-spend";
+import { listBilledRequests } from "@/lib/data";
 import { countUnreadConversations, loadInbox, type InboxConversation } from "@/lib/inbox";
 import { formatMessageTime, officeMessageHref, portalInboxThreads } from "@/lib/messages";
 import { supabase } from "@/lib/supabase";
@@ -168,7 +169,7 @@ type PendingPayment = { amount: number; method: string; propertyId: number | nul
 type Bundle = {
   orders: WorkOrder[] | null;
   /** Requests completed this year, with prices, for the Billed line. */
-  billed: WorkOrder[] | null;
+  billed: BilledRow[] | null;
   charges: RentCharge[] | null;
   leases: Lease[] | null;
   units: Unit[] | null;
@@ -206,7 +207,7 @@ export function buildReadyHome(input: {
    * Requests completed this year, with prices (see `billedSpend`). Defaults to
    * the completed requests in `orders`; null when that read failed.
    */
-  billed?: WorkOrder[] | null;
+  billed?: BilledRow[] | null;
   charges: RentCharge[] | null;
   leases: Lease[] | null;
   units: Unit[] | null;
@@ -362,7 +363,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
           (rows) => rows,
           () => null,
         ),
-        listWorkOrders({ status: "closed", closed_since: billedYearStart(now) }).then(
+        listBilledRequests(billedYearStart(now)).then(
           (rows) => rows,
           () => null,
         ),
@@ -1511,7 +1512,7 @@ function pendingLine(pending: PendingPayment[] | null): string | null {
 
 function maintenanceCard(
   orders: WorkOrder[] | null,
-  billed: WorkOrder[] | null,
+  billed: BilledRow[] | null,
   now: Date,
 ): ReadyHomeModel["maintenance"] {
   if (orders == null) {

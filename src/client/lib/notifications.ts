@@ -448,7 +448,8 @@ export async function markNotificationRead(
  * "Mark all read": every unread conversation in the panel is read through its
  * latest message (so Messages agrees), and the '*' point moves up to the
  * newest event shown — a server time, so an event that lands meanwhile stays
- * unread. Per-row marks it covers are dropped to keep the table small.
+ * unread. Per-row marks at or before that point are dropped to keep the table
+ * small; newer ones stay.
  */
 export async function markAllNotificationsRead(
   snapshot: NotificationsSnapshot,
@@ -468,8 +469,13 @@ export async function markAllNotificationsRead(
           .from("NotificationReads")
           .upsert({ item_key: READ_ALL_KEY, read_at: newest }, { onConflict: "user_id,item_key" });
         fail(error);
-        // Every row shown is now covered by the new point; best effort.
-        await supabase.from("NotificationReads").delete().neq("item_key", READ_ALL_KEY);
+        // Drop per-row marks the new point already covers; best effort. A
+        // mark newer than the point (an event read meanwhile) is kept.
+        await supabase
+          .from("NotificationReads")
+          .delete()
+          .neq("item_key", READ_ALL_KEY)
+          .lte("read_at", newest);
       })(),
     );
   }

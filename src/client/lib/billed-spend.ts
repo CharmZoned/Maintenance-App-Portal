@@ -19,6 +19,9 @@ export const BILLED_LABEL = "Billed";
 
 type BilledOrder = Pick<WorkOrder, "status" | "landlord_price" | "completed_at" | "created_at">;
 
+/** What a billed-spend read returns: just enough to sum and to scope by property. */
+export type BilledRow = BilledOrder & Pick<WorkOrder, "id" | "property_id">;
+
 export function billedAmount(order: BilledOrder): number | null {
   if (order.status !== "closed") return null;
   const price = order.landlord_price;
