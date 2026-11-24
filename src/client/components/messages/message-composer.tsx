@@ -128,7 +128,7 @@ export function MessageComposer({
       ) : null}
       {sendError ? (
         <p role="alert" className="text-xs text-destructive">
-          Not sent: {sendError} Your message is still here — try again.
+          Not sent — your message is still here, so you can try again. {sendError}
         </p>
       ) : null}
       {showVisibility ? (

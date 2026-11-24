@@ -174,7 +174,14 @@ export function OfficeConversation({
   }, [lastId, state]);
 
   async function send(body: string) {
-    const created = await sendOfficeMessage(threadUserId, body, viewer);
+    let created: OfficeMessage;
+    try {
+      created = await sendOfficeMessage(threadUserId, body, viewer);
+    } catch (err) {
+      // The composer shows this under the field and keeps the draft.
+      const reason = (err as Error)?.message ?? "";
+      throw new Error(/failed to fetch|network|load failed/i.test(reason) ? "Check your connection." : reason);
+    }
     if (!aliveRef.current) return;
     setMessages((prev) => (prev.some((m) => m.id === created.id) ? prev : [...prev, created]));
     onLatestRef.current?.(created);
