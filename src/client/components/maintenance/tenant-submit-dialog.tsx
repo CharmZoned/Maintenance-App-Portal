@@ -203,6 +203,9 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
 
   // Closing never cancels a send in flight: it finishes in the background.
   function requestClose() {
+    // Cancel discards an unsent draft; one still sending, or one that failed
+    // to send, is kept for when the form opens again.
+    if (!savingRef.current && phase !== "failed") resetOnOpenRef.current = true;
     onOpenChange(false, { skipReload: savingRef.current });
   }
 
@@ -291,7 +294,11 @@ export function TenantSubmitDialog({ open, onOpenChange, onSaved }: Props) {
           onDismiss={() => setClosedFailure(null)}
           message={
             <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>Your request wasn’t sent. {closedFailure}</span>
+              <span>
+                {closedFailure === SAVE_ERROR
+                  ? "Your request wasn’t sent. Check your connection and try again."
+                  : `Your request wasn’t sent: ${closedFailure}`}
+              </span>
               <button
                 type="button"
                 onClick={retryFromBanner}

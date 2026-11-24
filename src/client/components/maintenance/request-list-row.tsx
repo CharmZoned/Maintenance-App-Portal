@@ -396,9 +396,12 @@ function RequestListRow({
   const status = toRequestStatus(o);
   const level = priorityLevel(o.priority);
   const assignee = assigneeFallback(o, item.assigneeName);
-  const stepWithName = listNextStep(o, item.assigneeName, true, startedAt);
-  const stepNoName = listNextStep(o, item.assigneeName, false, startedAt);
   const when = dateValue(o, dateColumn);
+  // With a Scheduled column, an Assigned row's next step is that same visit:
+  // say it once, in the column.
+  const sameAsDate = (step: string | undefined) => (step && step === when ? undefined : step);
+  const stepWithName = sameAsDate(listNextStep(o, item.assigneeName, true, startedAt));
+  const stepNoName = sameAsDate(listNextStep(o, item.assigneeName, false, startedAt));
   // A missed visit reads in the warning colour wherever its date shows.
   const missed = dateColumn === "scheduled" && visitMissed(o);
   const ariaLabel = [
