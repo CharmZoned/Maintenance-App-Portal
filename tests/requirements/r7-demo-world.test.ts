@@ -12,6 +12,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import * as data from "@/lib/data";
+import { uploadDemoFiles } from "../emulator/demo-files";
 import type { DemoWorld } from "../emulator/seed";
 import { clientFor, resetWorld, signInApp, signOutApp, sql, type World } from "../support/harness";
 import { EMULATOR_URL } from "../support/ports";
@@ -243,6 +244,30 @@ describe("[R7] Demo world: each role sees its own slice", () => {
     expect(await officeMessages(admin), "both office threads").toHaveLength(6);
     const tina = await clientFor("tenant");
     expect(await officeMessages(tina), "threads never cross").toEqual([]);
+  });
+
+  test("pnpm dev:local's file upload puts a picture behind every demo photo, which the reporter can open", async () => {
+    await signInApp("tenant");
+    const closed = demo.requests.closed.id;
+    // Rows only: before the upload the app has no URL to show (the "Photo 1" placeholder).
+    const before = await data.listMaintenancePhotos(closed);
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.map((p) => p.url)).toEqual(before.map(() => null));
+
+    const uploads = await uploadDemoFiles(EMULATOR_URL, demo);
+    expect(uploads.filter((u) => !u.ok)).toEqual([]);
+    expect(uploads).toHaveLength(demo.documents.length + demo.photos.length);
+
+    const after = await data.listMaintenancePhotos(closed);
+    expect(after).toHaveLength(before.length);
+    for (const photo of after) {
+      expect(photo.url, photo.storage_path).toBeTruthy();
+      const res = await fetch(photo.url!);
+      expect(res.status, photo.storage_path).toBe(200);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect([...bytes.slice(1, 4)], "PNG signature").toEqual([0x50, 0x4e, 0x47]);
+    }
+    await signOutApp();
   });
 
   test("every demo row is flagged as test data", async () => {

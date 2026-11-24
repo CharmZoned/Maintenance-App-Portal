@@ -940,6 +940,61 @@ describe("[R7] Permissions", () => {
       expect((await tenant.from("MaintenanceRequests").select("id").eq("id", id)).data).toEqual([{ id }]);
     });
 
+    test("the assigned worker cannot move a common-area job onto another property", async () => {
+      // Landlords see common-area rows through property_id, so only admins may change it.
+      const [birch] = await sql<{ id: number }>(
+        `insert into public."MaintenanceRequests"
+           (title, description, category, property_id, assigned_staff_id, scheduled_for, status)
+         values ('Birch House boiler', 'Office-filed', 'Other', $1, $2, now() + interval '1 day', 'Scheduled')
+         returning id`,
+        [world.otherProperty.id, world.staff.worker.id],
+      );
+      const birchId = Number(birch.id);
+      const own = await fileAsLandlord("Lobby door (landlord)", { unit_id: null, property_id: world.property.id });
+      await sql(
+        `update public."MaintenanceRequests" set assigned_staff_id = $2, scheduled_for = now() + interval '1 day', status = 'Scheduled' where id = $1`,
+        [own, world.staff.worker.id],
+      );
+
+      const landlord = await clientFor("landlord");
+      expect((await landlord.from("MaintenanceRequests").select("id").eq("id", birchId)).data).toEqual([]);
+
+      const worker = await clientFor("worker");
+      // Pull another landlord's job into this landlord's view.
+      expectDenied(
+        await worker.from("MaintenanceRequests").update({ property_id: world.property.id }).eq("id", birchId).select(),
+        "worker re-points a common-area job onto Maple Court",
+      );
+      // Push this landlord's own job (their photos and words) to another landlord.
+      expectDenied(
+        await worker.from("MaintenanceRequests").update({ property_id: world.otherProperty.id }).eq("id", own).select(),
+        "worker re-points the landlord's common-area request onto Birch House",
+      );
+      const rows = await sql<{ id: number; property_id: number }>(
+        `select id, property_id from public."MaintenanceRequests" where id = any($1::bigint[]) order by id`,
+        [[birchId, own]],
+      );
+      expect(rows.map((r) => [Number(r.id), Number(r.property_id)])).toEqual([
+        [birchId, world.otherProperty.id],
+        [own, world.property.id],
+      ]);
+      expect((await landlord.from("MaintenanceRequests").select("id").eq("id", birchId)).data).toEqual([]);
+      expect((await landlord.from("MaintenanceRequests").select("id").eq("id", own)).data).toEqual([{ id: own }]);
+
+      // The worker can still work the job, and the admin can still re-point it.
+      expectOk(
+        await worker.from("MaintenanceRequests").update({ status: "In Progress", started_at: new Date().toISOString() }).eq("id", own).select(),
+        "worker starts the job",
+      );
+      const admin = await clientFor("admin");
+      expectOk(
+        await admin.from("MaintenanceRequests").update({ property_id: world.property.id }).eq("id", birchId).select(),
+        "admin moves the job",
+      );
+      expect((await landlord.from("MaintenanceRequests").select("id").eq("id", birchId)).data).toEqual([{ id: birchId }]);
+      await sql(`delete from public."MaintenanceRequests" where id = any($1::bigint[])`, [[birchId, own]]);
+    });
+
     test("a landlord can link a chat message to their own request, but not to one they can't see", async () => {
       const own = await fileAsLandlord("Boiler noise (landlord)", { unit_id: null, property_id: world.property.id });
       const [other] = await sql<{ id: number }>(

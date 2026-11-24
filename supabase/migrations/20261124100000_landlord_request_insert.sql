@@ -224,7 +224,13 @@ COMMENT ON TABLE public."MaintenanceRequests" IS
   'Work orders. SELECT: admin / submitter tenant / assigned staff / owning landlord (unit, or property for common-area rows) / pooled-job workers. INSERT: admin, scoped tenant, or owning landlord (fresh Open rows only). UPDATE: admin or assigned maintenance (landlords read-only; cannot close). DELETE: admin.';
 
 -- Only admins re-point who reported a request (tenants are covered by
--- private.protect_maintenance_request; this is the landlord column).
+-- private.protect_maintenance_request; this is the landlord column), or which
+-- property it is on. Landlords now see common-area rows (unit_id NULL) through
+-- property_id, and protect_maintenance_request does not guard that column, so
+-- without this the assigned worker could move a common-area job onto another
+-- landlord's property and hand them its title, photos, history and price.
+-- Unit rows are also held to their unit's property by
+-- maintenance_request_property_matches_unit, which fires first (name order).
 CREATE OR REPLACE FUNCTION private.protect_submitted_by_landlord()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -235,16 +241,21 @@ BEGIN
   IF auth.uid() IS NULL OR private.current_role() = 'admin'::public.app_role THEN
     RETURN NEW;
   END IF;
-  IF NEW.submitted_by_landlord_id IS DISTINCT FROM OLD.submitted_by_landlord_id THEN
+  IF NEW.submitted_by_landlord_id IS DISTINCT FROM OLD.submitted_by_landlord_id
+    OR NEW.property_id IS DISTINCT FROM OLD.property_id
+  THEN
     RAISE EXCEPTION 'These request fields cannot be changed from this account';
   END IF;
   RETURN NEW;
 END;
 $function$;
 
+COMMENT ON FUNCTION private.protect_submitted_by_landlord() IS
+  'Non-admins cannot change MaintenanceRequests.submitted_by_landlord_id or property_id (landlord visibility of common-area rows goes through property_id).';
+
 DROP TRIGGER IF EXISTS maintenance_requests_protect_landlord_reporter ON public."MaintenanceRequests";
 CREATE TRIGGER maintenance_requests_protect_landlord_reporter
-  BEFORE UPDATE OF submitted_by_landlord_id ON public."MaintenanceRequests"
+  BEFORE UPDATE OF submitted_by_landlord_id, property_id ON public."MaintenanceRequests"
   FOR EACH ROW
   EXECUTE FUNCTION private.protect_submitted_by_landlord();
 

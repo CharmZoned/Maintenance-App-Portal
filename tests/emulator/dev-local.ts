@@ -5,14 +5,20 @@
  */
 import { spawn } from "node:child_process";
 import { DEV_APP_PORT, DEV_EMULATOR_PORT } from "../support/ports";
+import { uploadDemoFiles } from "./demo-files";
 import { ANON_KEY } from "./jwt";
 import { PASSWORD, PERSONAS } from "./seed";
 import { startEmulator } from "./server";
 
 const emulator = await startEmulator({ port: DEV_EMULATOR_PORT });
-await emulator.reset({ seed: true, demo: true });
+const world = await emulator.reset({ seed: true, demo: true });
+// The seed writes photo and document rows only; put a sample file behind each.
+const uploads = world?.demo ? await uploadDemoFiles(emulator.url, world.demo) : [];
+const failed = uploads.filter((u) => !u.ok);
+for (const f of failed) console.warn(`  Could not upload demo file ${f.path}: ${f.detail}`);
 
 console.log(`\nLocal backend ready (${emulator.db.migrations.length} migrations applied) at ${emulator.url}`);
+console.log(`Demo files uploaded: ${uploads.length - failed.length} of ${uploads.length}`);
 console.log(`\nDemo logins — password for all: ${PASSWORD}`);
 for (const p of Object.values(PERSONAS)) console.log(`  ${p.email.padEnd(24)} ${p.label}`);
 console.log(`\nEmails the app "sends" (sign-up / reset links): ${emulator.url}/__emulator/outbox\n`);
