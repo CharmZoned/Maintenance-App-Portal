@@ -7,6 +7,7 @@ import {
   buildEmptyState,
   buildErrorState,
   dashboardChargePeriods,
+  dashboardClosedSince,
   money,
   requestRef,
   type AdminDashboardSources,
@@ -21,7 +22,8 @@ import type {
 } from "@/lib/data";
 import type { Application, Landlord, Lease, Property, RentCharge, Tenant, Unit, WorkOrder } from "@/types";
 import { fixtureIntro, fixtureModel, fixtureStates } from "../preview/admin-dashboard-fixture";
-import { PERSONAS, resetWorld, signInApp, signOutApp } from "../support/harness";
+import { createWorkOrder, listWorkOrders, listWorkOrdersForDashboard } from "@/lib/data";
+import { PERSONAS, resetWorld, signInApp, signOutApp, sql } from "../support/harness";
 
 /**
  * The world below is the Figma sample (tests/preview/admin-dashboard-fixture.ts)
@@ -346,6 +348,13 @@ describe("helpers", () => {
     expect(dashboardChargePeriods(NOW)).toEqual(["2026-10", "2026-11", "2026-12"]);
     expect(dashboardChargePeriods(new Date(2026, 0, 5))).toEqual(["2025-12", "2026-01", "2026-02"]);
   });
+
+  test("closed requests are loaded from the start of the year, or 90 days back early in the year", () => {
+    // Mid November: the start of the year is further back than 90 days.
+    expect(dashboardClosedSince(NOW)).toBe(new Date(2026, 0, 1).toISOString());
+    // 5 January: 90 days back (7 Oct) reaches further than 1 January.
+    expect(dashboardClosedSince(new Date(2026, 0, 5, 14))).toBe(new Date(2025, 9, 7).toISOString());
+  });
 });
 
 describe("intro, empty and error states", () => {
@@ -461,7 +470,8 @@ describe("needs your attention", () => {
     expect(verify).toMatchObject({
       title: "Verify $725 Zelle from Raj Patel",
       context: "Tenant · Maple Court 1B · 15 days late",
-      href: "/rent?period=2026-11",
+      // Opens the reported payment itself on the Rent page.
+      href: "/rent?verify=5",
     });
     expect(assign).toMatchObject({
       title: "Unassigned request: Hallway light out",
@@ -980,7 +990,7 @@ describe("every link is a route the portal has", () => {
       model.listings.href,
     ].filter((href): href is string => Boolean(href));
     const route =
-      /^\/(maintenance(\/\d+)?|rent(\?period=\d{4}-\d{2})?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=(wo:\d+|office:[^&]+))?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
+      /^\/(maintenance(\/\d+)?|rent(\?(period=\d{4}-\d{2}|verify=\d+))?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=(wo:\d+|office:[\w-]+))?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
     for (const href of hrefs) expect(href).toMatch(route);
   });
 });
@@ -990,8 +1000,9 @@ describe("every link is a route the portal has", () => {
  * world, signed in as the admin exactly as the browser would be.
  */
 describe("loading from the portal database", () => {
+  let world: Awaited<ReturnType<typeof resetWorld>>;
   beforeAll(async () => {
-    await resetWorld();
+    world = await resetWorld();
     await signInApp("admin");
     return async () => {
       await signOutApp();
@@ -1019,5 +1030,38 @@ describe("loading from the portal database", () => {
     // The seeded approval queue holds one pending account.
     expect(state.model.kpis.find((k) => k.id === "approvals")?.value).toBe("1");
     expect(state.model.portfolio.totalsLine).toBe("2 landlords · 2 properties · 3 units");
+  });
+
+  test("the dashboard loads open requests and recent closed ones, not old history", async () => {
+    const make = (title: string) =>
+      createWorkOrder({ title, property_id: world.property.id, unit_id: world.units.a.id });
+    const longAgo = await make("Closed three years ago");
+    const lately = await make("Closed yesterday");
+    await make("Still open");
+    await sql(
+      // A request cannot close before it was created, so age the whole row.
+      `update public."MaintenanceRequests" set status = 'Closed', resolution_notes = 'Done', started_at = null,
+         created_at = now() - interval '3 years 1 day', closed_at = now() - interval '3 years' where id = $1`,
+      [longAgo.id],
+    );
+    await sql(
+      `update public."MaintenanceRequests" set status = 'Closed', resolution_notes = 'Done', started_at = null,
+         created_at = now() - interval '2 days', closed_at = now() - interval '1 day' where id = $1`,
+      [lately.id],
+    );
+
+    const all = await listWorkOrders();
+    const loaded = await listWorkOrdersForDashboard(dashboardClosedSince(new Date()));
+    const ids = loaded.map((wo) => wo.id).sort((x, y) => x - y);
+    // Everything except the request closed three years ago, each exactly once.
+    expect(ids).toEqual(
+      all
+        .filter((wo) => wo.id !== longAgo.id)
+        .map((wo) => wo.id)
+        .sort((x, y) => x - y),
+    );
+    expect(loaded.find((wo) => wo.id === lately.id)?.status).toBe("closed");
+    // Same joined shape as the full list.
+    expect(loaded.find((wo) => wo.id === lately.id)).toEqual(all.find((wo) => wo.id === lately.id));
   });
 });
