@@ -1,9 +1,49 @@
-import type { RequestStatus } from "@/components/patterns/status-chip";
 import type { WorkOrder, WorkOrderPriority, WorkOrderStatus } from "@/types";
+import { workOrderStatusFromDb } from "@/lib/mappers";
 import { formatDate } from "@/lib/utils";
 
 /**
- * Map live MaintenanceRequests status (+ assignee) to Figma Q2 RequestStatus chips.
+ * THE single source for request status / priority language (design brief §2.3).
+ *
+ * Every screen, for every role, shows exactly these five status labels and the
+ * two priority badges below. Stored DB values never change:
+ *   DB status:   Open | Scheduled | In Progress | On Hold | Closed
+ *   DB priority: Low | Normal | High | Urgent
+ *
+ * Do not add another status → label switch anywhere in the client. Import from
+ * here (components/maintenance/request-status.ts and work-order-status.ts only
+ * re-export these for older importers).
+ */
+
+// ── Status ─────────────────────────────────────────────────────────
+
+/** Q2 status labels only — never Open / Scheduled / Closed. */
+export type RequestStatus = "New" | "Assigned" | "In progress" | "On hold" | "Completed";
+
+/** Display order (queue tabs, filters, legends). */
+export const REQUEST_STATUSES: readonly RequestStatus[] = [
+  "New",
+  "Assigned",
+  "In progress",
+  "On hold",
+  "Completed",
+] as const;
+
+/**
+ * Label for a bare stored status, when there is no row to inspect for an
+ * assignee (status-history events, status dropdown options).
+ * An Open row WITH an assignee reads "Assigned" — use toRequestStatus for rows.
+ */
+export const STATUS_LABEL: Record<WorkOrderStatus, RequestStatus> = {
+  open: "New",
+  scheduled: "Assigned",
+  in_progress: "In progress",
+  on_hold: "On hold",
+  closed: "Completed",
+};
+
+/**
+ * Map a live MaintenanceRequests row (status + assignee) to its status label.
  * DB: open | scheduled | in_progress | on_hold | closed
  * UI: New | Assigned | In progress | On hold | Completed
  */
@@ -23,11 +63,27 @@ export function toRequestStatus(wo: Pick<WorkOrder, "status" | "assigned_staff_i
   }
 }
 
+/**
+ * Label for a stored status string as it appears in MaintenanceRequestStatusHistory
+ * ("In Progress", "On Hold", …) or as a client key ("in_progress").
+ */
+export function requestStatusFromDb(raw: string | null | undefined): RequestStatus {
+  if (!raw) return "New";
+  return STATUS_LABEL[workOrderStatusFromDb(raw)] ?? "New";
+}
+
+/** Options for a status picker: stored value + the shared label. */
+export function statusOptions(
+  values: readonly WorkOrderStatus[] = ["open", "scheduled", "in_progress", "on_hold", "closed"],
+): { value: WorkOrderStatus; label: RequestStatus }[] {
+  return values.map((value) => ({ value, label: STATUS_LABEL[value] }));
+}
+
 export function isOpenRequest(wo: Pick<WorkOrder, "status">): boolean {
   return wo.status !== "closed";
 }
 
-/** Compact next-step / context line under a status chip. */
+/** Compact next-step / context line under a status chip (brief §2.3). */
 export function requestNextStep(
   wo: WorkOrder,
   opts?: { assigneeName?: string | null },
@@ -54,11 +110,77 @@ export function requestNextStep(
       return [reason, follow].filter(Boolean).join(" · ") || "On hold";
     }
     case "Completed":
-      return wo.resolution_notes?.trim() || "Closed";
+      return wo.resolution_notes?.trim() || "Completed";
     default:
       return undefined;
   }
 }
+
+// ── Staff queue / worker "My jobs" bucketing ───────────────────────
+
+export function staffQueueTab(status: WorkOrderStatus, assigned: boolean): "needs" | "active" | "completed" {
+  if (status === "closed") return "completed";
+  if (status === "open" && !assigned) return "needs";
+  return "active";
+}
+
+export type JobSection = "Today" | "Upcoming" | "On hold" | "Recently completed";
+
+/**
+ * My jobs bucketing (Figma Worker / U7).
+ * Past-day and unscheduled open work stay under Today; future calendar days → Upcoming.
+ * `in_progress` stays under Today even when scheduled later.
+ */
+export function jobSectionFor(order: Pick<WorkOrder, "status" | "scheduled_at">, now: Date): JobSection {
+  if (order.status === "closed") return "Recently completed";
+  if (order.status === "on_hold") return "On hold";
+  if (order.status === "in_progress") return "Today";
+  if (order.scheduled_at) {
+    const d = parseWhenDate(order.scheduled_at);
+    if (d && !isSameLocalDay(d, now) && d > now) {
+      return "Upcoming";
+    }
+  }
+  return "Today";
+}
+
+// ── Priority ───────────────────────────────────────────────────────
+
+/** Priority badge — Emergency / High only (brief §2.3). */
+export type PriorityLevel = "Emergency" | "High";
+
+/**
+ * Words for every stored priority. DB 'urgent' is ALWAYS "Emergency" — never
+ * "Urgent" — so a request never says Emergency in one place and Urgent in another.
+ */
+export const PRIORITY_LABEL: Record<WorkOrderPriority, string> = {
+  low: "Low",
+  normal: "Normal",
+  high: "High",
+  urgent: "Emergency",
+};
+
+/** Options for a priority picker (stored value + shared label). */
+export const PRIORITY_OPTIONS: readonly { value: WorkOrderPriority; label: string }[] = [
+  { value: "low", label: PRIORITY_LABEL.low },
+  { value: "normal", label: PRIORITY_LABEL.normal },
+  { value: "high", label: PRIORITY_LABEL.high },
+  { value: "urgent", label: PRIORITY_LABEL.urgent },
+];
+
+/** Badge level, or null when the priority gets no badge (normal / low). */
+export function priorityLevel(priority: WorkOrderPriority): PriorityLevel | null {
+  if (priority === "urgent") return "Emergency";
+  if (priority === "high") return "High";
+  return null;
+}
+
+/** Plain word for a details row ("Priority  Emergency"). */
+export function priorityLabel(priority: WorkOrderPriority | null | undefined): string {
+  return PRIORITY_LABEL[priority ?? "normal"] ?? PRIORITY_LABEL.normal;
+}
+
+// ── Context lines ──────────────────────────────────────────────────
 
 /**
  * List-row context — place / property only (status + next-step live on StatusChip).
@@ -75,11 +197,37 @@ export function requestContextLine(
   return parts.join(" · ");
 }
 
-export function priorityLevel(priority: WorkOrderPriority): "Emergency" | "High" | null {
-  if (priority === "urgent") return "Emergency";
-  if (priority === "high") return "High";
-  return null;
+/** Staff queue row context: place · tenant · Emergency · assignee / schedule. */
+export function workOrderContextLine(
+  w: WorkOrder,
+  opts?: { isTenant?: boolean; assigneeLabel?: string | null },
+): string {
+  const parts: string[] = [];
+  if (w.property_name) parts.push(w.property_name);
+  if (w.unit_name) parts.push(`Unit ${w.unit_name}`);
+  if (!opts?.isTenant) {
+    const tenant = [w.tenant_first_name, w.tenant_last_name].filter(Boolean).join(" ");
+    if (tenant) parts.push(tenant);
+  }
+  if (w.priority === "urgent") parts.push(PRIORITY_LABEL.urgent);
+  if (opts?.assigneeLabel) parts.push(opts.assigneeLabel);
+  else if (w.status === "in_progress") parts.push(STATUS_LABEL.in_progress);
+  else if (w.status === "on_hold" && w.hold_reason) parts.push(w.hold_reason);
+  else if (w.scheduled_at) parts.push(formatScheduleWhen(w.scheduled_at));
+  else if (w.created_at) parts.push(formatRelativeWhen(w.created_at));
+  return parts.filter(Boolean).join(" · ") || "—";
 }
+
+export function unitPropertyLabel(unit?: string | null, property?: string | null): string {
+  const u = unit?.trim();
+  const p = property?.trim();
+  if (u && p) return `Unit ${u} · ${p}`;
+  if (u) return `Unit ${u}`;
+  if (p) return p;
+  return "Your home";
+}
+
+// ── Dates ──────────────────────────────────────────────────────────
 
 /**
  * Date-only write path stores noon-UTC (`…T12:00:00.000Z` via updateWorkOrder).
@@ -113,13 +261,48 @@ export function formatActivityStamp(iso: string | null | undefined): string {
   return formatDate(iso, { day: "numeric", month: "short" });
 }
 
-export function unitPropertyLabel(unit?: string | null, property?: string | null): string {
-  const u = unit?.trim();
-  const p = property?.trim();
-  if (u && p) return `Unit ${u} · ${p}`;
-  if (u) return `Unit ${u}`;
-  if (p) return p;
-  return "Your home";
+/** Parse ISO / date-only the same way for bucketing and relative labels. */
+export function parseWhenDate(iso: string): Date | null {
+  const d = new Date(iso.length <= 10 ? `${iso}T00:00:00` : iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+export function formatRelativeWhen(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
+  const d = parseWhenDate(iso);
+  if (!d) return iso;
+  if (isSameLocalDay(d, now)) {
+    return `Today ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameLocalDay(d, yesterday)) {
+    return "Yesterday";
+  }
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+/**
+ * Schedule subtitle for queue/My jobs rows.
+ * Past calendar days under Today would otherwise say "Yesterday" — use Overdue instead.
+ */
+export function formatScheduleWhen(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
+  const d = parseWhenDate(iso);
+  if (!d) return iso;
+  if (isSameLocalDay(d, now)) {
+    return `Today ${d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  }
+  if (d < now) return "Overdue";
+  return formatRelativeWhen(iso, now);
 }
 
 /** Newest first; stable on equal timestamps. */

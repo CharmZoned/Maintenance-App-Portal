@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
+import type { PriorityLevel } from "@/lib/request-status";
 
-/** Priority badge — Emergency / High only (Figma Patterns). */
-export type PriorityLevel = "Emergency" | "High";
+/** Priority badge — Emergency / High only (Figma Patterns). Map DB values with `priorityLevel()`. */
+export type { PriorityLevel };
 
 export function PriorityChip({
   level,
