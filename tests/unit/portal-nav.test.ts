@@ -74,6 +74,7 @@ describe("portal-nav", () => {
     ]);
     expect(navItemsForAudience("maintenance").map((i) => i.label)).toEqual([
       "My jobs",
+      "Calendar",
       "Messages",
     ]);
   });

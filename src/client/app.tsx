@@ -69,7 +69,7 @@ import {
   type PortalAudience,
 } from "./lib/safe-redirect";
 
-function activeFor(route: Route): string {
+function activeFor(route: Route, staffShell: boolean): string {
   if (route.name === "property") return "properties";
   if (route.name === "request") return "maintenance";
   if (
@@ -82,10 +82,11 @@ function activeFor(route: Route): string {
   }
   // Staff-only screens without a rail entry of their own: leases belong with the
   // rent roll, applications come in through the website listings, and the
-  // calendar now lives on the dashboard. (Other shells have no such nav ids.)
+  // calendar now lives on the dashboard. (Other shells have no such nav ids;
+  // the technician shell lists Calendar itself.)
   if (route.name === "leases") return "rent";
   if (route.name === "applications") return "listings";
-  if (route.name === "calendar") return "dashboard";
+  if (route.name === "calendar") return staffShell ? "dashboard" : "calendar";
   if (route.name === "account") return "account";
   // Payments are Home CTAs in Figma — keep Home nav highlight.
   if (route.name === "payments" || route.name === "payments-ledger") return "home";
@@ -593,7 +594,7 @@ export function App() {
       {isStaffShell || route.name === "request" ? null : (
         <MobileTabBar
           items={navItems}
-          active={activeFor(route)}
+          active={activeFor(route, isStaffShell)}
           onNavigate={(href) => navigate(href)}
         />
       )}
@@ -623,7 +624,7 @@ export function App() {
           {isStaffShell ? (
             <AdminWorkspace
               items={navItems}
-              active={activeFor(route)}
+              active={activeFor(route, isStaffShell)}
               homeHref={homePath}
               userName={displayName ?? displayNameFromEmail(chrome.email)}
               userMeta={`${roleLabel(chrome.role)} · ${PORTAL_BRAND}`}
@@ -638,7 +639,7 @@ export function App() {
               <div className="hidden shrink-0 md:flex">
                 <PortalNav
                   items={navItems}
-                  active={activeFor(route)}
+                  active={activeFor(route, isStaffShell)}
                   homeHref={homePath}
                   onNavigate={(href) => navigate(href)}
                 />
