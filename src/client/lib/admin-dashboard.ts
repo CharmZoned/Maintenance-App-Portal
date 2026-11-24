@@ -64,6 +64,7 @@ import type {
   UserAccountRow,
 } from "@/lib/data";
 import { displayNameFromEmail } from "@/lib/portal-nav";
+import { vacantUnlistedUnits } from "@/lib/listings-overview";
 import { isOpenRequest, toRequestStatus } from "@/lib/request-status";
 import { formatMoney } from "@/lib/utils";
 import {
@@ -570,27 +571,12 @@ function createCtx(sources: AdminDashboardSources, now: Date): Ctx {
     ? new Set(sources.marketing.filter((m) => m.marketed).map((m) => m.unit_id))
     : null;
 
-  // A vacant unit with a lease already signed (upcoming) or running is spoken for.
-  const leasedUnitIds = new Set(
-    (sources.leases ?? [])
-      .filter((l) => l.status === "upcoming" || l.status === "active")
-      .map((l) => l.unit_id),
-  );
-  const vacantUnlisted = sources.units
-    .filter(
-      (u) =>
-        u.status === "vacant" &&
-        !leasedUnitIds.has(u.id) &&
-        !(marketedUnitIds?.has(u.id) ?? false),
-    )
-    .sort((a, b) => {
-      // Ready homes first: they are the ones that could be earning rent today.
-      const ready = Number(b.readiness_status === "ready") - Number(a.readiness_status === "ready");
-      if (ready !== 0) return ready;
-      const pa = propertyById.get(a.property_id)?.name ?? "";
-      const pb = propertyById.get(b.property_id)?.name ?? "";
-      return pa.localeCompare(pb) || a.name.localeCompare(b.name, undefined, { numeric: true }) || a.id - b.id;
-    });
+  const vacantUnlisted = vacantUnlistedUnits({
+    units: sources.units,
+    marketedUnitIds,
+    leases: sources.leases,
+    propertyById,
+  });
 
   return {
     sources,
@@ -975,9 +961,10 @@ function buildAttention(ctx: Ctx): AttentionModel {
           // Without the marketing flags we only know the home is vacant.
           title: marketingKnown ? `${name} is vacant and not listed` : `${name} is vacant`,
           context: joinParts([landlord ? personRef(landlord) : null, "Ready for move-in"]),
+          // Listings can't be published from the portal yet, so the action
+          // opens the property, where the unit and its lease are managed.
           href: ROUTES.property(unit.property_id),
-          actionLabel: marketingKnown ? "Create listing" : "Manage listings",
-          actionHref: ROUTES.listings,
+          actionLabel: "Open property",
         },
       });
     });
