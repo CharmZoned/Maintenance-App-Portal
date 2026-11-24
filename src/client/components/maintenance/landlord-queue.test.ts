@@ -157,6 +157,46 @@ describe("landlord maintenance queue", () => {
     expect(model.completedSpendLine).toBe(`Spend: ${formatMoney(180)} this month · ${formatMoney(180)} this year`);
   });
 
+  it("notes properties whose only completed requests are older than this month", () => {
+    const closedLastYear = order({
+      id: 980,
+      request_number: "MR-000980",
+      title: "Old roof patch",
+      status: "closed",
+      property_id: 2,
+      created_at: "2025-10-01",
+      completed_at: "2025-10-15",
+      landlord_price: 90,
+    });
+    const withOlderOnly = buildLandlordQueue({
+      orders: [...sample, closedLastYear],
+      properties,
+      tab: "completed",
+      propertyId: "all",
+      now,
+    });
+    expect(withOlderOnly.completedNotes).toEqual(["Birch House has no completed requests this month."]);
+
+    const closedThisMonth = order({
+      id: 981,
+      request_number: "MR-000981",
+      title: "Thermostat swap",
+      status: "closed",
+      property_id: 2,
+      created_at: "2026-11-02",
+      completed_at: "2026-11-12",
+      landlord_price: 75,
+    });
+    const withThisMonth = buildLandlordQueue({
+      orders: [...sample, closedLastYear, closedThisMonth],
+      properties,
+      tab: "completed",
+      propertyId: "all",
+      now,
+    });
+    expect(withThisMonth.completedNotes).toEqual([]);
+  });
+
   it("names the property when a tab filter matches nothing", () => {
     const model = buildLandlordQueue({
       orders: sample,

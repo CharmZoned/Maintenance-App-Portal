@@ -129,7 +129,7 @@ export function buildLandlordQueue(input: {
     completedSpendLine: `Spend: ${spendMonthLabel} · ${spendYearLabel}`,
     groups,
     openFooter: input.tab === "open" ? openFooter(completedThisMonth) : null,
-    completedNotes: input.tab === "completed" ? completedNotes(scoped, input.properties, input.propertyId) : [],
+    completedNotes: input.tab === "completed" ? completedNotes(scoped, input.properties, input.propertyId, now) : [],
     empty: emptyState(input.orders.length, groups.length, input.tab, input.propertyId, input.properties),
   };
 }
@@ -335,13 +335,16 @@ function completedNotes(
   scoped: readonly WorkOrder[],
   properties: readonly LandlordQueueProperty[],
   propertyId: number | "all",
+  now: Date,
 ): string[] {
-  const withCompleted = new Set(
-    scoped.filter((order) => order.status === "closed").map((order) => order.property_id),
+  const withCompletedThisMonth = new Set(
+    scoped
+      .filter((order) => order.status === "closed" && inMonth(order.completed_at ?? order.created_at, now))
+      .map((order) => order.property_id),
   );
   return properties
     .filter((property) => propertyId === "all" || property.id === propertyId)
-    .filter((property) => !withCompleted.has(property.id))
+    .filter((property) => !withCompletedThisMonth.has(property.id))
     .map((property) => `${property.name} has no completed requests this month.`)
     .sort((a, b) => a.localeCompare(b));
 }
