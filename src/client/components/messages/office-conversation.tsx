@@ -53,6 +53,7 @@ export function OfficeConversation({
   threadUserId,
   viewer,
   personLabel,
+  latestMessageAt,
   onRead,
   onLatestMessage,
 }: {
@@ -61,6 +62,11 @@ export function OfficeConversation({
   viewer: OfficeViewer;
   /** Admin view: how the person on the other side is named ("Sam Fixit · Team"). */
   personLabel?: string | null;
+  /**
+   * When the inbox last saw a message in this thread. If that is newer than
+   * what is on screen, the conversation refetches instead of waiting its turn.
+   */
+  latestMessageAt?: string | null;
   /** The viewer's read row now covers every message in the thread. */
   onRead?: (threadUserId: string) => void;
   /** The newest message in the thread changed (loaded, received or sent). */
@@ -148,6 +154,17 @@ export function OfficeConversation({
   useVisibleRefresh(() => {
     if (state === "ready") void load("background");
   });
+
+  // The inbox has heard of a message this conversation has not shown yet.
+  const lastShownAt = messages[messages.length - 1]?.created_at ?? null;
+  useEffect(() => {
+    if (state !== "ready" || !latestMessageAt) return;
+    const known = Date.parse(latestMessageAt);
+    if (Number.isNaN(known)) return;
+    if (lastShownAt == null || known > Date.parse(lastShownAt)) void load("background");
+    // Only a change in what the inbox knows should trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestMessageAt]);
 
   // Keep the newest message in view.
   const lastId = messages[messages.length - 1]?.id ?? null;

@@ -422,8 +422,10 @@ function VerifyZelleDialog({
 
         {owed != null && after != null && after < 0 ? (
           <p className="rounded-sm bg-warning-tint px-3 py-2 text-sm text-warning">
-            Only {exactMoney(owed, currency)} is still owed on this charge, less than this payment. The ledger
-            will refuse it until that is corrected.
+            {owed === 0
+              ? "This charge is already paid in full"
+              : `Only ${exactMoney(owed, currency)} is still owed on this charge, less than this payment`}
+            . The ledger will refuse it until that is corrected.
           </p>
         ) : null}
 

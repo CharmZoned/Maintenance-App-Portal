@@ -202,7 +202,8 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
     await expect(main.getByText("In progress", { exact: true })).toBeVisible();
     await expect(main.getByText("Assigned (staff)")).toBeVisible();
     await expect(main.getByText(WORKER_UPDATE)).toBeVisible();
-    // Replies to staff go through the request's conversation in Messages, not this page.
+    // The request page no longer has a reply box: it hands the tenant to the request's conversation in
+    // Messages. That thread is still a demo ("Chat isn't connected"), so no reply is sent or checked here.
     await expect(main.getByRole("button", { name: "Open request conversation" })).toBeVisible();
     await shot(page, testInfo, "Tenant reads the worker's update");
   });

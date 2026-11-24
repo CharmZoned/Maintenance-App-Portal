@@ -199,14 +199,21 @@ function StaffMessagesPage({
     );
   }, []);
 
+  const officeRef = useRef(office);
+  officeRef.current = office;
+
   /** The open conversation has a newer latest message (received or sent): update its row. */
   const handleOfficeLatest = useCallback((message: OfficeMessage) => {
+    const isNews = (summaries: OfficeThreadSummary[]) => {
+      const existing = summaries.find((s) => s.thread_user_id === message.thread_user_id);
+      return !existing || Date.parse(existing.last_message_at) < Date.parse(message.created_at);
+    };
+    if (!officeRef.current || !isNews(officeRef.current.summaries)) return;
     // Drop any refresh already in flight: it may predate this message.
     officeSeqRef.current += 1;
     setOffice((prev) => {
-      if (!prev) return prev;
+      if (!prev || !isNews(prev.summaries)) return prev;
       const existing = prev.summaries.find((s) => s.thread_user_id === message.thread_user_id);
-      if (existing && Date.parse(existing.last_message_at) >= Date.parse(message.created_at)) return prev;
       const next: OfficeThreadSummary = {
         thread_user_id: message.thread_user_id,
         last_message_at: message.created_at,
@@ -396,6 +403,7 @@ function StaffMessagesPage({
           threadUserId={selectedOfficeUserId}
           viewer={officeViewer}
           personLabel={officeViewer.role === "admin" ? selected.title : null}
+          latestMessageAt={selected.updatedAt || null}
           onRead={handleOfficeRead}
           onLatestMessage={handleOfficeLatest}
         />
@@ -480,11 +488,20 @@ function StaffMessagesPage({
             variant="brand"
             size="header"
             type="button"
-            onClick={() =>
+            onClick={() => {
+              // A worker's only direct conversation is the one with the office.
+              const own =
+                officeViewer && officeViewer.role !== "admin"
+                  ? threads.find((t) => t.kind === "office")
+                  : undefined;
+              if (own) {
+                openThread(own);
+                return;
+              }
               setNotice(
                 "New message is stubbed — start from a work order comment thread for now.",
-              )
-            }
+              );
+            }}
           >
             New message
           </Button>

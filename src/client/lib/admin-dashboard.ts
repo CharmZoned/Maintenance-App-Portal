@@ -141,6 +141,8 @@ const ROUTES = {
   request: (id: number) => `/maintenance/${id}`,
   rent: "/rent",
   rentPeriod: (period: string) => `/rent?period=${period}`,
+  /** The Rent page opens the reported Zelle payment waiting to be verified. */
+  rentVerify: (intentId: number) => `/rent?verify=${intentId}`,
   properties: "/properties",
   property: (id: number) => `/properties/${id}`,
   /** People → Approvals tab (the page reads `?tab=`). */
@@ -909,7 +911,7 @@ function buildAttention(ctx: Ctx): AttentionModel {
           placeCompact(charge?.property_name ?? null, charge?.unit_name ?? null),
           lateness,
         ]),
-        href: charge?.period ? ROUTES.rentPeriod(charge.period) : ROUTES.rent,
+        href: ROUTES.rentVerify(intent.id),
         actionLabel: "Verify",
       },
     });
@@ -1187,7 +1189,7 @@ function buildCalendar(ctx: Ctx): DashboardCalendarModel {
         placeLine(intent.charge?.property_name ?? null, intent.charge?.unit_name ?? null),
       ].filter(Boolean),
       actionLabel: "Open rent",
-      href: intent.charge?.period ? ROUTES.rentPeriod(intent.charge.period) : ROUTES.rent,
+      href: ROUTES.rentVerify(intent.id),
     });
   }
 
@@ -1445,7 +1447,7 @@ function buildActivity(ctx: Ctx): ActivityModel {
         "Awaiting verification",
         whenLabel(moment, today),
       ]),
-      href: intent.charge?.period ? ROUTES.rentPeriod(intent.charge.period) : ROUTES.rent,
+      href: ROUTES.rentVerify(intent.id),
       moment,
     });
   }

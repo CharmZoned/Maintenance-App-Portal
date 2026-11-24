@@ -470,7 +470,8 @@ describe("needs your attention", () => {
     expect(verify).toMatchObject({
       title: "Verify $725 Zelle from Raj Patel",
       context: "Tenant · Maple Court 1B · 15 days late",
-      href: "/rent?period=2026-11",
+      // Opens the reported payment itself on the Rent page.
+      href: "/rent?verify=5",
     });
     expect(assign).toMatchObject({
       title: "Unassigned request: Hallway light out",
@@ -985,7 +986,7 @@ describe("every link is a route the portal has", () => {
       model.listings.href,
     ].filter((href): href is string => Boolean(href));
     const route =
-      /^\/(maintenance(\/\d+)?|rent(\?period=\d{4}-\d{2})?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=wo:\d+)?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
+      /^\/(maintenance(\/\d+)?|rent(\?(period=\d{4}-\d{2}|verify=\d+))?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=wo:\d+)?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
     for (const href of hrefs) expect(href).toMatch(route);
   });
 });
