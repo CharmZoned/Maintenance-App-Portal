@@ -64,8 +64,8 @@ export function LandlordPropertyPage({ id, navigate }: { id: number; navigate: (
         const nextProperty = await getProperty(id);
         const nextUnits = await listUnits(id);
         const [nextLeases, nextCharges, nextOrders, nextDocs] = await Promise.all([
-          listLeases().catch(() => [] as Lease[]),
-          listCharges(currentPeriod()).catch(() => [] as RentCharge[]),
+          listLeases(),
+          listCharges(currentPeriod()),
           listWorkOrders({ property_id: id, skip_staff_notes: true }),
           listPropertyDocuments({ property_id: id }),
         ]);
