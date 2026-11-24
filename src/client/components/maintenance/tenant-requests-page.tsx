@@ -21,6 +21,11 @@ import {
   toRequestStatus,
   unitPropertyLabel,
 } from "@/lib/request-status";
+import {
+  isReportedByOther,
+  tenantReporterLabel,
+  useRequestReporterNames,
+} from "@/lib/request-reporters";
 import type { TenantHomeContext, WorkOrder } from "@/types";
 import { TenantSubmitDialog } from "./tenant-submit-dialog";
 import { TenantRequestDetailPanel } from "./tenant-request-detail-panel";
@@ -208,6 +213,8 @@ export function TenantRequestsPage({
   }, [filtered, selectedId]);
 
   const selected = filtered.find((o) => o.id === selectedId) ?? null;
+  /** Landlord display names for landlord-filed requests on this unit (D3). */
+  const reporterNames = useRequestReporterNames(orders);
   const noUnit = home != null && home.unit_id == null;
   const placeLabel = unitPropertyLabel(home?.unit_label, home?.property_name);
   const go = navigate ?? (() => undefined);
@@ -233,7 +240,7 @@ export function TenantRequestsPage({
                 Requests
               </h2>
               <p className="mt-1 text-sm text-muted-foreground md:hidden">
-                Track the repairs you submitted for your unit.
+                Track repairs for your unit.
               </p>
               <p className="mt-1 hidden text-sm text-muted-foreground md:block">
                 Track repairs and stay in touch with the people helping.
@@ -290,7 +297,7 @@ export function TenantRequestsPage({
                 Your requests
               </h3>
               <p className="mt-1 text-sm text-muted-foreground">
-                Requests you submitted for your unit.
+                Requests for your unit, from you or your landlord.
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">
@@ -336,10 +343,7 @@ export function TenantRequestsPage({
                   {filtered.map((w) => {
                     const status = toRequestStatus(w);
                     const selectedRow = w.id === selectedId;
-                    const reporter =
-                      [w.tenant_first_name, w.tenant_last_name]
-                        .filter(Boolean)
-                        .join(" ") || "You";
+                    const reporter = tenantReporterLabel(w, reporterNames.get(w.id));
                     const when = formatActivityStamp(w.created_at);
                     const next = requestNextStep(w);
                     return (
@@ -393,7 +397,8 @@ export function TenantRequestsPage({
               )}
 
               <p className="mt-6 text-sm text-muted-foreground">
-                Only requests you submitted appear here.
+                This list shows requests you submitted and repairs your landlord
+                reported for your unit.
                 {placeLabel && placeLabel !== "Your home" ? (
                   <span className="sr-only"> ({placeLabel})</span>
                 ) : null}
@@ -415,6 +420,11 @@ export function TenantRequestsPage({
                   key={selected.id}
                   order={selected}
                   navigate={go}
+                  reporterName={
+                    isReportedByOther(selected)
+                      ? (reporterNames.get(selected.id) ?? null)
+                      : null
+                  }
                   compact
                   onOpenFullDetail={() => openFullDetail(selected)}
                 />
