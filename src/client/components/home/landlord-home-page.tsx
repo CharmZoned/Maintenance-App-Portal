@@ -33,7 +33,7 @@ import {
   type LandlordDocumentRowModel,
 } from "@/lib/landlord-documents";
 import { billedSpend, billedSpendText, billedYearStart } from "@/lib/billed-spend";
-import { formatMessageTime, threadsFromWorkOrders } from "@/lib/messages";
+import { formatMessageTime, officeMessageHref, threadsFromWorkOrders } from "@/lib/messages";
 import { isOpenRequest, requestNextStep, toRequestStatus } from "@/lib/request-status";
 import { daysBetween, formatMoney, toIsoDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -419,7 +419,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
   };
 
   const greeting = greetingTitle(now, name);
-  const onMessage = () => navigate("/messages");
+  const onMessage = () => navigate(officeMessageHref());
   const unitCount = properties.reduce((sum, property) => sum + (property.unit_count ?? 0), 0);
 
   let body: ReactNode;
@@ -590,7 +590,7 @@ export function ReadyHome({
 }) {
   return (
     <div className="flex flex-col gap-6">
-      <HomeIntro greeting={model.greeting} subtitle={model.subtitle} onMessage={() => navigate("/messages")} />
+      <HomeIntro greeting={model.greeting} subtitle={model.subtitle} onMessage={() => navigate(officeMessageHref())} />
       <ul aria-label="Portfolio" className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {model.kpis.map((tile) => (
           <li key={tile.id} className="min-w-0">
@@ -642,7 +642,7 @@ export function ReadyHome({
             navigate={navigate}
             onRetry={onRetry}
           />
-          <SupportCard className="order-7 md:order-6 xl:order-none" onMessage={() => navigate("/messages")} />
+          <SupportCard className="order-7 md:order-6 xl:order-none" onMessage={() => navigate(officeMessageHref())} />
         </div>
       </div>
     </div>
@@ -728,7 +728,7 @@ function AttentionCard({
           <div className="min-w-0">
             <p className="lg-body-medium text-foreground">Nothing needs you right now.</p>
             <p className="lg-caption text-muted-foreground">
-              Late rent, leases ending soon and anything waiting on you will show up here.
+              Urgent repairs, late rent, leases ending soon and anything waiting on you will show up here.
             </p>
           </div>
         </div>
@@ -1264,6 +1264,12 @@ function rankAttention(input: {
   }
 
   for (const order of input.orders ?? []) {
+    if (!isOpenRequest(order)) continue;
+    const urgent = urgentAttention(order);
+    if (urgent) {
+      items.push(urgent);
+      continue;
+    }
     if (order.status !== "on_hold") continue;
     const follow = order.next_follow_up_date
       ? new Date(`${dayKey(order.next_follow_up_date)}T00:00:00`).toLocaleDateString(undefined, {
@@ -1305,6 +1311,31 @@ function rankAttention(input: {
   }
 
   return items.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, ATTENTION_CAP);
+}
+
+/**
+ * An open Emergency or High-priority request on the owner's property, linking
+ * to the request. Emergency outranks everything; High sits just under late
+ * rent. It replaces the plain on-hold line for the same request.
+ */
+function urgentAttention(order: WorkOrder): AttentionItem | null {
+  const emergency = order.priority === "urgent";
+  if (!emergency && order.priority !== "high") return null;
+  const created = Date.parse(order.created_at);
+  const unit = order.unit_name?.trim();
+  return {
+    kind: "link",
+    id: `priority-${order.id}`,
+    // The band sets the rank; newer requests come first within it.
+    score: (emergency ? 3000 : 900) + (Number.isFinite(created) ? created / 1e13 : 0),
+    tone: "warning",
+    icon: "alert",
+    title: `${emergency ? "Emergency" : "High priority"} · ${order.title}`,
+    context: [requestLabel(order), order.property_name?.trim(), unit ? `Unit ${unit}` : null, toRequestStatus(order)]
+      .filter(Boolean)
+      .join(" · "),
+    href: `/maintenance/${order.id}`,
+  };
 }
 
 function vacantItems(

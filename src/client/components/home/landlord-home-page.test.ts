@@ -330,7 +330,7 @@ describe("buildReadyHome", () => {
 
     const html = visibleText(renderReady(model));
     expect(html).toContain("Nothing needs you right now.");
-    expect(html).toContain("Late rent, leases ending soon and anything waiting on you will show up here.");
+    expect(html).toContain("Urgent repairs, late rent, leases ending soon and anything waiting on you will show up here.");
     expect(html).toContain("All clear");
     expect(html).toContain("No payments awaiting verification");
     expect(html).toContain("The rent roll isn't in this portal yet.");
@@ -510,7 +510,7 @@ describe("landlord home review fixes", () => {
   });
 });
 
-describe("landlord home: billed spend", () => {
+describe("landlord home: billed spend and urgent requests", () => {
   const base = {
     now,
     name: "Lena",
@@ -543,5 +543,24 @@ describe("landlord home: billed spend", () => {
     const model = buildReadyHome({ ...base, orders: [], billed: null });
     expect(model.maintenance.billedLine).toBeNull();
     expect(visibleText(renderReady(model))).toContain("Billed amounts couldn't be loaded.");
+  });
+
+  it("puts open Emergency and High requests in Needs your attention, linked to the request", () => {
+    const model = buildReadyHome({
+      ...base,
+      orders: [
+        order({ id: 6, title: "Outlet sparks", status: "open", priority: "high", created_at: "2026-11-15T08:00:00", property_name: "Maple Court", unit_name: "2B", request_number: "MR-001006" }),
+        order({ id: 7, title: "Gas smell", status: "on_hold", priority: "urgent", created_at: "2026-11-14T08:00:00", property_name: "Maple Court" }),
+        order({ id: 8, title: "Done already", status: "closed", priority: "urgent", created_at: "2026-11-14T08:00:00" }),
+        order({ id: 9, title: "Squeaky door", status: "open", priority: "normal", created_at: "2026-11-14T08:00:00" }),
+      ],
+      charges: [charge({ id: 10, status: "overdue", amount: 725, amount_paid: 0, due_date: "2026-11-01", unit_name: "1B" })],
+    });
+    const links = model.attention.flatMap((item) => (item.kind === "link" ? [item] : []));
+    expect(links.map((item) => item.id)).toEqual(["priority-7", "rent-10", "priority-6"]);
+    expect(links[0]).toMatchObject({ title: "Emergency · Gas smell", href: "/maintenance/7" });
+    expect(links[0].context).toContain("On hold");
+    expect(links[2]).toMatchObject({ title: "High priority · Outlet sparks", href: "/maintenance/6" });
+    expect(links[2].context).toBe("#MR-001006 · Maple Court · Unit 2B · New");
   });
 });
