@@ -442,29 +442,50 @@ describe("LandlordHomePage states", () => {
 });
 
 describe("landlord home review fixes", () => {
-  it("counts an unread thread that sits past the three shown", () => {
-    const model = buildReadyHome({
+  it("shows the owner's office conversation with the shared unread count — not request rows", () => {
+    const base = {
       now,
       name: "Lena",
       properties: [maple],
-      orders: [
-        order({ id: 1, title: "Newest closed", status: "closed", created_at: "2026-11-16T08:00:00", property_id: 1 }),
-        order({ id: 2, title: "Second closed", status: "closed", created_at: "2026-11-15T08:00:00", property_id: 1 }),
-        order({ id: 3, title: "Third closed", status: "closed", created_at: "2026-11-14T08:00:00", property_id: 1 }),
-        order({ id: 4, title: "Older open", status: "open", created_at: "2026-11-04T08:00:00", property_id: 1 }),
-      ],
+      orders: [order({ id: 4, title: "Open request", status: "open" as const, created_at: "2026-11-04T08:00:00", property_id: 1 })],
       charges: [],
       leases: [],
       units: [],
       documents: [],
       pending: [],
       marketed: null,
+      userId: "u-lena",
+    };
+    const unread = buildReadyHome({
+      ...base,
+      inbox: [
+        {
+          key: "office:u-lena",
+          kind: "office",
+          threadUserId: "u-lena",
+          last: {
+            at: "2026-11-16T08:00:00Z",
+            body: "It was $120.",
+            authorRole: "admin",
+            authorUserId: "u-admin",
+            authorTenantId: null,
+            authorStaffId: null,
+          },
+          unread: true,
+        },
+      ],
     });
+    expect(unread.messages.unavailable).toBe(false);
+    expect(unread.messages.unread).toBe(1);
+    expect(unread.messages.threads).toMatchObject([
+      { id: "office:u-lena", name: "Landlord Gopher office", preview: "Landlord Gopher: It was $120.", unread: true },
+    ]);
+    // No per-property message counts: an owner's one conversation is with the office.
+    expect(unread.properties.every((property) => property.unread === 0)).toBe(true);
 
-    expect(model.messages.unavailable).toBe(false);
-    expect(model.messages.unread).toBe(1);
-    expect(model.messages.threads.map((thread) => thread.id)).toEqual(["wo:1", "wo:2", "wo:3"]);
-    expect(model.messages.threads.every((thread) => !thread.unread)).toBe(true);
+    const empty = buildReadyHome({ ...base, inbox: [] });
+    expect(empty.messages.unread).toBe(0);
+    expect(empty.messages.threads).toMatchObject([{ id: "office:u-lena", time: "", unread: false }]);
   });
 
   it("treats a failed request load as unavailable instead of an empty inbox", () => {

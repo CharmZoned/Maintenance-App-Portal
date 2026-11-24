@@ -34,7 +34,9 @@ import {
   type LandlordDocumentRowModel,
 } from "@/lib/landlord-documents";
 import { billedSpend, billedSpendText, billedYearStart } from "@/lib/billed-spend";
-import { formatMessageTime, officeMessageHref, threadsFromWorkOrders } from "@/lib/messages";
+import { countUnreadConversations, loadInbox, type InboxConversation } from "@/lib/inbox";
+import { formatMessageTime, officeMessageHref, portalInboxThreads } from "@/lib/messages";
+import { supabase } from "@/lib/supabase";
 import { isOpenRequest, requestNextStep, toRequestStatus } from "@/lib/request-status";
 import { daysBetween, formatMoney, toIsoDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -59,7 +61,9 @@ import {
  * TODO(data-gap): no support-contact record and no property photo column.
  * TODO(data-gap): no document-share event for this read-only role, so the
  * success banner (document shared) has nothing live to show.
- * TODO(data-gap): message rows are request threads, not a messages table.
+ * Messages: the owner's conversations are their office thread (request
+ * messaging with owners is out of scope), read with the shared inbox rule —
+ * so this card, the Messages badge and the Messages page show one number.
  */
 
 const LEASE_SOON_DAYS = 60;
@@ -171,6 +175,8 @@ type Bundle = {
   documents: PropertyDocument[] | null;
   pending: PendingPayment[] | null;
   marketed: Map<number, boolean> | null;
+  inbox: InboxConversation[] | null;
+  userId: string | null;
 };
 
 export function greetingTitle(now: Date, name: string | null): string {
@@ -207,6 +213,9 @@ export function buildReadyHome(input: {
   documents: PropertyDocument[] | null;
   pending: PendingPayment[] | null;
   marketed: Map<number, boolean> | null;
+  /** The owner's inbox (lib/inbox.ts); null or absent = it could not be loaded. */
+  inbox?: InboxConversation[] | null;
+  userId?: string | null;
 }): ReadyHomeModel {
   const ids = new Set(input.properties.map((property) => property.id));
   const orders = owned(input.orders, ids);
@@ -228,7 +237,6 @@ export function buildReadyHome(input: {
   const nameDetail =
     names.length <= 2 ? names.join(" · ") : `${names.slice(0, 2).join(" · ")} · +${names.length - 2}`;
 
-  const unreadByProperty = unreadCounts(orders ?? []);
   const lateByProperty = lateCounts(charges ?? [], input.now);
 
   return {
@@ -279,7 +287,8 @@ export function buildReadyHome(input: {
       propertyCard(property, {
         open: (orders ?? []).filter((order) => order.property_id === property.id && isOpenRequest(order)).length,
         late: lateByProperty.get(property.id) ?? 0,
-        unread: unreadByProperty.get(property.id) ?? 0,
+        // Owners have no per-property conversations (their one thread is with the office).
+        unread: 0,
         ordersKnown: orders != null,
         chargesKnown: charges != null,
       }),
@@ -291,7 +300,7 @@ export function buildReadyHome(input: {
       pending,
     }),
     maintenance: maintenanceCard(orders, billed, input.now),
-    messages: messageCard(orders, input.now),
+    messages: messageCard(input.inbox ?? null, input.userId ?? null, input.now),
     activity:
       orders == null
         ? { unavailable: true, days: [] }
@@ -339,8 +348,12 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       // Open requests cover counts, attention, maintenance, and messages.
       // A short closed slice is enough for recent completions in activity.
       // Ended leases and the full unit graph are not used by these cards.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const userId = session?.user.id ?? null;
       // Billed spend needs every request completed this year, with its price.
-      const [openOrders, recentClosed, billed, charges, leases, documents, pending] = await Promise.all([
+      const [openOrders, recentClosed, billed, charges, leases, documents, pending, inbox] = await Promise.all([
         listWorkOrders({ open_only: true, skip_staff_notes: true }).then(
           (rows) => rows,
           () => null,
@@ -366,9 +379,15 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
           () => null,
         ),
         loadPendingPayments(),
+        loadInbox({ role: "landlord", userId }).then(
+          (rows) => rows,
+          () => null,
+        ),
       ]);
       if (cancelled) return;
       setBundle({
+        inbox,
+        userId,
         orders: openOrders == null ? null : [...openOrders, ...(recentClosed ?? [])],
         billed,
         charges,
@@ -458,6 +477,8 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
       documents: bundle.documents,
       pending: bundle.pending,
       marketed: bundle.marketed,
+      inbox: bundle.inbox,
+      userId: bundle.userId,
     });
     body = (
       <ReadyHome
@@ -1516,30 +1537,26 @@ function maintenanceCard(
   };
 }
 
-function messageCard(orders: WorkOrder[] | null, now: Date): ReadyHomeModel["messages"] {
-  if (orders == null) return { unavailable: true, unread: 0, threads: [] };
-  const byId = new Map(orders.map((order) => [order.id, order]));
-  const all = threadsFromWorkOrders(orders, { now });
-  const threads = all.slice(0, MESSAGE_CAP);
+function messageCard(
+  inbox: InboxConversation[] | null,
+  userId: string | null,
+  now: Date,
+): ReadyHomeModel["messages"] {
+  if (inbox == null) return { unavailable: true, unread: 0, threads: [] };
+  const threads = portalInboxThreads({ viewer: { role: "landlord", userId }, workOrders: [], inbox });
   return {
     unavailable: false,
-    unread: all.filter((thread) => thread.unread).length,
-    threads: threads.map((thread) => {
-      const order = thread.requestId != null ? byId.get(thread.requestId) : undefined;
-      const tenant = order ? person(order.tenant_first_name, order.tenant_last_name) : "";
-      const place = order?.unit_name
-        ? `Unit ${order.unit_name}`
-        : order?.property_name || "";
-      return {
-        id: thread.id,
-        name: [tenant || order?.title || thread.title, place].filter(Boolean).join(" · "),
-        preview: thread.preview,
-        time: formatMessageTime(thread.updatedAt, now),
-        unread: thread.unread,
-        href: `/messages?thread=${encodeURIComponent(thread.id)}`,
-        icon: tenant ? "user" : "wrench",
-      };
-    }),
+    // The shared count: the same number as the Messages badge and page.
+    unread: countUnreadConversations(inbox),
+    threads: threads.slice(0, MESSAGE_CAP).map((thread) => ({
+      id: thread.id,
+      name: thread.title,
+      preview: thread.preview,
+      time: formatMessageTime(thread.updatedAt, now),
+      unread: thread.unread,
+      href: `/messages?thread=${encodeURIComponent(thread.id)}`,
+      icon: "user",
+    })),
   };
 }
 
@@ -1599,18 +1616,6 @@ function groupActivity(items: ActivityItemModel[], now: Date): { label: string; 
     else groups.push({ label, items: [item] });
   }
   return groups;
-}
-
-function unreadCounts(orders: WorkOrder[]): Map<number, number> {
-  const byId = new Map(orders.map((order) => [order.id, order]));
-  const counts = new Map<number, number>();
-  for (const thread of threadsFromWorkOrders(orders)) {
-    if (!thread.unread || thread.requestId == null) continue;
-    const propertyId = byId.get(thread.requestId)?.property_id;
-    if (propertyId == null) continue;
-    counts.set(propertyId, (counts.get(propertyId) ?? 0) + 1);
-  }
-  return counts;
 }
 
 function lateCounts(charges: RentCharge[], now: Date): Map<number, number> {

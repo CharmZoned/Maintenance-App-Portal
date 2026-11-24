@@ -9,6 +9,7 @@ import {
   announceInboxChanged,
   countUnreadConversations,
   createInboxReadMarker,
+  INBOX_CHANGED_EVENT,
   listOfficeMessages,
   loadAdminInbox,
   officeKey,
@@ -29,6 +30,7 @@ import type { CommentVisibility, WorkOrder } from "@/types";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
 import { MessageThreadRow } from "./message-thread-row";
+import { ConversationUnavailable } from "./conversation-unavailable";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -81,6 +83,8 @@ export function AdminMessagesPage({
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [mobileThread, setMobileThread] = useState(false);
+  /** The URL names a conversation that is not in the inbox. */
+  const [unavailable, setUnavailable] = useState(false);
   const [commentVisibility, setCommentVisibility] = useState<CommentVisibility>("internal");
   const [threadReloadKey, setThreadReloadKey] = useState(0);
   const [myUserId, setMyUserId] = useState<string | null>(null);
@@ -131,6 +135,13 @@ export function AdminMessagesPage({
   const inboxRef = useRef(inbox);
   inboxRef.current = inbox;
 
+  // Reads saved elsewhere (the bell's "Mark all read") refresh the rows quietly.
+  useEffect(() => {
+    const onChange = () => void loadAdminInbox().then(setInbox, () => undefined);
+    window.addEventListener(INBOX_CHANGED_EVENT, onChange);
+    return () => window.removeEventListener(INBOX_CHANGED_EVENT, onChange);
+  }, []);
+
   /**
    * Records conversations as read for this admin, then lets the rail badge
    * catch up. It decides when to write (lib/inbox.ts), so re-renders of this
@@ -151,17 +162,21 @@ export function AdminMessagesPage({
     const thread = params.get("thread");
     if (thread && threads.some((t) => t.id === thread)) {
       setSelectedId(thread);
+      setUnavailable(false);
       setMobileThread(true);
       // Once per id: this effect re-runs whenever `threads` changes.
       reads.follow(thread);
       return;
     }
     // No thread, or one that isn't in the list: show nothing open rather than
-    // leaving the previous conversation on screen under a different URL.
+    // leaving the previous conversation on screen under a different URL. A
+    // named thread that is not in the inbox says so (once the list is loaded).
     reads.follow(null);
     setSelectedId(null);
-    setMobileThread(false);
-  }, [search, threads, reads]);
+    const missing = Boolean(thread) && state === "ready";
+    setUnavailable(missing);
+    setMobileThread(missing);
+  }, [search, threads, reads, state]);
 
   const selected: MessageThread | undefined = threads.find((t) => t.id === selectedId);
   const selectedRequestId = selected?.kind === "request" ? (selected.requestId ?? null) : null;
@@ -244,7 +259,9 @@ export function AdminMessagesPage({
 
   function closeMobileThread() {
     setMobileThread(false);
+    setUnavailable(false);
     if (replace) replace("/messages");
+    else navigate("/messages");
   }
 
   /** The office just wrote: it is now the latest message, so the conversation is answered. */
@@ -318,7 +335,11 @@ export function AdminMessagesPage({
   const threadPane = selected ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-[100px] shrink-0 items-center gap-2 border-b border-border px-4 md:px-5">
-        <button type="button" className="text-sm font-medium text-foreground md:hidden" onClick={closeMobileThread}>
+        <button
+          type="button"
+          className="-ml-2 inline-flex min-h-11 min-w-11 items-center px-2 text-sm font-medium text-foreground md:hidden"
+          onClick={closeMobileThread}
+        >
           ← Back
         </button>
         <div className="min-w-0 flex-1">
@@ -382,6 +403,10 @@ export function AdminMessagesPage({
         onSend={send}
       />
     </div>
+  ) : unavailable ? (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center">
+      <ConversationUnavailable onBack={closeMobileThread} />
+    </div>
   ) : (
     <div className="hidden flex-1 items-center justify-center md:flex">
       <EmptyState message="Select a conversation to read and reply." />
@@ -419,7 +444,7 @@ export function AdminMessagesPage({
         <div className="-mx-[var(--page-gutter,1.5rem)] -mb-6 -mt-2 flex min-h-[calc(100vh-var(--page-content-top,8rem))] border-t border-border md:min-h-[calc(100vh-var(--page-content-top,7rem))]">
           <div
             className={
-              mobileThread && selected
+              mobileThread && (selected || unavailable)
                 ? "hidden w-full md:block md:w-[420px] md:shrink-0 md:border-r md:border-border"
                 : "w-full md:w-[420px] md:shrink-0 md:border-r md:border-border"
             }
@@ -428,7 +453,13 @@ export function AdminMessagesPage({
               <MessageThreadRow key={t.id} thread={t} selected={t.id === selectedId} onSelect={() => openThread(t)} />
             ))}
           </div>
-          <div className={mobileThread && selected ? "flex min-w-0 flex-1 flex-col" : "hidden min-w-0 flex-1 flex-col md:flex"}>
+          <div
+            className={
+              mobileThread && (selected || unavailable)
+                ? "flex min-w-0 flex-1 flex-col"
+                : "hidden min-w-0 flex-1 flex-col md:flex"
+            }
+          >
             {threadPane}
           </div>
         </div>

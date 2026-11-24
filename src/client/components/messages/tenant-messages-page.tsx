@@ -1,41 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { Wrench } from "lucide-react";
-import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
 import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
+import { ConversationUnavailable } from "./conversation-unavailable";
+import { usePortalInbox } from "./use-portal-inbox";
 import { cn } from "@/lib/utils";
-import {
-  commentSenderLabel,
-  formatMessageTime,
-  mergeMessageThreads,
-  officeDraftFromSearch,
-  officeMessageSenderLabel,
-  officeThreadId,
-  parseOfficeThreadId,
-  parseWorkOrderThreadId,
-  resolveStaffMessagesDeepLink,
-  threadsFromOfficeSummaries,
-  threadsFromWorkOrders,
-  workOrderThreadId,
-  type MessageThread,
-} from "@/lib/messages";
-import type { OfficeMessage } from "@/lib/data";
+import { commentSenderLabel, formatMessageTime, officeMessageSenderLabel } from "@/lib/messages";
 import { messagesLoadScenarioFromSearch } from "@/lib/tenant-messages-mock";
-import { supabase } from "@/lib/supabase";
-import type { MaintenanceComment, WorkOrder } from "@/types";
-
-type LoadState = "loading" | "ready" | "error";
 
 /**
  * Tenant Messages — Figma M/T/D inbox + conversation, backed by:
  * - OfficeMessages (one direct thread with the Landlord Gopher office)
- * - MaintenanceRequestComments on the tenant's work orders
+ * - MaintenanceRequestComments on the tenant's requests (tenant-visible only)
  *
- * Deep links: `?thread=wo:<id>` / `?thread=office:<uuid>` / `?request=<pk>`
- * Demo: `?demo=empty|error` still exercises empty/error UI without a backend miss.
+ * Read state, deep links and sending live in `usePortalInbox`, shared with the
+ * landlord and technician inbox, so "unread" means the same everywhere.
+ *
+ * Deep links: `?thread=wo:<id>` / `?thread=office:<uuid>` / `?request=<pk>` /
+ * `?office=me&about=…`. Demo: `?demo=empty|error` exercises empty/error UI.
  */
 export function TenantMessagesPage({
   search = "",
@@ -46,341 +31,17 @@ export function TenantMessagesPage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const {
-    listWorkOrders,
-    listMaintenanceComments,
-    addMaintenanceComment,
-    listOfficeThreads,
-    listOfficeMessages,
-    sendOfficeMessage,
-    markOfficeThreadRead,
-    setError,
-    setNotice,
-  } = useApp();
+  const scenario = useMemo(() => messagesLoadScenarioFromSearch(search), [search]);
+  const inbox = usePortalInbox({
+    role: "tenant",
+    search,
+    navigate,
+    replace,
+    scenario: scenario === "empty" || scenario === "error" ? scenario : null,
+  });
+  const { state, threads: conversations, unreadCount: unread, selected, selectedRequestId, unavailable } = inbox;
 
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [officeSummaries, setOfficeSummaries] = useState<
-    Awaited<ReturnType<typeof listOfficeThreads>>
-  >([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [state, setState] = useState<LoadState>("loading");
-  const [error, setLocalError] = useState<string | null>(null);
-  const [openedIds, setOpenedIds] = useState<Set<string>>(() => new Set());
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  /** Soft-open rows for `?thread=wo:` / own `office:` not yet in the loaded inbox. */
-  const [extraThreads, setExtraThreads] = useState<MessageThread[]>([]);
-  const [mobileThread, setMobileThread] = useState(false);
-  const [deepLinkMiss, setDeepLinkMiss] = useState<string | null>(null);
-  const [comments, setComments] = useState<MaintenanceComment[]>([]);
-  const [officeMessages, setOfficeMessages] = useState<OfficeMessage[]>([]);
-  const [threadLoading, setThreadLoading] = useState(false);
-  const [threadError, setThreadError] = useState<string | null>(null);
-  const [threadReloadKey, setThreadReloadKey] = useState(0);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  const loadScenario = useMemo(() => messagesLoadScenarioFromSearch(search), [search]);
-
-  const load = useCallback(async () => {
-    setState("loading");
-    setLocalError(null);
-    try {
-      if (loadScenario === "error") {
-        throw new Error("Couldn’t load messages right now. Try again.");
-      }
-      if (loadScenario === "empty") {
-        const { data: auth } = await supabase.auth.getUser();
-        setCurrentUserId(auth.user?.id ?? null);
-        setWorkOrders([]);
-        setOfficeSummaries([]);
-        setState("ready");
-        return;
-      }
-      const [{ data: auth }, list, office] = await Promise.all([
-        supabase.auth.getUser(),
-        listWorkOrders(),
-        listOfficeThreads(),
-      ]);
-      setCurrentUserId(auth.user?.id ?? null);
-      setWorkOrders(list);
-      setOfficeSummaries(office);
-      setState("ready");
-    } catch (err) {
-      setLocalError((err as Error).message);
-      setState("error");
-      setError((err as Error).message);
-    }
-  }, [listWorkOrders, listOfficeThreads, setError, loadScenario]);
-
-  useEffect(() => {
-    void load();
-  }, [load, reloadKey]);
-
-  const conversations = useMemo(() => {
-    if (loadScenario === "empty") return [];
-    const requestThreads = threadsFromWorkOrders(workOrders, { openedIds });
-    const direct = threadsFromOfficeSummaries(officeSummaries, {
-      ensureOwnThread: currentUserId
-        ? { userId: currentUserId, title: "Landlord Gopher office" }
-        : undefined,
-    });
-    // Prefer office title for the tenant's own thread.
-    const merged = mergeMessageThreads(
-      direct.map((t) =>
-        t.threadUserId === currentUserId
-          ? { ...t, title: "Landlord Gopher office" }
-          : t,
-      ),
-      requestThreads,
-    );
-    const known = new Set(merged.map((t) => t.id));
-    const extras = extraThreads.filter((t) => !known.has(t.id));
-    return extras.length === 0 ? merged : mergeMessageThreads(merged, extras);
-  }, [workOrders, officeSummaries, openedIds, currentUserId, loadScenario, extraThreads]);
-
-  const unread = useMemo(
-    () => conversations.filter((c) => c.unread).length,
-    [conversations],
-  );
-
-  useEffect(() => {
-    if (state !== "ready") return;
-    const link = resolveStaffMessagesDeepLink(search, conversations, {
-      currentUserId,
-      isAdmin: false,
-    });
-
-    if (link.kind === "thread") {
-      const officeUser = parseOfficeThreadId(link.threadId);
-      if (
-        officeUser &&
-        currentUserId &&
-        officeUser === currentUserId &&
-        !conversations.some((t) => t.id === link.threadId)
-      ) {
-        setExtraThreads((prev) => {
-          if (prev.some((t) => t.id === link.threadId)) return prev;
-          return [
-            ...prev,
-            {
-              id: link.threadId,
-              kind: "direct",
-              title: "Landlord Gopher office",
-              preview: "Message the office — no messages yet.",
-              updatedAt: new Date().toISOString(),
-              unread: false,
-              threadUserId: officeUser,
-            },
-          ];
-        });
-      }
-      setSelectedId(link.threadId);
-      setOpenedIds((prev) => {
-        if (prev.has(link.threadId)) return prev;
-        return new Set(prev).add(link.threadId);
-      });
-      setMobileThread(true);
-      setDeepLinkMiss(null);
-      return;
-    }
-
-    if (link.kind === "request") {
-      if (!link.known) {
-        const id = workOrderThreadId(link.requestId);
-        setExtraThreads((prev) => {
-          if (prev.some((t) => t.id === id)) return prev;
-          return [
-            ...prev,
-            {
-              id,
-              kind: "request",
-              title: `Request ${link.requestId}`,
-              preview: "No messages yet.",
-              updatedAt: new Date().toISOString(),
-              unread: false,
-              requestId: link.requestId,
-            },
-          ];
-        });
-      }
-      setSelectedId(link.threadId);
-      setOpenedIds((prev) => {
-        if (prev.has(link.threadId)) return prev;
-        return new Set(prev).add(link.threadId);
-      });
-      setMobileThread(true);
-      setDeepLinkMiss(null);
-      return;
-    }
-
-    if (link.kind === "not-found") {
-      setSelectedId(null);
-      setMobileThread(true);
-      setDeepLinkMiss(link.raw || "unknown");
-      return;
-    }
-
-    setDeepLinkMiss(null);
-    setSelectedId((prev) => prev ?? conversations[0]?.id ?? null);
-    setMobileThread(false);
-  }, [search, conversations, state, currentUserId]);
-
-  const selected: MessageThread | undefined =
-    conversations.find((c) => c.id === selectedId) ??
-    extraThreads.find((c) => c.id === selectedId);
-  const selectedRequestId =
-    selected?.kind === "request"
-      ? (selected.requestId ?? null)
-      : selectedId
-        ? parseWorkOrderThreadId(selectedId)
-        : null;
-  const selectedThreadUserId =
-    selected?.kind === "direct"
-      ? (selected.threadUserId ?? parseOfficeThreadId(selected.id))
-      : selectedId
-        ? (() => {
-            const uid = parseOfficeThreadId(selectedId);
-            return uid && currentUserId && uid === currentUserId ? uid : null;
-          })()
-        : null;
-
-  const selectedRequestIdRef = useRef(selectedRequestId);
-  selectedRequestIdRef.current = selectedRequestId;
-  const selectedThreadUserIdRef = useRef(selectedThreadUserId);
-  selectedThreadUserIdRef.current = selectedThreadUserId;
-
-  useEffect(() => {
-    setComments([]);
-    setOfficeMessages([]);
-    setThreadError(null);
-
-    if (selectedRequestId != null) {
-      let cancelled = false;
-      setThreadLoading(true);
-      void listMaintenanceComments(selectedRequestId)
-        .then((rows) => {
-          if (cancelled) return;
-          setComments(rows.filter((r) => r.visibility === "tenant_visible"));
-          setThreadError(null);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setComments([]);
-          setThreadError((err as Error).message);
-          setError((err as Error).message);
-        })
-        .finally(() => {
-          if (!cancelled) setThreadLoading(false);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (selectedThreadUserId) {
-      let cancelled = false;
-      setThreadLoading(true);
-      void listOfficeMessages(selectedThreadUserId)
-        .then(async (rows) => {
-          if (cancelled) return;
-          setOfficeMessages(rows);
-          setThreadError(null);
-          try {
-            await markOfficeThreadRead(selectedThreadUserId);
-            setOfficeSummaries((prev) =>
-              prev.map((t) =>
-                t.thread_user_id === selectedThreadUserId ? { ...t, unread: false } : t,
-              ),
-            );
-          } catch (err) {
-            setNotice(
-              `Opened the conversation, but couldn’t mark it read: ${(err as Error).message}`,
-            );
-          }
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setOfficeMessages([]);
-          setThreadError((err as Error).message);
-          setError((err as Error).message);
-        })
-        .finally(() => {
-          if (!cancelled) setThreadLoading(false);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setThreadLoading(false);
-  }, [
-    selectedRequestId,
-    selectedThreadUserId,
-    threadReloadKey,
-    listMaintenanceComments,
-    listOfficeMessages,
-    markOfficeThreadRead,
-    setError,
-    setNotice,
-  ]);
-
-  const showMobileConversation = Boolean(mobileThread && (selected || deepLinkMiss));
-
-  function openThread(conversation: MessageThread) {
-    setSelectedId(conversation.id);
-    setOpenedIds((prev) => new Set(prev).add(conversation.id));
-    setMobileThread(true);
-    setDeepLinkMiss(null);
-    if (replace) {
-      replace(`/messages?thread=${encodeURIComponent(conversation.id)}`);
-    }
-  }
-
-  function closeMobileThread() {
-    setMobileThread(false);
-    setDeepLinkMiss(null);
-    if (replace) replace("/messages");
-  }
-
-  async function sendOnRequest(body: string) {
-    if (selectedRequestId == null) return;
-    const requestId = selectedRequestId;
-    try {
-      const created = await addMaintenanceComment(requestId, body, "tenant_visible");
-      if (selectedRequestIdRef.current !== requestId) return;
-      setComments((prev) => [...prev, created]);
-    } catch (err) {
-      setError((err as Error).message);
-      throw err;
-    }
-  }
-
-  async function sendOnOffice(body: string) {
-    if (!selectedThreadUserId) return;
-    const threadUserId = selectedThreadUserId;
-    try {
-      const created = await sendOfficeMessage(threadUserId, body);
-      if (selectedThreadUserIdRef.current !== threadUserId) return;
-      setOfficeMessages((prev) => [...prev, created]);
-      setOfficeSummaries((prev) => {
-        const rest = prev.filter((t) => t.thread_user_id !== threadUserId);
-        return [
-          {
-            thread_user_id: threadUserId,
-            last_message_at: created.created_at,
-            last_message_body: created.body,
-            last_author_role: created.author_role,
-            last_author_user_id: created.author_user_id,
-            unread: false,
-          },
-          ...rest,
-        ];
-      });
-      void markOfficeThreadRead(threadUserId).catch(() => undefined);
-    } catch (err) {
-      setError((err as Error).message);
-      throw err;
-    }
-  }
+  const showMobileConversation = Boolean(inbox.mobileThread && (selected || unavailable));
 
   const hero = (
     <header className="space-y-2">
@@ -390,9 +51,7 @@ export function TenantMessagesPage({
       <h2 className="text-[2.125rem] font-semibold leading-[2.625rem] tracking-[-0.01em] text-foreground">
         Messages
       </h2>
-      <p className="text-sm text-muted-foreground md:hidden">
-        Your home. Your conversations.
-      </p>
+      <p className="text-sm text-muted-foreground md:hidden">Your home. Your conversations.</p>
       <p className="hidden text-sm text-muted-foreground md:block">
         Conversations for your home and your maintenance requests.
       </p>
@@ -403,25 +62,13 @@ export function TenantMessagesPage({
     <header className="space-y-3">
       <button
         type="button"
-        onClick={closeMobileThread}
-        className="text-sm font-medium text-brand-text hover:underline"
+        onClick={inbox.closeThread}
+        className="-ml-2 inline-flex min-h-11 items-center px-2 text-sm font-medium text-brand-text hover:underline"
       >
         ← Back to inbox
       </button>
       <h2 className="text-2xl font-semibold leading-8 text-foreground">Messages</h2>
     </header>
-  );
-
-  const notFoundEmpty = (
-    <EmptyState
-      message={
-        deepLinkMiss
-          ? `No conversation for “${deepLinkMiss}”. Pick a thread from your inbox, or open the request from Requests.`
-          : "Select a conversation to read and reply."
-      }
-      actionLabel={deepLinkMiss ? "Back to requests" : undefined}
-      onAction={deepLinkMiss ? () => navigate("/maintenance") : undefined}
-    />
   );
 
   const inboxCard = (
@@ -437,27 +84,23 @@ export function TenantMessagesPage({
       </div>
       <ul className="border-t border-border">
         {conversations.map((c) => {
-          const time = formatMessageTime(c.updatedAt);
+          // An empty thread has no message to date it by.
+          const time = c.empty ? "" : formatMessageTime(c.updatedAt);
+          const when = time ? `. ${time}` : "";
           return (
             <li key={c.id}>
               <button
                 type="button"
-                onClick={() => openThread(c)}
+                onClick={() => inbox.openThread(c)}
                 className={cn(
                   "flex min-h-[7.375rem] w-full items-center gap-3 border-b border-border px-4 py-3.5 text-left transition-colors",
-                  c.id === selectedId ? "bg-brand-tint" : "bg-card hover:bg-muted/50",
+                  c.id === selected?.id ? "bg-brand-tint" : "bg-card hover:bg-muted/50",
                 )}
-                aria-current={c.id === selectedId ? "true" : undefined}
-                aria-label={
-                  c.unread
-                    ? `${c.title}, unread. ${c.preview}. ${time}`
-                    : `${c.title}. ${c.preview}. ${time}`
-                }
+                aria-current={c.id === selected?.id ? "true" : undefined}
+                aria-label={c.unread ? `${c.title}, unread. ${c.preview}${when}` : `${c.title}. ${c.preview}${when}`}
               >
                 <div className="flex h-full w-2 shrink-0 items-center justify-center">
-                  {c.unread ? (
-                    <span className="size-2 rounded-full bg-brand" aria-hidden />
-                  ) : null}
+                  {c.unread ? <span className="size-2 rounded-full bg-brand" aria-hidden /> : null}
                 </div>
                 <div className="min-w-0 flex-1" aria-hidden>
                   <div className="flex items-center justify-between gap-2">
@@ -465,13 +108,25 @@ export function TenantMessagesPage({
                       {c.kind === "request" ? (
                         <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                       ) : null}
-                      <span className="truncate text-sm font-semibold text-foreground">
+                      <span
+                        className={cn(
+                          "truncate text-sm text-foreground",
+                          c.unread ? "font-semibold" : "font-medium",
+                        )}
+                      >
                         {c.title}
                       </span>
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+                    {time ? <span className="shrink-0 text-xs text-muted-foreground">{time}</span> : null}
                   </div>
-                  <p className="mt-1 truncate text-[13px] text-muted-foreground">{c.preview}</p>
+                  <p
+                    className={cn(
+                      "mt-1 truncate text-[13px]",
+                      c.empty ? "italic text-muted-foreground/80" : "text-muted-foreground",
+                    )}
+                  >
+                    {c.preview}
+                  </p>
                 </div>
               </button>
             </li>
@@ -491,27 +146,24 @@ export function TenantMessagesPage({
     "flex h-[min(32rem,calc(100dvh-12rem))] max-h-[calc(100dvh-12rem)] flex-col overflow-hidden rounded-lg border border-border bg-card";
 
   const isDirect = selected?.kind === "direct";
-  const threadBody = threadLoading ? (
+  const threadBody = inbox.threadLoading ? (
     <>
       <SkeletonRow />
       <SkeletonRow />
     </>
-  ) : threadError ? (
-    <ErrorRetry message={threadError} onRetry={() => setThreadReloadKey((k) => k + 1)} />
+  ) : inbox.threadError ? (
+    <ErrorRetry message={inbox.threadError} onRetry={inbox.retryThread} />
   ) : isDirect ? (
-    officeMessages.length === 0 ? (
+    inbox.officeMessages.length === 0 ? (
       <EmptyState message="No messages yet. Say hello to the office." />
     ) : (
-      officeMessages.map((m) => {
+      inbox.officeMessages.map((m) => {
         const { label, outgoing } = officeMessageSenderLabel(m, {
-          currentUserId,
+          currentUserId: inbox.viewer.userId,
           currentRole: "tenant",
         });
         return (
-          <div
-            key={m.id}
-            className={outgoing ? "flex justify-end" : "flex justify-start"}
-          >
+          <div key={m.id} className={outgoing ? "flex justify-end" : "flex justify-start"}>
             <MessageBubble
               sender={label}
               body={m.body}
@@ -522,16 +174,13 @@ export function TenantMessagesPage({
         );
       })
     )
-  ) : comments.length === 0 ? (
+  ) : inbox.comments.length === 0 ? (
     <EmptyState message="No messages on this request yet. Send the first update." />
   ) : (
-    comments.map((c) => {
+    inbox.comments.map((c) => {
       const { label, outgoing } = commentSenderLabel(c, { currentRole: "tenant" });
       return (
-        <div
-          key={c.id}
-          className={outgoing ? "flex justify-end" : "flex justify-start"}
-        >
+        <div key={c.id} className={outgoing ? "flex justify-end" : "flex justify-start"}>
           <MessageBubble
             sender={label}
             body={c.body}
@@ -543,70 +192,55 @@ export function TenantMessagesPage({
     })
   );
 
-  const conversationCard = selected ? (
-    <section
-      aria-label={`Conversation ${selected.title}`}
-      className={conversationPaneClass}
-    >
+  const conversationCard = unavailable ? (
+    <section className={cn(conversationPaneClass, "items-center justify-center")}>
+      <ConversationUnavailable onBack={inbox.closeThread} />
+    </section>
+  ) : selected ? (
+    <section aria-label={`Conversation ${selected.title}`} className={conversationPaneClass}>
       <div className="shrink-0 space-y-3 border-b border-border px-5 py-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
-            {selected.title}
-          </h3>
+          <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">{selected.title}</h3>
           {selectedRequestId != null ? (
             <Button
               type="button"
               variant="secondary"
               size="lg"
               className="min-h-11 w-full sm:w-auto sm:min-w-[10rem]"
-              onClick={() => navigate(`/maintenance?wo=${selectedRequestId}`)}
+              onClick={() => navigate(`/maintenance/${selectedRequestId}`)}
             >
               Open request
             </Button>
           ) : null}
         </div>
-        <div className="space-y-0.5">
-          <p className="text-xs text-muted-foreground">
-            {isDirect
-              ? "You · Landlord Gopher office"
-              : "You · assigned request members"}
-          </p>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          {isDirect ? "You · Landlord Gopher office" : "You · the office and your technician"}
+        </p>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
         {threadBody}
-        <p className="pt-2 text-xs text-muted-foreground">
-          Only members of this conversation can view or reply.
-        </p>
+        <p className="pt-2 text-xs text-muted-foreground">Only members of this conversation can view or reply.</p>
       </div>
       <div className="shrink-0">
         <MessageComposer
           resetKey={selected.id}
-          initialValue={
-            isDirect && currentUserId != null && selected.id === officeThreadId(currentUserId)
-              ? (officeDraftFromSearch(search) ?? "")
-              : ""
-          }
-          placeholder="Write a message…"
-          onSend={async (body) => {
-            if (isDirect) await sendOnOffice(body);
-            else await sendOnRequest(body);
+          initialValue={inbox.draft}
+          placeholder={isDirect ? "Message the office…" : "Write a message…"}
+          onSend={async (body, visibility) => {
+            if (isDirect) await inbox.sendOnOffice(body);
+            else await inbox.sendOnRequest(body, visibility);
           }}
         />
       </div>
     </section>
   ) : (
     <section className={cn(conversationPaneClass, "items-center justify-center")}>
-      {notFoundEmpty}
+      <EmptyState message="Select a conversation to read and reply." />
     </section>
   );
 
   return (
-    <PageShell
-      title="Messages"
-      meta={state === "ready" && unread > 0 ? `${unread} unread` : "Inbox"}
-      width="max-w-none"
-    >
+    <PageShell title="Messages" meta={state === "ready" && unread > 0 ? `${unread} unread` : "Inbox"} width="max-w-none">
       {state === "loading" ? (
         <div className="space-y-3" aria-busy="true" aria-label="Loading messages">
           {hero}
@@ -617,12 +251,9 @@ export function TenantMessagesPage({
       ) : state === "error" ? (
         <div className="space-y-6">
           {hero}
-          <ErrorRetry
-            message={error ?? "Couldn’t load messages."}
-            onRetry={() => setReloadKey((k) => k + 1)}
-          />
+          <ErrorRetry message={inbox.error ?? "Couldn’t load messages."} onRetry={inbox.reload} />
         </div>
-      ) : conversations.length === 0 && !deepLinkMiss ? (
+      ) : conversations.length === 0 && !unavailable ? (
         <div className="space-y-6">
           {hero}
           <EmptyState message="No conversations yet. When you message the office or open a request, threads show up here." />
@@ -641,14 +272,7 @@ export function TenantMessagesPage({
             {hero}
             <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-stretch">
               <div className="w-full lg:w-[360px] lg:shrink-0">{inboxCard}</div>
-              <div
-                className={cn(
-                  "min-w-0 flex-1",
-                  deepLinkMiss && !selected ? "flex md:flex" : "hidden md:block",
-                )}
-              >
-                {conversationCard}
-              </div>
+              <div className="hidden min-w-0 flex-1 md:block">{conversationCard}</div>
             </div>
             <p className="mt-6 text-center text-xs text-muted-foreground md:text-left">
               <span className="md:hidden">Only conversation members can read or reply.</span>

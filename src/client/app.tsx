@@ -50,6 +50,7 @@ import { FoundationGalleryPage } from "./components/foundation/foundation-galler
 import { PeoplePage } from "./components/people/people-page";
 import { MessagesPage } from "./components/messages/messages-page";
 import { NotificationsHost } from "./components/messages/notifications-host";
+import { useInboxUnread } from "./components/messages/use-inbox-unread";
 import { TenantHomePage } from "./components/home/tenant-home-page";
 import { LandlordHomePage } from "./components/home/landlord-home-page";
 import { useOwnerName } from "./components/landlord/use-owner-name";
@@ -146,6 +147,12 @@ export function App() {
   const navCounts = useAdminNavCounts({
     enabled: ready && !isTenant && !isLandlord && !isMaintenance,
     isAdmin,
+    refreshKey: path,
+  });
+  // Messages badge for the tenant / landlord / technician shells: the same inbox rule.
+  const portalUnread = useInboxUnread({
+    enabled: ready && (isTenant || isLandlord || isMaintenance),
+    role: isTenant ? "tenant" : isLandlord ? "landlord" : isMaintenance ? "maintenance" : null,
     refreshKey: path,
   });
 
@@ -393,7 +400,7 @@ export function App() {
   const isStaffShell = audience === "staff";
   const navItems = isStaffShell
     ? withNavCounts(navItemsForAudience(audience, { isAdmin }), navCounts)
-    : navItemsForAudience(audience);
+    : withNavCounts(navItemsForAudience(audience), { messages: portalUnread });
   const metaFullName = auth.gate.user.user_metadata?.full_name;
   const displayName =
     typeof metaFullName === "string" && metaFullName.trim() ? metaFullName.trim() : ownerName;

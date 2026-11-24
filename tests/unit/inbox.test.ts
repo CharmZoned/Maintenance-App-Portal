@@ -3,8 +3,12 @@ import {
   buildInbox,
   countUnreadConversations,
   createInboxReadMarker,
+  hasRequestConversations,
   isConversationUnread,
+  isOurs,
+  OFFICE_VIEWER,
   requestReadThread,
+  requestReadThreadsFor,
   type InboxConversation,
   type InboxReadMarker,
   type OfficeMessageRow,
@@ -15,20 +19,20 @@ const T = (hour: number, minute = 0) => new Date(Date.UTC(2026, 10, 20, hour, mi
 
 describe("isConversationUnread — the one unread rule", () => {
   it("is unread when someone outside the office wrote and nobody has read or answered", () => {
-    expect(isConversationUnread([{ at: T(9), fromOffice: false, readAt: null }])).toBe(true);
+    expect(isConversationUnread([{ at: T(9), ours: false, readAt: null }])).toBe(true);
   });
 
   it("is read once this admin opened it after the message", () => {
-    expect(isConversationUnread([{ at: T(9), fromOffice: false, readAt: T(10) }])).toBe(false);
+    expect(isConversationUnread([{ at: T(9), ours: false, readAt: T(10) }])).toBe(false);
     // Read exactly through the latest message (the timestamp the app records).
-    expect(isConversationUnread([{ at: T(9), fromOffice: false, readAt: T(9) }])).toBe(false);
+    expect(isConversationUnread([{ at: T(9), ours: false, readAt: T(9) }])).toBe(false);
   });
 
   it("is answered — so not unread — when any admin replied after it", () => {
     expect(
       isConversationUnread([
-        { at: T(9), fromOffice: false, readAt: null },
-        { at: T(10), fromOffice: true, readAt: null },
+        { at: T(9), ours: false, readAt: null },
+        { at: T(10), ours: true, readAt: null },
       ]),
     ).toBe(false);
   });
@@ -36,15 +40,15 @@ describe("isConversationUnread — the one unread rule", () => {
   it("is unread again when they write after the office's reply", () => {
     expect(
       isConversationUnread([
-        { at: T(9), fromOffice: false, readAt: T(9) },
-        { at: T(10), fromOffice: true, readAt: T(9) },
-        { at: T(11), fromOffice: false, readAt: T(9) },
+        { at: T(9), ours: false, readAt: T(9) },
+        { at: T(10), ours: true, readAt: T(9) },
+        { at: T(11), ours: false, readAt: T(9) },
       ]),
     ).toBe(true);
   });
 
   it("never counts the office's own messages", () => {
-    expect(isConversationUnread([{ at: T(9), fromOffice: true, readAt: null }])).toBe(false);
+    expect(isConversationUnread([{ at: T(9), ours: true, readAt: null }])).toBe(false);
     expect(isConversationUnread([])).toBe(false);
   });
 
@@ -136,6 +140,65 @@ describe("buildInbox", () => {
       requestReads: [],
     });
     expect(inbox[0].unread).toBe(false);
+  });
+
+  describe("the same rule for tenants, landlords and technicians", () => {
+    const tina = { role: "tenant" as const, userId: "u-tenant" };
+    const sam = { role: "maintenance" as const, userId: "u-maintenance" };
+
+    it("whose side a message is on: the office for admins, the reader alone for everyone else", () => {
+      expect(isOurs(OFFICE_VIEWER, { author_role: "admin", author_user_id: "u-other-admin" })).toBe(true);
+      expect(isOurs(tina, { author_role: "tenant", author_user_id: "u-tenant" })).toBe(true);
+      // Another tenant in the same home is not "us".
+      expect(isOurs(tina, { author_role: "tenant", author_user_id: "u-flatmate" })).toBe(false);
+      expect(isOurs(tina, { author_role: "admin", author_user_id: "u-admin" })).toBe(false);
+    });
+
+    it("an office reply is unread for the tenant until they read it, and answered once they reply", () => {
+      const officeRows = [office(1, "u-tenant", "tenant", T(8)), office(2, "u-tenant", "admin", T(9))];
+      const fresh = buildInbox({ officeMessages: officeRows, officeReads: [], comments: [], requestReads: [] }, tina);
+      expect(fresh[0]).toMatchObject({ key: "office:u-tenant", unread: true });
+
+      const read = buildInbox(
+        { officeMessages: officeRows, officeReads: [{ thread_user_id: "u-tenant", last_read_at: T(9) }], comments: [], requestReads: [] },
+        tina,
+      );
+      expect(read[0].unread).toBe(false);
+
+      const replied = buildInbox(
+        {
+          officeMessages: [...officeRows, { ...office(3, "u-tenant", "tenant", T(10)), author_user_id: "u-tenant" }],
+          officeReads: [],
+          comments: [],
+          requestReads: [],
+        },
+        tina,
+      );
+      expect(replied[0].unread).toBe(false);
+    });
+
+    it("a technician's comment is unread for the tenant; the tenant's own is not", () => {
+      const rows = [comment(1, 5, "maintenance", T(9))];
+      expect(buildInbox({ officeMessages: [], officeReads: [], comments: rows, requestReads: [] }, tina)[0].unread).toBe(true);
+      const own = [{ ...comment(2, 5, "tenant", T(9)), author_user_id: "u-tenant" }];
+      expect(buildInbox({ officeMessages: [], officeReads: [], comments: own, requestReads: [] }, tina)[0].unread).toBe(false);
+    });
+
+    it("a technician reads internal notes against their office-thread read", () => {
+      const rows = [comment(1, 5, "admin", T(9), "internal")];
+      const shared = [{ maintenance_request_id: 5, thread: "shared", last_read_at: T(10) }];
+      expect(buildInbox({ officeMessages: [], officeReads: [], comments: rows, requestReads: shared }, sam)[0].unread).toBe(true);
+      expect(requestReadThreadsFor("maintenance")).toEqual(["shared", "office"]);
+      // RLS refuses tenants and landlords an office-thread read row, so they never write one.
+      expect(requestReadThreadsFor("tenant")).toEqual(["shared"]);
+      expect(requestReadThreadsFor("landlord")).toEqual(["shared"]);
+    });
+
+    it("landlords have no request conversations", () => {
+      expect(hasRequestConversations("landlord")).toBe(false);
+      expect(hasRequestConversations("tenant")).toBe(true);
+      expect(hasRequestConversations("maintenance")).toBe(true);
+    });
   });
 });
 

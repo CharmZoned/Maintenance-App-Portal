@@ -1,7 +1,8 @@
 import type { OfficeMessage, OfficeThreadSummary, StaffMember, UserAccountRow } from "@/lib/data";
-import { requestKey, type InboxConversation } from "@/lib/inbox";
+import { hasRequestConversations, requestKey, type InboxConversation } from "@/lib/inbox";
 import { displayNameFromEmail, roleLabel } from "@/lib/portal-nav";
 import type { Landlord, MaintenanceComment, Tenant, WorkOrder } from "@/types";
+import type { AppRole } from "@/types.supabase";
 import { STATUS_LABEL } from "@/lib/request-status";
 
 /** Inbox thread — request-linked uses WO comments; direct uses OfficeMessages. */
@@ -23,6 +24,12 @@ export type MessageThread = {
    * set, rows lead with it and show `title` as the secondary line.
    */
   counterpart?: string;
+  /**
+   * Nobody has written here yet: the row is a place to start a conversation
+   * (the user's own office thread, an open request). It shows no time, sorts
+   * after conversations with messages, and is never unread.
+   */
+  empty?: boolean;
   /** Stub flag for PR notes / UI banner. */
   stub?: boolean;
 };
@@ -30,7 +37,11 @@ export type MessageThread = {
 export type NotificationItemData = {
   id: string;
   sentence: string;
+  /** Optional second line, e.g. the start of the message. */
+  detail?: string;
   time: string;
+  /** ISO time the event happened (for ordering); `time` is its label. */
+  at?: string;
   unread: boolean;
   /** Deep-link when available. */
   href?: string;
@@ -90,38 +101,169 @@ export function parseOfficeThreadId(id: string): string | null {
   return uid || null;
 }
 
+const timeOf = (iso: string | null | undefined) => {
+  const t = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+};
+
 /**
- * Build inbox threads from work orders the caller can already see.
- * Unread is a client stub (no MaintenanceThreadReads write yet): open/non-closed
- * WOs from the last 14 days count as unread until the user opens them in-session.
+ * Inbox order: conversations with messages first, newest message first; then
+ * the empty ones (the user's own office thread before requests, newest
+ * request first). Ties break on id so the order is stable.
+ */
+export function compareThreads(a: MessageThread, b: MessageThread): number {
+  if (Boolean(a.empty) !== Boolean(b.empty)) return a.empty ? 1 : -1;
+  if (a.empty && b.empty && a.kind !== b.kind) return a.kind === "direct" ? -1 : 1;
+  return timeOf(b.updatedAt) - timeOf(a.updatedAt) || a.id.localeCompare(b.id);
+}
+
+/** Who wrote a message, as the reader of a non-admin inbox would say it. */
+export function portalAuthorName(
+  last: InboxConversation["last"],
+  viewer: { role: AppRole; userId: string | null },
+  wo?: WorkOrder,
+): string {
+  if (viewer.userId != null && last.authorUserId === viewer.userId) return "You";
+  switch (last.authorRole) {
+    case "admin":
+      return "Landlord Gopher";
+    case "maintenance":
+      return viewer.role === "maintenance" ? "Another technician" : "Technician";
+    case "tenant": {
+      const first = wo && last.authorTenantId === wo.tenant_id ? wo.tenant_first_name?.trim() : "";
+      return first || (viewer.role === "tenant" ? "Your household" : "Tenant");
+    }
+    case "landlord":
+      return "Owner";
+    default:
+      return "Someone";
+  }
+}
+
+const NO_MESSAGES_PREVIEW = "No messages yet";
+
+/**
+ * Request threads for work orders the caller can see. With `inbox`, each row
+ * is dated and previewed by its last visible message and carries the saved
+ * read state; a request nobody has written on is `empty` (no time, never
+ * unread). Nothing is inferred from request dates or status.
  */
 export function threadsFromWorkOrders(
-  workOrders: WorkOrder[],
-  opts?: { openedIds?: Set<string>; now?: Date },
+  workOrders: readonly WorkOrder[],
+  opts?: {
+    inbox?: readonly InboxConversation[];
+    viewer?: { role: AppRole; userId: string | null };
+    /** Kept for callers that pass a clock; threads no longer depend on it. */
+    now?: Date;
+  },
 ): MessageThread[] {
-  const now = opts?.now ?? new Date();
-  const opened = opts?.openedIds ?? new Set<string>();
-  const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
-
+  const byKey = new Map((opts?.inbox ?? []).map((c) => [c.key, c]));
+  const viewer = opts?.viewer ?? { role: "admin" as AppRole, userId: null };
   return workOrders
-    .map((wo) => {
+    .map((wo): MessageThread => {
       const id = workOrderThreadId(wo.id);
-      const updated = wo.scheduled_at || wo.created_at;
-      const age = now.getTime() - new Date(updated).getTime();
-      const unreadStub =
-        !opened.has(id) && wo.status !== "closed" && age >= 0 && age < twoWeeksMs;
+      const conversation = byKey.get(id);
+      if (!conversation) {
+        return {
+          id,
+          kind: "request",
+          title: workOrderThreadTitle(wo),
+          preview: NO_MESSAGES_PREVIEW,
+          updatedAt: wo.created_at,
+          unread: false,
+          empty: true,
+          requestId: wo.id,
+        };
+      }
       return {
         id,
-        kind: "request" as const,
+        kind: "request",
         title: workOrderThreadTitle(wo),
-        preview: workOrderPreview(wo),
-        updatedAt: updated,
-        unread: unreadStub,
+        preview: `${portalAuthorName(conversation.last, viewer, wo)}: ${conversation.last.body}`,
+        updatedAt: conversation.last.at,
+        unread: conversation.unread,
         requestId: wo.id,
       };
     })
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    .sort(compareThreads);
 }
+
+/**
+ * The Messages list for a tenant, landlord or technician: their own office
+ * thread (always listed, so they can write to the office) and the request
+ * threads they take part in, from the shared inbox rule (lib/inbox.ts) — so
+ * the header count equals the nav badge, the bell and the landlord Home card.
+ *
+ * - Landlords get no request threads: request messaging with the owner is out
+ *   of scope (SOW); their request links open the request page instead.
+ * - A request with messages is always listed. One with none is listed only
+ *   while it is open (somewhere to start talking); closed and silent ones are
+ *   left out, so finished work does not crowd the inbox.
+ * - A request conversation whose request is not in `workOrders` (past the
+ *   list's cap) still gets a row, so every unread one can be opened.
+ */
+export function portalInboxThreads(input: {
+  viewer: { role: AppRole; userId: string | null };
+  workOrders: readonly WorkOrder[];
+  inbox: readonly InboxConversation[];
+  officeTitle?: string;
+}): MessageThread[] {
+  const { viewer } = input;
+  const threads: MessageThread[] = [];
+
+  const ownId = viewer.userId;
+  if (ownId) {
+    const own = input.inbox.find((c) => c.kind === "office" && c.threadUserId === ownId);
+    threads.push(
+      own
+        ? {
+            id: own.key,
+            kind: "direct",
+            threadUserId: ownId,
+            title: input.officeTitle ?? OFFICE_TITLE,
+            preview: `${portalAuthorName(own.last, viewer)}: ${own.last.body}`,
+            updatedAt: own.last.at,
+            unread: own.unread,
+          }
+        : {
+            id: officeThreadId(ownId),
+            kind: "direct",
+            threadUserId: ownId,
+            title: input.officeTitle ?? OFFICE_TITLE,
+            preview: "No messages yet. Write to the office any time.",
+            updatedAt: "",
+            unread: false,
+            empty: true,
+          },
+    );
+  }
+
+  if (hasRequestConversations(viewer.role)) {
+    const listed = new Set<number>();
+    for (const thread of threadsFromWorkOrders(input.workOrders, { inbox: input.inbox, viewer })) {
+      const wo = input.workOrders.find((w) => w.id === thread.requestId);
+      listed.add(thread.requestId!);
+      if (thread.empty && wo?.status === "closed") continue;
+      threads.push(thread);
+    }
+    for (const conversation of input.inbox) {
+      if (conversation.kind !== "request" || listed.has(conversation.requestId)) continue;
+      threads.push({
+        id: conversation.key,
+        kind: "request",
+        requestId: conversation.requestId,
+        title: `Request ${conversation.requestId}`,
+        preview: `${portalAuthorName(conversation.last, viewer)}: ${conversation.last.body}`,
+        updatedAt: conversation.last.at,
+        unread: conversation.unread,
+      });
+    }
+  }
+
+  return threads.sort(compareThreads);
+}
+
+export const OFFICE_TITLE = "Landlord Gopher office";
 
 /**
  * Map OfficeMessages summaries into inbox rows.
@@ -152,24 +294,22 @@ export function threadsFromOfficeSummaries(
     threads.push({
       id: officeThreadId(ensure.userId),
       kind: "direct",
-      title: ensure.title ?? "Landlord Gopher office",
-      preview: "Message the office — no messages yet.",
-      updatedAt: new Date(0).toISOString(),
+      title: ensure.title ?? OFFICE_TITLE,
+      preview: "No messages yet. Write to the office any time.",
+      // No message, so no date: never the epoch.
+      updatedAt: "",
       unread: false,
+      empty: true,
       threadUserId: ensure.userId,
     });
   }
 
-  return threads.sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
+  return threads.sort(compareThreads);
 }
 
-/** Merge request + direct threads, newest first. */
+/** Merge request + direct threads, newest first (empty threads last). */
 export function mergeMessageThreads(...groups: MessageThread[][]): MessageThread[] {
-  return groups
-    .flat()
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return groups.flat().sort(compareThreads);
 }
 
 /**
@@ -264,34 +404,53 @@ export function resolveStaffMessagesDeepLink(
   return { kind: "none" };
 }
 
-export function notificationsFromWorkOrders(
-  workOrders: WorkOrder[],
-  opts?: { now?: Date },
-): NotificationItemData[] {
-  const now = opts?.now ?? new Date();
-  return workOrders
-    .filter((wo) => wo.status !== "closed")
-    .slice(0, 8)
-    .map((wo) => {
-      const who =
-        wo.tenant_first_name || wo.tenant_last_name
-          ? `${wo.tenant_first_name ?? ""} ${wo.tenant_last_name ?? ""}`.trim()
-          : "A tenant";
-      const sentence =
-        wo.status === "in_progress"
-          ? `Work started on ${workOrderThreadTitle(wo)}.`
-          : wo.status === "scheduled"
-            ? `${workOrderThreadTitle(wo)} was scheduled.`
-            : `${who} has an open request · ${wo.title}.`;
-      return {
-        id: `notif-wo-${wo.id}`,
-        sentence,
-        time: formatMessageTime(wo.created_at, now),
-        unread: true,
-        href: `/messages?thread=${workOrderThreadId(wo.id)}`,
-        stub: true,
-      };
-    });
+/**
+ * What a `/messages` URL asks a tenant, landlord or technician inbox to do.
+ *   - open        — select `threadId`; `draft` is the office-message helper's
+ *                   prefilled text (`officeMessageHref`), applied once
+ *   - redirect    — landlord request links go to the request page (no request
+ *                   threads for owners)
+ *   - unavailable — the link names a conversation this user cannot open (not
+ *                   theirs, not visible, or malformed): say so, never fake one
+ *   - none        — no conversation named
+ */
+export type PortalMessagesLink =
+  | { kind: "open"; threadId: string; draft: string | null }
+  | { kind: "redirect"; to: string }
+  | { kind: "unavailable" }
+  | { kind: "none" };
+
+export function resolvePortalMessagesLink(
+  search: string,
+  threads: readonly MessageThread[],
+  viewer: { role: AppRole; userId: string | null },
+): PortalMessagesLink {
+  const link = resolveStaffMessagesDeepLink(search, threads as MessageThread[], {
+    currentUserId: viewer.userId,
+    isAdmin: viewer.role === "admin",
+  });
+  switch (link.kind) {
+    case "thread": {
+      const officeUser = parseOfficeThreadId(link.threadId);
+      // Office threads: only the viewer's own (resolveStaffMessagesDeepLink checked it).
+      if (officeUser) return { kind: "open", threadId: link.threadId, draft: officeDraftFromSearch(search) };
+      if (!hasRequestConversations(viewer.role)) {
+        const requestId = parseWorkOrderThreadId(link.threadId);
+        return requestId != null ? { kind: "redirect", to: `/maintenance/${requestId}` } : { kind: "unavailable" };
+      }
+      return { kind: "open", threadId: link.threadId, draft: null };
+    }
+    case "request":
+      if (!hasRequestConversations(viewer.role)) return { kind: "redirect", to: `/maintenance/${link.requestId}` };
+      // Listed = the user can see the request. Anything else is not theirs to open.
+      return threads.some((t) => t.id === link.threadId)
+        ? { kind: "open", threadId: link.threadId, draft: null }
+        : { kind: "unavailable" };
+    case "not-found":
+      return { kind: "unavailable" };
+    default:
+      return { kind: "none" };
+  }
 }
 
 export function commentSenderLabel(
