@@ -1,4 +1,6 @@
 import type { RequestViewerRole } from "@/lib/request-timeline";
+import { parseRoute, type Route } from "@/hooks/use-router";
+import { safeInternalPath } from "@/lib/safe-redirect";
 
 export type { RequestViewerRole };
 
@@ -137,6 +139,41 @@ export function backLinkFor(role: RequestViewerRole): { label: string; to: strin
     default:
       return { label: "Maintenance", to: "/maintenance" };
   }
+}
+
+const FROM_LABELS: Partial<Record<Route["name"], string>> = {
+  dashboard: "Dashboard",
+  home: "Home",
+  calendar: "Calendar",
+  messages: "Messages",
+  properties: "Properties",
+  property: "Property",
+  tenant: "Tenant",
+  people: "People",
+};
+
+/**
+ * Back link that honours `?from=<encoded path>` (set by the maintenance list
+ * and calendar so Back returns to the same view, filters included). Only a
+ * safe internal path (safeInternalPath: same origin, a real portal route) that
+ * is not another request page is used; anything else falls back to
+ * backLinkFor(role).
+ */
+export function backLinkFromSearch(
+  role: RequestViewerRole,
+  search: string,
+  origin: string,
+): { label: string; to: string } {
+  const fallback = backLinkFor(role);
+  const raw = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search).get("from");
+  const pathname = safeInternalPath(raw, origin);
+  if (!raw || !pathname) return fallback;
+  const route = parseRoute(pathname);
+  if (route.name === "request") return fallback;
+  // safeInternalPath keeps the path only; carry the list's own query (filters, view) back too.
+  const query = new URL(raw, origin).search;
+  const label = route.name === "maintenance" ? fallback.label : (FROM_LABELS[route.name] ?? "Back");
+  return { label, to: `${pathname}${query}` };
 }
 
 /**

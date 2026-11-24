@@ -810,6 +810,10 @@ export interface Database {
         Args: { p_request_id: number; p_fixed: boolean; p_note?: string | null };
         Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
       };
+      reopen_maintenance_request_not_fixed: {
+        Args: { p_request_id: number; p_note: string };
+        Returns: Database["public"]["Tables"]["MaintenanceRequests"]["Row"];
+      };
       list_available_job_locations: {
         Args: Record<string, never>;
         Returns: {

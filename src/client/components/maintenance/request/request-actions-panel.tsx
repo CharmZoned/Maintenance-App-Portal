@@ -96,8 +96,10 @@ export interface RequestActionsPanelProps {
   onEditCost?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
-  /** Worker, job offered to the pool (New, unassigned): take it. */
+  /** Worker, job offered to the pool (New, unassigned): take it. Only with FEATURES.workerSelfClaim. */
   onAcceptJob?: () => void;
+  /** Worker, a job they hold: hand it back to the office (reason required). Only with FEATURES.workerSelfClaim. */
+  onReleaseJob?: () => void;
 }
 
 export function RequestActionsPanel(props: RequestActionsPanelProps) {
@@ -120,15 +122,24 @@ export function RequestActionsPanel(props: RequestActionsPanelProps) {
 
 // ── Worker ─────────────────────────────────────────────────────────
 
-function WorkerActions({ status, busy, onChangeStatus, onAcceptJob, costLabel, visibility }: RequestActionsPanelProps) {
+function WorkerActions({
+  status,
+  busy,
+  onChangeStatus,
+  onAcceptJob,
+  onReleaseJob,
+  costLabel,
+  visibility,
+}: RequestActionsPanelProps) {
   const primary = workerPrimaryAction(status);
   const canHold = workerCanHold(status);
+  const canRelease = Boolean(onReleaseJob) && status !== "New" && status !== "Completed";
   const canAccept = status === "New" && Boolean(onAcceptJob);
   const note =
     status === "New"
       ? canAccept
         ? "Accept this job to add it to your schedule."
-        : "This job isn't assigned to you yet."
+        : "This job isn’t assigned to you yet."
       : status === "Completed"
         ? "This job is completed."
         : null;
@@ -158,6 +169,11 @@ function WorkerActions({ status, busy, onChangeStatus, onAcceptJob, costLabel, v
           onClick={() => onChangeStatus?.("on_hold")}
         >
           Put on hold
+        </Button>
+      ) : null}
+      {canRelease ? (
+        <Button variant="ghost" className="h-11 w-full md:h-7" disabled={busy} onClick={onReleaseJob}>
+          Release job
         </Button>
       ) : null}
       {note ? <p className="text-sm leading-5 text-muted-foreground">{note}</p> : null}

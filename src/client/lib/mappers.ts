@@ -433,6 +433,13 @@ export function mapWorkOrder(
     hold_reason: row.hold_reason,
     next_follow_up_date: row.next_follow_up_date,
     created_at: row.created_at,
+    offered_at: row.offered_at ?? null,
+    accepted_at: row.accepted_at ?? null,
+    released_at: row.released_at ?? null,
+    tenant_fix_response:
+      row.tenant_fix_response === "confirmed" || row.tenant_fix_response === "not_fixed" ? row.tenant_fix_response : null,
+    tenant_fix_responded_at: row.tenant_fix_responded_at ?? null,
+    tenant_fix_note: row.tenant_fix_note ?? null,
     property_name: extras?.property_name,
     property_color: extras?.property_color,
     unit_name: extras?.unit_name,

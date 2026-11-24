@@ -158,10 +158,10 @@ test.describe("[WF1] Maintenance request lifecycle", () => {
 
     await page.getByRole("button", { name: "Mark completed" }).filter({ visible: true }).first().click();
     const dialog = page.getByRole("dialog", { name: "Mark completed" });
-    await expect(dialog.getByText("Add a photo of the finished work first.")).toBeVisible();
+    await expect(dialog.getByText("Add a photo of the finished work.")).toBeVisible();
     await dialog.locator('input[type="file"]').setInputFiles({ ...PNG, name: "fixed.png" });
-    await expect(page.getByText("Photo added.")).toBeVisible();
-    await dialog.locator("#resolution-notes").fill(RESOLUTION);
+    await expect(dialog.getByRole("img", { name: "Your photo 1" })).toBeVisible();
+    await dialog.getByLabel("What fixed it?").fill(RESOLUTION);
     await shot(page, testInfo, "Worker records what fixed it");
     await dialog.getByRole("button", { name: "Mark completed" }).click();
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Wrench } from "lucide-react";
 import { useApp } from "@/context";
 import { createSingleFlightLoader, queryId, type DeepLinkProps } from "@/lib/deep-link";
+import { FEATURES } from "@/lib/feature-flags";
 import { PageShell } from "@/components/page-shell";
 import { EmptyState, ErrorRetry } from "@/components/patterns";
 import {
@@ -59,13 +60,23 @@ export function jobPath(order: Pick<WorkOrder, "id">): string {
   return `/maintenance/${order.id}`;
 }
 
-/** `Maple Court · Unit 1A · Tina Renter · OK to enter if absent` */
+/** A job waiting in the pool: offered, nobody has taken it yet. */
+export function isJobOffer(order: Pick<WorkOrder, "status" | "assigned_staff_id">): boolean {
+  return order.status === "open" && order.assigned_staff_id == null;
+}
+
+/**
+ * `Maple Court · Unit 1A · Tina Renter · OK to enter if absent`. An offer
+ * leaves the tenant's name out: it is only shared with the worker who takes the job.
+ */
 export function jobContextLine(order: WorkOrder): string {
   const parts: string[] = [];
   if (order.property_name?.trim()) parts.push(order.property_name.trim());
   if (order.unit_name?.trim()) parts.push(`Unit ${order.unit_name.trim()}`);
   else if (order.property_name?.trim()) parts.push("Common area");
-  const tenant = [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ").trim();
+  const tenant = isJobOffer(order)
+    ? ""
+    : [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ").trim();
   if (tenant) parts.push(tenant);
   if (order.permission_to_enter) parts.push("OK to enter if absent");
   return parts.join(" · ");
@@ -117,14 +128,24 @@ export function sortJobs(orders: readonly WorkOrder[], sort: JobSort): WorkOrder
   });
 }
 
-/** Group into the My jobs sections, in display order; empty sections are dropped. */
+/**
+ * Group into the My jobs sections, in display order; empty sections are dropped.
+ * Without self-claim (FEATURES.workerSelfClaim off: admins assign at launch)
+ * there is no Job offers section: pool jobs are left out entirely.
+ */
 export function groupJobsWith(
   orders: readonly WorkOrder[],
   sortSection: (items: readonly WorkOrder[]) => WorkOrder[],
   now: Date,
+  opts: { offers?: boolean } = {},
 ): { label: JobSection; items: WorkOrder[] }[] {
+  const offers = opts.offers ?? FEATURES.workerSelfClaim;
   const groups = new Map<JobSection, WorkOrder[]>(JOB_SECTIONS.map((label) => [label, []]));
-  for (const o of orders) groups.get(jobSectionFor(o, now))!.push(o);
+  for (const o of orders) {
+    const section = jobSectionFor(o, now);
+    if (section === "Job offers" && !offers) continue;
+    groups.get(section)!.push(o);
+  }
   // Only the five most recently completed jobs (by completion, not creation).
   groups.set(
     "Recently completed",
@@ -141,8 +162,9 @@ export function groupJobs(
   orders: readonly WorkOrder[],
   sort: JobSort,
   now: Date,
+  opts: { offers?: boolean } = {},
 ): { label: JobSection; items: WorkOrder[] }[] {
-  return groupJobsWith(orders, (items) => sortJobs(items, sort), now);
+  return groupJobsWith(orders, (items) => sortJobs(items, sort), now, opts);
 }
 
 // ── Loading ────────────────────────────────────────────────────────
@@ -239,9 +261,11 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
   const shown = useMemo(() => sections.flatMap((s) => s.items), [sections]);
   const thumbnails = useRequestThumbnails(useMemo(() => shown.map((o) => o.id), [shown]));
 
-  const openCount = orders.filter((o) => o.status !== "closed").length;
+  const offers = FEATURES.workerSelfClaim;
+  const counted = offers ? orders : orders.filter((o) => jobSectionFor(o, now) !== "Job offers");
+  const openCount = counted.filter((o) => o.status !== "closed").length;
   const todayCount = sections.find((s) => s.label === "Today")?.items.length ?? 0;
-  const mineOpen = orders.filter((o) => o.status !== "closed" && jobSectionFor(o, now) !== "Job offers").length;
+  const mineOpen = counted.filter((o) => o.status !== "closed" && jobSectionFor(o, now) !== "Job offers").length;
   const meta =
     loading || listError
       ? undefined
@@ -262,7 +286,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
           message="We couldn't load the requests. Check your connection and try again."
           onRetry={() => void load()}
         />
-      ) : orders.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="rounded-md border border-border bg-card">
           <EmptyState icon={<Wrench className="size-5" aria-hidden />} message="No jobs assigned right now." />
         </div>
@@ -285,7 +309,7 @@ export function MyJobsPage({ search = "", replace, navigate }: MyJobsPageProps =
                 </h2>
                 {section.label === "Job offers" ? (
                   <p className="-mt-1.5 text-sm leading-5 text-muted-foreground">
-                    Offered to all workers. Open one to accept it.
+                    Offered to workers whose trades match the job. Open one to accept it.
                   </p>
                 ) : null}
                 <RequestListTable
