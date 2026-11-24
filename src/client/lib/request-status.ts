@@ -151,7 +151,7 @@ export function requestNextStep(wo: WorkOrder, opts: RequestNextStepOptions = {}
     case "New":
       return "Not assigned yet";
     case "Assigned":
-      return join(requestDayWord(wo.scheduled_at, now), assignee) ?? "Not scheduled yet";
+      return join(formatVisit(wo, { now }), assignee) ?? "Not scheduled yet";
     case "In progress": {
       // Never surface draft resolution_notes until Completed.
       const day = requestDayInSentence(opts.startedAt, now);
@@ -216,6 +216,197 @@ export function jobSectionFor(
     }
   }
   return "Today";
+}
+
+// ── Visits (UX-17): a date plus an arrival window ──────────────────
+
+/**
+ * The arrival windows an admin picks from. Hours are local, 24-hour.
+ * "Custom" (any start and end on the day) is the fourth choice in the picker.
+ */
+export type VisitWindowId = "morning" | "afternoon" | "evening";
+export const VISIT_WINDOWS: readonly { id: VisitWindowId; label: string; startHour: number; endHour: number }[] = [
+  { id: "morning", label: "Morning", startHour: 8, endHour: 12 },
+  { id: "afternoon", label: "Afternoon", startHour: 12, endHour: 17 },
+  { id: "evening", label: "Evening", startHour: 17, endHour: 20 },
+];
+
+/** The request fields a visit is read from. Status / assignee are optional. */
+export type VisitFields = Pick<WorkOrder, "scheduled_at"> &
+  Partial<Pick<WorkOrder, "scheduled_end_at" | "status" | "assigned_staff_id">>;
+
+export interface VisitInfo {
+  /** Local calendar day, `YYYY-MM-DD` (for calendars and grouping). */
+  dayKey: string;
+  /** "Today" or "Wed 25 Nov" (plus the year when it is not this year). */
+  day: string;
+  /** "8–12", "2 pm", or null for a date-only visit. */
+  time: string | null;
+  start: Date;
+  /** End of the arrival window; null when there is no window. */
+  end: Date | null;
+  /** The window (or, without one, the day) is over and work has not started. */
+  missed: boolean;
+  /** THE visit text: "Wed 25 Nov · 8–12", "Today · 8–12 (missed)". */
+  label: string;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** "8", "9:30", "12"; with `meridiem`, "8 am", "9:30 pm". */
+function clockText(d: Date, meridiem: boolean): string {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const base = `${h % 12 === 0 ? 12 : h % 12}${m ? `:${pad2(m)}` : ""}`;
+  return meridiem ? `${base} ${h < 12 ? "am" : "pm"}` : base;
+}
+
+const DAY_START_MIN = 8 * 60;
+const DAY_END_MIN = 20 * 60;
+
+/**
+ * Window text. Inside the working day (8 am – 8 pm) the hours read without
+ * am / pm, like the picker: "8–12", "12–5", "5–8", "9:30–11". Anything outside
+ * spells it out: "6–9 am", "7 pm–12 am".
+ */
+export function formatVisitWindow(start: Date, end: Date): string {
+  const s = start.getHours() * 60 + start.getMinutes();
+  const sameDay = localDayKey(start) === localDayKey(end);
+  const e = sameDay ? end.getHours() * 60 + end.getMinutes() : 24 * 60 + end.getHours() * 60 + end.getMinutes();
+  if (s >= DAY_START_MIN && s < DAY_END_MIN && e > s && e <= DAY_END_MIN) {
+    return `${clockText(start, false)}–${clockText(end, false)}`;
+  }
+  const sameMeridiem = sameDay && start.getHours() < 12 === end.getHours() < 12;
+  return sameMeridiem
+    ? `${clockText(start, false)}–${clockText(end, true)}`
+    : `${clockText(start, true)}–${clockText(end, true)}`;
+}
+
+/** Work on the request has moved past the visit (started, paused or done). */
+function visitIsPast(status: WorkOrderStatus | undefined): boolean {
+  return status === "in_progress" || status === "on_hold" || status === "closed";
+}
+
+/**
+ * Everything a screen needs to show a visit, or null when none is set.
+ * Date-only values (`YYYY-MM-DD`, or the noon-UTC sentinel the date-only write
+ * path stores) keep their calendar day and show no time. A start with no end
+ * shows its arrival time ("2 pm").
+ */
+export function visitInfo(v: VisitFields, now: Date = new Date()): VisitInfo | null {
+  const iso = v.scheduled_at;
+  if (!iso) return null;
+  const endIso = v.scheduled_end_at ?? null;
+  const endDate = endIso ? new Date(endIso) : null;
+  const end = endDate && !Number.isNaN(endDate.getTime()) ? endDate : null;
+  const dateOnly = !end && (/^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE_SENTINEL.test(iso));
+  const start = dateOnly ? new Date(`${iso.slice(0, 10)}T00:00:00`) : new Date(iso);
+  if (Number.isNaN(start.getTime())) return null;
+
+  const day = isSameLocalDay(start, now) ? "Today" : formatRequestDay(start, now);
+  const time = end && end > start ? formatVisitWindow(start, end) : dateOnly ? null : clockText(start, true);
+
+  // Missed once the window ends (no window: once the day ends) and work has
+  // not started. A New request is nobody's visit yet, so it is never missed.
+  const isNew = v.status === "open" && v.assigned_staff_id === null;
+  const over = end && end > start
+    ? end.getTime() <= now.getTime()
+    : new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1).getTime() <= now.getTime();
+  const missed = over && !visitIsPast(v.status) && !isNew;
+
+  const label = `${[day, time].filter(Boolean).join(" · ")}${missed ? " (missed)" : ""}`;
+  return { dayKey: localDayKey(start), day, time, start, end: end && end > start ? end : null, missed, label };
+}
+
+/**
+ * THE visit text for every screen and role: "Wed 25 Nov · 8–12",
+ * "Today · 8–12", "Today · 8–12 (missed)", "Mon 23 Nov · 2 pm (missed)",
+ * "Wed 25 Nov" (date only). "" when no visit is set — callers say
+ * "Not scheduled yet" in their own words.
+ */
+export function formatVisit(v: VisitFields, opts: { now?: Date } = {}): string {
+  return visitInfo(v, opts.now)?.label ?? "";
+}
+
+/** The time part only ("8–12", "2 pm"), for a calendar that already shows the day. */
+export function formatVisitTime(v: VisitFields): string | null {
+  return visitInfo(v)?.time ?? null;
+}
+
+/**
+ * Someone is coming: a visit is set and the request is not New. An open
+ * request nobody has taken (including one offered to the worker pool) has a
+ * proposed date at most, which is not a scheduled visit.
+ */
+export function hasScheduledVisit(o: VisitFields): boolean {
+  if (!o.scheduled_at) return false;
+  return !(o.status === "open" && (o.assigned_staff_id ?? null) === null);
+}
+
+/** What the scheduling picker holds: a day, a window and (for custom) two times. */
+export interface VisitChoice {
+  /** `YYYY-MM-DD` */
+  date: string;
+  window: VisitWindowId | "custom";
+  /** `HH:MM`, used when window is "custom". */
+  startTime: string;
+  endTime: string;
+}
+
+function hhmm(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Prefill the picker from a stored visit (Morning on today when none is set). */
+export function visitChoiceFrom(v: VisitFields, now: Date = new Date()): VisitChoice {
+  const info = visitInfo(v, now);
+  const morning = VISIT_WINDOWS[0];
+  const fallback = (date: string): VisitChoice => ({
+    date,
+    window: morning.id,
+    startTime: `${pad2(morning.startHour)}:00`,
+    endTime: `${pad2(morning.endHour)}:00`,
+  });
+  if (!info) return fallback(localDayKey(now));
+  if (!info.time) return fallback(info.dayKey);
+  const end = info.end ?? new Date(info.start.getTime() + 60 * 60_000);
+  const preset = info.end
+    ? VISIT_WINDOWS.find(
+        (w) =>
+          info.start.getHours() === w.startHour &&
+          info.start.getMinutes() === 0 &&
+          end.getHours() === w.endHour &&
+          end.getMinutes() === 0,
+      )
+    : undefined;
+  return { date: info.dayKey, window: preset?.id ?? "custom", startTime: hhmm(info.start), endTime: hhmm(end) };
+}
+
+/**
+ * The stored values for a picked visit (local times → ISO instants), or an
+ * error sentence when the custom window is not usable.
+ */
+export function visitFromChoice(
+  c: VisitChoice,
+): { scheduled_at: string; scheduled_end_at: string } | { error: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(c.date)) return { error: "Choose a date." };
+  const preset = VISIT_WINDOWS.find((w) => w.id === c.window);
+  const startTime = preset ? `${pad2(preset.startHour)}:00` : c.startTime;
+  const endTime = preset ? `${pad2(preset.endHour)}:00` : c.endTime;
+  if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
+    return { error: "Enter a start and end time." };
+  }
+  const start = new Date(`${c.date}T${startTime}:00`);
+  const end = new Date(`${c.date}T${endTime}:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { error: "Enter a start and end time." };
+  if (end <= start) return { error: "The window must end after it starts." };
+  return { scheduled_at: start.toISOString(), scheduled_end_at: end.toISOString() };
 }
 
 // ── Priority ───────────────────────────────────────────────────────
@@ -287,7 +478,7 @@ export function workOrderContextLine(
   if (opts?.assigneeLabel) parts.push(opts.assigneeLabel);
   else if (w.status === "in_progress") parts.push(STATUS_LABEL.in_progress);
   else if (w.status === "on_hold" && w.hold_reason) parts.push(w.hold_reason);
-  else if (w.scheduled_at) parts.push(formatScheduleWhen(w.scheduled_at));
+  else if (hasScheduledVisit(w)) parts.push(formatVisit(w));
   else if (w.created_at) parts.push(formatRelativeWhen(w.created_at));
   return parts.filter(Boolean).join(" · ") || "—";
 }
