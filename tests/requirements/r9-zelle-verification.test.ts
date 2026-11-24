@@ -82,7 +82,7 @@ beforeAll(async () => {
   );
 });
 
-describe("[R8] Admin web portal", () => {
+describe("[R9] Verifying Zelle payments", () => {
   describe("Zelle payments awaiting verification", () => {
     test("a payment the tenant reports waits for the office and does not move the balance", async () => {
       const chargeId = await freshCharge("2098-01");

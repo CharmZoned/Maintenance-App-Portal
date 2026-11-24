@@ -9,6 +9,8 @@ export type AdminNavCounts = {
   maintenance?: number;
   /** Accounts waiting for approval — admins only. */
   people?: number;
+  /** Office threads with something the office has not read — admins only. */
+  messages?: number;
 };
 
 async function countOpenRequests(): Promise<number | undefined> {
@@ -27,6 +29,12 @@ async function countPendingAccounts(): Promise<number | undefined> {
   return accounts.filter((a) => a.account_status === "pending").length;
 }
 
+async function countUnreadOfficeThreads(): Promise<number | undefined> {
+  // Same source as the dashboard's "Unread messages" tile.
+  const threads = await data.listOfficeThreads();
+  return threads.filter((thread) => thread.unread).length;
+}
+
 /**
  * Counts for the admin workspace rail. Loads in the background (never blocks
  * rendering) and again whenever `refreshKey` changes — pass the current path so
@@ -34,7 +42,8 @@ async function countPendingAccounts(): Promise<number | undefined> {
  *
  * Each count is independent and fails silently: a count that cannot be loaded
  * is dropped, so the rail shows no badge rather than a stale or invented one.
- * Messages has no count here: the portal has no real unread-message count yet.
+ * Messages counts unread office threads; request threads have no read
+ * tracking yet, so they never add to it.
  */
 export function useAdminNavCounts({
   enabled,
@@ -63,8 +72,16 @@ export function useAdminNavCounts({
         });
     };
     load("maintenance", countOpenRequests);
-    if (isAdmin) load("people", countPendingAccounts);
-    else setCounts((prev) => (prev.people === undefined ? prev : { ...prev, people: undefined }));
+    if (isAdmin) {
+      load("people", countPendingAccounts);
+      load("messages", countUnreadOfficeThreads);
+    } else {
+      setCounts((prev) =>
+        prev.people === undefined && prev.messages === undefined
+          ? prev
+          : { ...prev, people: undefined, messages: undefined },
+      );
+    }
     return () => {
       cancelled = true;
     };

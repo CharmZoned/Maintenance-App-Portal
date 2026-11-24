@@ -150,6 +150,8 @@ const ROUTES = {
   messages: "/messages",
   /** The Messages page opens a request thread from `?thread=wo:<id>`. */
   requestThread: (id: number) => `/messages?thread=wo:${id}`,
+  /** …and one person's thread with the office from `?thread=office:<userId>`. */
+  officeThread: (userId: string) => `/messages?thread=office:${userId}`,
   listings: "/listings",
   /** The Leases page resolves `?lease=` to the tenant record or the lease editor. */
   lease: (id: number) => `/leases?lease=${id}`,
@@ -1736,7 +1738,7 @@ function buildMessages(ctx: Ctx): MessagesModel {
       preview: oneLine(thread.last_message_body, 140),
       time: threadTime(moment, today),
       unread: thread.unread,
-      href: ROUTES.messages,
+      href: ROUTES.officeThread(thread.thread_user_id),
       ms: moment.ms,
     });
   }

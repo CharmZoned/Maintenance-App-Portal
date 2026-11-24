@@ -7,7 +7,8 @@
     { "id": "R5", "title": "Property documents", "summary": "An admin uploads documents to a property or unit and decides who else can see each one; workers see none." },
     { "id": "R6", "title": "Notifications", "summary": "Email and push notifications, and messaging. Deferred — nothing built yet." },
     { "id": "R7", "title": "Permissions", "summary": "Nothing is readable without logging in, and each role sees only its own slice of the data." },
-    { "id": "R8", "title": "Admin web portal", "summary": "Dashboard, user management, rental applications, vendors and settings — limited to the right people." }
+    { "id": "R8", "title": "Admin web portal", "summary": "Dashboard, user management, rental applications, vendors and settings — limited to the right people." },
+    { "id": "R9", "title": "Verifying Zelle payments", "summary": "A tenant-reported Zelle payment waits for the office; only an admin can confirm it, which records the payment against the rent charge." }
   ],
   "workflows": [
     {
@@ -24,6 +25,7 @@
       "id": "WF3",
       "title": "Worker job pool",
       "summary": "An admin sets the date, time and price and pushes a job; a worker accepts it (first accept wins), can release it back, completes it with a photo, and the tenant confirms the fix. Includes the direct chat with the office."
-    }
+    },
+    { "id": "WF4", "title": "Messaging the office", "summary": "A worker writes to the office, the admin sees it unread, opening it marks it read, the admin replies, and threads never cross." }
   ]
 }
