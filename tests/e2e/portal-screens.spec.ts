@@ -161,7 +161,8 @@ test.describe("[R1] Accounts and login — screens", () => {
     await page.getByLabel("Email").fill("nina@signup.test");
     await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
     await page.getByRole("button", { name: "Create account", exact: true }).click();
-    await expect(page.getByText("Check your email to verify your account")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+    await expect(page.getByText("nina@signup.test")).toBeVisible();
     await shot(page, testInfo, "Sign-up confirmation message");
 
     const mail = (await outbox()).find((m) => m.to === "nina@signup.test" && m.type === "signup");
