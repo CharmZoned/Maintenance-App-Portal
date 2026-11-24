@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
-import { ArrowLeft, Building2, MapPin, Pencil, Plus, Wrench } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Building2, ChevronRight, MapPin, Pencil, Plus } from "lucide-react";
 import { useApp } from "@/context";
-import { cn, colorClasses, formatDate, formatMoney } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { cn, colorClasses, formatMoney } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PropertyDialog } from "./property-dialog";
 import { UnitDialog } from "./unit-dialog";
 import { PropertyDocumentsPanel } from "./property-documents-panel";
 import { WorkOrderDialog } from "../maintenance/work-order-dialog";
+import { LandlordSubmitDialog, unitDisplayName } from "../maintenance/landlord-submit-dialog";
+import { RequestGroups } from "./request-groups";
+import { openRequestCountByUnit, openRequestsLabel, unitPagePath } from "./property-requests";
 import { PROPERTY_TYPE_LABELS, UNIT_READINESS_LABELS, type Property, type Unit, type WorkOrder } from "@/types";
+import { isOpenRequest } from "@/lib/request-status";
 import { PageShell } from "@/components/page-shell";
 
 const STATUS_TONE: Record<string, string> = {
@@ -35,6 +38,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   const [editingUnit, setEditingUnit] = useState<Unit | undefined>(undefined);
   const [unitDialogOpen, setUnitDialogOpen] = useState(false);
   const [woDialogOpen, setWoDialogOpen] = useState(false);
+  const [landlordSubmitOpen, setLandlordSubmitOpen] = useState(false);
 
   async function load() {
     try {
@@ -59,6 +63,9 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Stable object: the dialog resets its fields whenever `defaults` changes.
+  const woDefaults = useMemo(() => ({ property_id: id }), [id]);
+
   if (loading) {
     return (
       <div className="flex flex-1 items-center justify-center text-muted-foreground">
@@ -78,18 +85,27 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
   const palette = colorClasses(property.color);
   const occupied = units.filter((u) => u.status === "occupied").length;
   const totalRent = units.reduce((sum, u) => sum + (u.market_rent ?? 0), 0);
-  const openWorkOrders = workOrders.filter((w) => w.status !== "closed");
+  const openRequests = workOrders.filter((w) => isOpenRequest(w));
+  const openByUnit = openRequestCountByUnit(workOrders);
+  // A landlord with one property never sees the list (it sends them here), so
+  // the back link goes Home instead of bouncing straight back to this page.
+  const backToHome = app.isLandlord && app.properties.length === 1;
+  const canNewRequest = app.canCreateWorkOrders || (app.isLandlord && app.canSubmitRequest);
+  function openNewRequest() {
+    if (app.canCreateWorkOrders) setWoDialogOpen(true);
+    else setLandlordSubmitOpen(true);
+  }
 
   return (
     <PageShell
       title={
         <button
           type="button"
-          onClick={() => navigate("/properties")}
+          onClick={() => navigate(backToHome ? "/home" : "/properties")}
           className="inline-flex items-center gap-1.5 text-[1.375rem] font-semibold leading-tight tracking-[-0.01em] transition-colors duration-150 hover:text-muted-foreground"
         >
           <ArrowLeft className="size-4 text-muted-foreground" aria-hidden />
-          Properties
+          {backToHome ? "Home" : "Properties"}
         </button>
       }
       width="max-w-7xl"
@@ -130,7 +146,7 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
           <SummaryCard label="Units" value={String(units.length)} />
           <SummaryCard label="Occupied" value={`${occupied}/${units.length}`} />
           <SummaryCard label="Market rent" value={formatMoney(totalRent, app.settings.currency)} />
-          <SummaryCard label="Open work orders" value={String(openWorkOrders.length)} tone={openWorkOrders.length > 0 ? "warn" : "default"} />
+          <SummaryCard label="Open requests" value={String(openRequests.length)} tone={openRequests.length > 0 ? "warn" : "default"} />
         </section>
 
         <section>
@@ -148,73 +164,98 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
             </Card>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {units.map((u) => (
-                <Card key={u.id} className={cn("p-4", app.canMutatePortfolio && "cursor-pointer transition-colors duration-150 hover:bg-muted")} onClick={() => { if (!app.canMutatePortfolio) return; setEditingUnit(u); setUnitDialogOpen(true); }}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-semibold">{u.name}</h3>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} sqft` : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
-                        {u.status}
-                      </span>
-                      {u.readiness_status !== "ready" && (
-                        <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", READINESS_TONE[u.readiness_status])}>
-                          {UNIT_READINESS_LABELS[u.readiness_status] ?? u.readiness_status}
+              {units.map((u) => {
+                const href = unitPagePath(property.id, u.id);
+                const openCount = openByUnit.get(u.id) ?? 0;
+                return (
+                  <Card key={u.id} className="relative p-4 transition-colors duration-150 hover:bg-muted">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold">
+                          {/* Stretched link: the whole card opens the unit page. */}
+                          <a
+                            href={href}
+                            onClick={(e) => {
+                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                              e.preventDefault();
+                              navigate(href);
+                            }}
+                            className="outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-[3px] focus-visible:after:ring-ring/40"
+                          >
+                            {unitDisplayName(u.name)}
+                          </a>
+                        </h3>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {u.bedrooms} bd · {u.bathrooms} ba{u.sqft ? ` · ${u.sqft} sqft` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold capitalize", STATUS_TONE[u.status])}>
+                          {u.status}
                         </span>
-                      )}
+                        {u.readiness_status !== "ready" && (
+                          <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", READINESS_TONE[u.readiness_status])}>
+                            {UNIT_READINESS_LABELS[u.readiness_status] ?? u.readiness_status}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="mt-3 flex items-end justify-between border-t pt-3">
-                    <div>
-                      <div className="stat-label">Market rent</div>
-                      <div className="text-sm font-semibold tabular-nums">{formatMoney(u.market_rent, app.settings.currency)}</div>
+                    <div className="mt-3 flex items-end justify-between gap-3 border-t pt-3">
+                      <div className="min-w-0">
+                        {app.isLandlord ? (
+                          <>
+                            <div className="stat-label">Tenant</div>
+                            <div className="truncate text-sm font-medium">{u.active_tenant_name || "Vacant"}</div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="stat-label">Market rent</div>
+                            <div className="text-sm font-semibold tabular-nums">{formatMoney(u.market_rent, app.settings.currency)}</div>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1 text-right text-xs text-muted-foreground">
+                        <span className={cn(openCount > 0 && "font-medium text-foreground")}>{openRequestsLabel(openCount)}</span>
+                        <ChevronRight className="size-3.5" aria-hidden />
+                      </div>
                     </div>
-                    {u.active_tenant_name && (
-                      <div className="text-right text-xs text-muted-foreground">{u.active_tenant_name}</div>
-                    )}
-                  </div>
-                </Card>
-              ))}
+                    {!app.isLandlord && (u.active_tenant_name || app.canMutatePortfolio) ? (
+                      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span className="truncate">{u.active_tenant_name ? `Tenant: ${u.active_tenant_name}` : "Vacant"}</span>
+                        {app.canMutatePortfolio && (
+                          <button
+                            type="button"
+                            onClick={() => { setEditingUnit(u); setUnitDialogOpen(true); }}
+                            className="relative z-10 shrink-0 hover:text-foreground"
+                            aria-label={`Edit ${unitDisplayName(u.name)}`}
+                          >
+                            Edit unit
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                  </Card>
+                );
+              })}
             </div>
           )}
         </section>
 
         <section>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-[1.0625rem] font-semibold leading-tight">Work orders</h2>
-            {app.canCreateWorkOrders && (
-              <Button size="sm" variant="outline" onClick={() => setWoDialogOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" /> New work order
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-[1.0625rem] font-semibold leading-tight">Requests</h2>
+            {canNewRequest && (
+              <Button size="sm" variant="outline" onClick={openNewRequest}>
+                <Plus className="mr-1 h-4 w-4" /> New request
               </Button>
             )}
           </div>
-          {workOrders.length === 0 ? (
-            <Card className="p-8 text-center text-sm text-muted-foreground">No work orders for this property.</Card>
-          ) : (
-            <Card className="divide-y">
-              {workOrders.map((w) => (
-                <div key={w.id} className="flex items-center justify-between gap-4 p-4">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{w.title}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {[w.unit_name, w.vendor_name, formatDate(w.created_at)].filter(Boolean).join(" · ")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Badge variant="neutral" className="capitalize">{w.priority}</Badge>
-                    <Badge variant="secondary" className="capitalize">{w.status.replace("_", " ")}</Badge>
-                  </div>
-                </div>
-              ))}
-            </Card>
-          )}
+          <RequestGroups
+            orders={workOrders}
+            showPlace
+            navigate={navigate}
+            emptyText="No requests for this property yet."
+          />
         </section>
 
         <PropertyDocumentsPanel propertyId={property.id} units={units} />
@@ -230,11 +271,21 @@ export function PropertyPage({ id, navigate }: { id: number; navigate: (to: stri
         propertyId={property.id}
         unit={editingUnit}
       />
-      <WorkOrderDialog
-        open={woDialogOpen}
-        onOpenChange={(o) => { setWoDialogOpen(o); if (!o) load(); }}
-        defaults={{ property_id: property.id }}
-      />
+      {app.canCreateWorkOrders ? (
+        <WorkOrderDialog
+          open={woDialogOpen}
+          onOpenChange={(o) => { setWoDialogOpen(o); if (!o) load(); }}
+          defaults={woDefaults}
+        />
+      ) : null}
+      {app.isLandlord ? (
+        <LandlordSubmitDialog
+          open={landlordSubmitOpen}
+          onOpenChange={setLandlordSubmitOpen}
+          presetPropertyId={property.id}
+          onCreated={() => void load()}
+        />
+      ) : null}
     </PageShell>
   );
 }
