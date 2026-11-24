@@ -9,6 +9,11 @@ import {
   toRequestStatus,
 } from "@/lib/request-status";
 import { formatDate } from "@/lib/utils";
+import {
+  isReportedByOther,
+  tenantReporterLabel,
+  useRequestReporterNames,
+} from "@/lib/request-reporters";
 import type {
   MaintenanceComment,
   MaintenancePhoto,
@@ -35,6 +40,7 @@ export function TenantRequestDetailPanel({
   compact = false,
   extras,
   onOpenFullDetail,
+  reporterName,
 }: {
   order: WorkOrder;
   navigate: (to: string) => void;
@@ -44,6 +50,11 @@ export function TenantRequestDetailPanel({
   extras?: TenantRequestExtras;
   /** Keyboard-accessible path to the full detail route (desktop + compact). */
   onOpenFullDetail?: () => void;
+  /**
+   * Landlord's display name for a landlord-filed request, when the parent has
+   * already loaded it. Omitted: the panel looks it up itself.
+   */
+  reporterName?: string | null;
 }) {
   const app = useApp();
   const [photos, setPhotos] = useState<MaintenancePhoto[]>(extras?.photos ?? []);
@@ -111,9 +122,17 @@ export function TenantRequestDetailPanel({
   const status = toRequestStatus(order);
   const nextStep = requestNextStep(order);
   const priority = priorityLevel(order.priority);
-  const reporter =
-    [order.tenant_first_name, order.tenant_last_name].filter(Boolean).join(" ") ||
-    "You";
+  // Landlord-filed request on the tenant's unit (D3): view only.
+  const viewOnly = isReportedByOther(order);
+  const lookupOrders = useMemo(
+    () => (reporterName === undefined ? [order] : []),
+    [order, reporterName],
+  );
+  const lookedUpNames = useRequestReporterNames(lookupOrders);
+  const reporter = tenantReporterLabel(
+    order,
+    reporterName === undefined ? lookedUpNames.get(order.id) : reporterName,
+  );
   const reportedWhen = formatActivityStamp(order.created_at);
   const assignedLabel = order.assigned_staff_id
     ? "Assigned (staff)"
@@ -184,7 +203,10 @@ export function TenantRequestDetailPanel({
       </div>
 
       <dl className="mt-6 space-y-3">
-        <DetailRow label="Reported" value={`${reporter} · ${reportedWhen}`} />
+        <DetailRow
+          label={viewOnly ? "Reported by" : "Reported"}
+          value={`${reporter} · ${reportedWhen}`}
+        />
         <DetailRow label="Assigned to" value={assignedLabel} />
         <DetailRow label="Scheduled" value={scheduledLabel} />
         {order.category ? <DetailRow label="Category" value={order.category} /> : null}
@@ -281,25 +303,38 @@ export function TenantRequestDetailPanel({
         </ul>
       )}
 
-      <div className="mt-auto pt-6">
-        {/*
-          TODO(data-gap): full messages↔WO join still needs the messages backend.
-          Messages accepts `?request=` (demo WO id map / soft-open for unknowns).
-        */}
-        <Button
-          type="button"
-          variant="secondary"
-          className="h-11 w-full min-h-11 text-sm text-brand-text"
-          onClick={() => navigate(`/messages?request=${order.id}`)}
-        >
-          Open request conversation
-        </Button>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {compact
-            ? "Only conversation members can read or reply."
-            : "Conversation members only."}
-        </p>
-      </div>
+      {viewOnly ? (
+        // Landlord-filed: no conversation, photo or fix-confirmation controls.
+        <div className="mt-auto pt-6">
+          <p
+            className="rounded-sm bg-muted px-4 py-3 text-sm text-muted-foreground"
+            role="note"
+          >
+            Your landlord reported this repair for your home. You can follow its
+            progress here, but you can’t reply to it or add photos.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-auto pt-6">
+          {/*
+            TODO(data-gap): full messages↔WO join still needs the messages backend.
+            Messages accepts `?request=` (demo WO id map / soft-open for unknowns).
+          */}
+          <Button
+            type="button"
+            variant="secondary"
+            className="h-11 w-full min-h-11 text-sm text-brand-text"
+            onClick={() => navigate(`/messages?request=${order.id}`)}
+          >
+            Open request conversation
+          </Button>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {compact
+              ? "Only conversation members can read or reply."
+              : "Conversation members only."}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

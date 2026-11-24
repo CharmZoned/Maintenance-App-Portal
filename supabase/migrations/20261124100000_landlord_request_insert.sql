@@ -3,10 +3,11 @@
 -- Owner decisions (2026-11-24, docs/landlord-wave-plan.md §2):
 --   D1  Landlords can submit requests.
 --   D2  They can file common-area requests (no unit) on a property they own.
---   D3  The tenant of the unit does NOT see a landlord-filed request. Tenant
---       visibility stays "requests I submitted" (submitted_by_tenant_id), and a
---       landlord-filed row always has submitted_by_tenant_id NULL, so the
---       existing tenant rule already hides it; nothing to tighten there.
+--   D3  (changed by the owner 2026-11-24) The current tenant of the unit DOES
+--       see a landlord-filed request on that unit, view only; common-area
+--       requests stay hidden from tenants. This file leaves tenant visibility
+--       at "requests I submitted"; 20261124120000_tenant_sees_landlord_requests
+--       adds the unit tenant's read path.
 --       The landlord form offers "Permission to enter"; the column already
 --       defaults to false, so a landlord who leaves it alone files "No".
 --
@@ -161,7 +162,8 @@ $function$;
 
 -- ── Who reads a request ─────────────────────────────────────────────
 -- Unchanged from 20261118190000 except the common-area landlord branch.
--- Tenants still see only what they submitted (D3).
+-- Tenants see only what they submitted here; 20261124120000 adds landlord-filed
+-- requests on the tenant's current unit (D3, changed 2026-11-24).
 
 DROP POLICY IF EXISTS maintenance_requests_select ON public."MaintenanceRequests";
 CREATE POLICY maintenance_requests_select ON public."MaintenanceRequests"
