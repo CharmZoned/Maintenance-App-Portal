@@ -8,10 +8,9 @@ import * as data from "@/lib/data";
 import {
   announceInboxChanged,
   countUnreadConversations,
+  createInboxReadMarker,
   listOfficeMessages,
   loadAdminInbox,
-  markOfficeThreadRead,
-  markRequestThreadRead,
   officeKey,
   requestKey,
   sendOfficeMessage,
@@ -131,19 +130,19 @@ export function AdminMessagesPage({
   const inboxRef = useRef(inbox);
   inboxRef.current = inbox;
 
-  /** Record the conversation as read for this admin, then let the rail badge catch up. */
-  const markRead = useCallback((threadId: string) => {
-    const conversation = inboxRef.current?.find((c) => c.key === threadId);
-    if (!conversation?.unread) return;
-    const setUnread = (unread: boolean) =>
-      setInbox((prev) => prev?.map((c) => (c.key === threadId ? { ...c, unread } : c)) ?? prev);
-    setUnread(false);
-    const write =
-      conversation.kind === "office"
-        ? markOfficeThreadRead(conversation.threadUserId, conversation.last.at)
-        : markRequestThreadRead(conversation.requestId, conversation.last.at);
-    write.then(announceInboxChanged, () => setUnread(true));
-  }, []);
+  /**
+   * Records conversations as read for this admin, then lets the rail badge
+   * catch up. It decides when to write (lib/inbox.ts), so re-renders of this
+   * page — including the one a failed write causes — never write again.
+   */
+  const [reads] = useState(() =>
+    createInboxReadMarker({
+      getConversation: (key) => inboxRef.current?.find((c) => c.key === key),
+      setUnread: (key, unread) =>
+        setInbox((prev) => prev?.map((c) => (c.key === key ? { ...c, unread } : c)) ?? prev),
+      onWritten: announceInboxChanged,
+    }),
+  );
 
   // Deep-link ?thread=wo:123 | office:<user id> — open it; clear selection when absent.
   useEffect(() => {
@@ -152,14 +151,16 @@ export function AdminMessagesPage({
     if (thread && threads.some((t) => t.id === thread)) {
       setSelectedId(thread);
       setMobileThread(true);
-      markRead(thread);
+      // Once per id: this effect re-runs whenever `threads` changes.
+      reads.follow(thread);
       return;
     }
     if (!thread) {
+      reads.follow(null);
       setSelectedId(null);
       setMobileThread(false);
     }
-  }, [search, threads, markRead]);
+  }, [search, threads, reads]);
 
   const selected: MessageThread | undefined = threads.find((t) => t.id === selectedId);
   const selectedRequestId = selected?.kind === "request" ? (selected.requestId ?? null) : null;
@@ -205,11 +206,18 @@ export function AdminMessagesPage({
               };
             }),
           );
+    const key = selectedRequestId != null ? requestKey(selectedRequestId) : officeKey(selectedThreadUserId!);
     void read
       .then((rows) => {
         if (cancelled) return;
         setMessages(rows);
         setThreadError(null);
+        // Someone may have written since the inbox loaded: read through what is on screen.
+        const newest = rows.reduce<string | null>(
+          (best, m) => (best == null || Date.parse(m.at) > Date.parse(best) ? m.at : best),
+          null,
+        );
+        if (newest) reads.seen(key, newest);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -224,12 +232,12 @@ export function AdminMessagesPage({
     return () => {
       cancelled = true;
     };
-  }, [selectedRequestId, selectedThreadUserId, selectedName, myUserId, threadReloadKey, listMaintenanceComments, setError]);
+  }, [selectedRequestId, selectedThreadUserId, selectedName, myUserId, threadReloadKey, listMaintenanceComments, setError, reads]);
 
   function openThread(thread: MessageThread) {
     setSelectedId(thread.id);
     setMobileThread(true);
-    markRead(thread.id);
+    reads.open(thread.id);
     if (replace) replace(`/messages?thread=${encodeURIComponent(thread.id)}`);
   }
 

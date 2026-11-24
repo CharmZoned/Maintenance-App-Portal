@@ -12,6 +12,7 @@ import { countRequestsNeedingAction } from "@/components/chrome/use-admin-nav-co
 import { staffQueueTab } from "@/components/maintenance/request-status";
 import * as data from "@/lib/data";
 import {
+  announceInboxChanged,
   countAdminUnread,
   countUnreadConversations,
   loadAdminInbox,
@@ -102,6 +103,21 @@ describe("[R8] Admin counts", () => {
       // Sam's and Lena's office threads end with an admin reply.
       expect(inbox.filter((c) => c.kind === "office").every((c) => !c.unread)).toBe(true);
       expect(await countAdminUnread()).toBe(countUnreadConversations(inbox));
+    });
+
+    test("callers asking at the same moment share one inbox load; a change starts a fresh one", async () => {
+      await signInApp("admin");
+      const a = loadAdminInbox();
+      const b = loadAdminInbox();
+      expect(b).toBe(a);
+      announceInboxChanged();
+      const c = loadAdminInbox();
+      expect(c).not.toBe(a);
+      expect(await c).toEqual(await a);
+      // Settled loads are not reused.
+      const d = loadAdminInbox();
+      expect(d).not.toBe(c);
+      await d;
     });
 
     test("opening a request thread marks it read for this admin only", async () => {

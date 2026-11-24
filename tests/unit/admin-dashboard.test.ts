@@ -919,6 +919,36 @@ describe("messages", () => {
     expect(model.messages.threads[1]).toMatchObject({ id: "office-u-sam", unread: false });
   });
 
+  test("a request conversation is named by who it is with — like the Messages page — not by who wrote last", () => {
+    const base = sampleWorld();
+    const inbox: InboxConversation[] = [
+      {
+        key: "wo:1000",
+        kind: "request",
+        requestId: 1000,
+        // Sam (the team member on it) wrote last; the conversation is still with Tina.
+        last: last({ at: at(2026, 11, 16, 9, 20), body: "On my way.", authorRole: "maintenance", authorStaffId: 1 }),
+        unread: true,
+      },
+      {
+        key: "wo:995",
+        kind: "request",
+        requestId: 995,
+        last: last({ at: at(2026, 11, 16, 9, 10), body: "Part arrives Friday.", authorRole: "admin" }),
+        unread: false,
+      },
+    ];
+    // No tenant on the boiler job: it is with the team member assigned.
+    const workOrders = base.workOrders.map((w) =>
+      w.id === 995 ? { ...w, tenant_id: null, tenant_first_name: null, tenant_last_name: null } : w,
+    );
+    const { messages } = buildAdminDashboardModel({ ...base, workOrders, inbox }, NOW);
+    expect(messages.threads.map((t) => [t.id, t.icon, t.name])).toEqual([
+      ["wo-1000", "user", "Tina Renter · Tenant · 1A"],
+      ["wo-995", "wrench", "Lee Wrench · Team"],
+    ]);
+  });
+
   test("unavailable when the inbox did not load", () => {
     expect(buildAdminDashboardModel(world({ inbox: null }), NOW).messages).toEqual({
       summaryLine: "Messages aren’t available right now.",

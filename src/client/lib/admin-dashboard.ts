@@ -1713,6 +1713,13 @@ function threadIcon(person: Person | null, role: RoleWord | null): AdminIconName
   return (person?.role ?? role) === "team" ? "wrench" : "user";
 }
 
+/** Who the office talks to on a request: its tenant (at the request's unit), else the team member on it. */
+function requestCounterpartPerson(ctx: Ctx, wo: WorkOrder): Person | null {
+  const tenant = ctx.people.tenant(wo.tenant_id);
+  if (tenant) return { ...tenant, unit: wo.unit_name?.trim() || tenant.unit };
+  return ctx.people.staff(wo.assigned_staff_id);
+}
+
 function buildMessages(ctx: Ctx): MessagesModel {
   const { sources, today, people } = ctx;
   if (!sources.inbox) {
@@ -1740,19 +1747,18 @@ function buildMessages(ctx: Ctx): MessagesModel {
       });
       continue;
     }
-    // Request conversation, headed by whoever wrote last.
+    // Request conversation, headed by who it is with — the same person the
+    // Messages page names (lib/messages.ts requestCounterpart): the tenant who
+    // reported it, else the team member on it, else the place.
     const wo = requests.get(conversation.requestId);
     if (!wo) continue;
-    const author = commentAuthor(ctx, {
-      author_tenant_id: conversation.last.authorTenantId,
-      author_user_id: conversation.last.authorUserId,
-      author_staff_id: conversation.last.authorStaffId,
-    });
-    const role = roleWord(conversation.last.authorRole);
+    const counterpart = requestCounterpartPerson(ctx, wo);
     rows.push({
       id: `wo-${wo.id}`,
-      icon: threadIcon(author, role),
-      name: author ? personHeading(author) : role ? ROLE_TITLE[role] : "Request comment",
+      icon: threadIcon(counterpart, null),
+      name: counterpart
+        ? personHeading(counterpart)
+        : joinParts(["Office request", wo.property_name, wo.unit_name?.trim() || null]),
       preview: oneLine(`${wo.title} — ${conversation.last.body}`, 140),
       time: threadTime(moment, today),
       unread: conversation.unread,

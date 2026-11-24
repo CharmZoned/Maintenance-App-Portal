@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildInbox,
   countUnreadConversations,
+  createInboxReadMarker,
   isConversationUnread,
   requestReadThread,
+  type InboxConversation,
+  type InboxReadMarker,
   type OfficeMessageRow,
   type RequestCommentRow,
 } from "../../src/client/lib/inbox";
@@ -133,5 +136,144 @@ describe("buildInbox", () => {
       requestReads: [],
     });
     expect(inbox[0].unread).toBe(false);
+  });
+});
+
+describe("createInboxReadMarker — when the Messages page writes a read", () => {
+  type Write = (conversation: InboxConversation, through: string) => Promise<void>;
+
+  /**
+   * A stand-in for AdminMessagesPage: an inbox in state, and a "render" that
+   * re-runs the deep-link effect (follow) every time the inbox changes, just as
+   * the page's effect re-runs whenever `threads` is rebuilt.
+   */
+  function harness(write: Write) {
+    let inbox: InboxConversation[] = [
+      {
+        key: "wo:7",
+        kind: "request",
+        requestId: 7,
+        last: { at: T(9), body: "Disposal jammed", authorRole: "tenant", authorUserId: "u-tina", authorTenantId: 1, authorStaffId: null },
+        unread: true,
+      },
+      {
+        key: "office:u-raj",
+        kind: "office",
+        threadUserId: "u-raj",
+        last: { at: T(8), body: "Hi", authorRole: "tenant", authorUserId: "u-raj", authorTenantId: null, authorStaffId: null },
+        unread: true,
+      },
+    ];
+    let url: string | null = null;
+    let renders = 0;
+    const written = vi.fn();
+    const render = () => {
+      renders += 1;
+      if (renders > 50) throw new Error("render loop");
+      marker.follow(url);
+    };
+    const marker: InboxReadMarker = createInboxReadMarker({
+      getConversation: (key) => inbox.find((c) => c.key === key),
+      setUnread: (key, unread) => {
+        inbox = inbox.map((c) => (c.key === key ? { ...c, unread } : c));
+        render();
+      },
+      write,
+      onWritten: written,
+    });
+    const visit = (key: string | null) => {
+      url = key;
+      render();
+    };
+    return {
+      marker,
+      written,
+      unread: (key: string) => inbox.find((c) => c.key === key)!.unread,
+      /** Navigate to ?thread=key (or to no thread) and render. */
+      visit,
+      /** The admin clicks a row: open it, then the URL follows (as openThread does). */
+      click(key: string) {
+        marker.open(key);
+        visit(key);
+      },
+      renders: () => renders,
+    };
+  }
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("a rejected write is not written again on re-render; the conversation stays unread", async () => {
+    const write = vi.fn<Write>(() => Promise.reject(new Error("503")));
+    const page = harness(write);
+    page.visit("wo:7");
+    expect(page.unread("wo:7")).toBe(false); // shown read while the write is on its way
+    await flush();
+    expect(page.unread("wo:7")).toBe(true); // put back after the failure
+    // The failure re-rendered the page; a few more renders change nothing.
+    page.visit("wo:7");
+    page.visit("wo:7");
+    await flush();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(page.written).not.toHaveBeenCalled();
+    expect(page.renders()).toBeLessThan(10);
+  });
+
+  it("a click on a conversation whose write failed is the retry, once per click", async () => {
+    const write = vi.fn<Write>().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    const page = harness(write);
+    page.click("wo:7");
+    await flush();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(page.unread("wo:7")).toBe(true);
+
+    page.click("wo:7");
+    await flush();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(page.unread("wo:7")).toBe(false);
+    expect(page.written).toHaveBeenCalledTimes(1);
+  });
+
+  it("the deep link marks each conversation once, and a click while it is being written adds nothing", async () => {
+    const write = vi.fn<Write>(() => Promise.resolve());
+    const page = harness(write);
+    page.visit("wo:7");
+    page.click("wo:7");
+    await flush();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ key: "wo:7" }), T(9));
+
+    page.visit("office:u-raj");
+    await flush();
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenLastCalledWith(expect.objectContaining({ key: "office:u-raj" }), T(8));
+    // Already read: coming back to it writes nothing.
+    page.visit(null);
+    page.visit("wo:7");
+    await flush();
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads through a newer message the open thread shows, after the first write and only once", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const first = new Promise<void>((resolve) => (release = resolve));
+    const write = vi.fn<Write>((_c, through) => {
+      order.push(`start ${through}`);
+      return (order.length === 1 ? first : Promise.resolve()).then(() => {
+        order.push(`done ${through}`);
+      });
+    });
+    const page = harness(write);
+    page.click("wo:7");
+    // The thread loads and has a message the inbox did not know about yet.
+    page.marker.seen("wo:7", T(9, 30));
+    page.marker.seen("wo:7", T(9, 30));
+    // Nothing newer than the inbox's latest message: nothing more to write.
+    page.marker.seen("wo:7", T(9));
+    release();
+    await flush();
+    await flush();
+    expect(order).toEqual([`start ${T(9)}`, `done ${T(9)}`, `start ${T(9, 30)}`, `done ${T(9, 30)}`]);
+    expect(page.written).toHaveBeenCalledTimes(2);
   });
 });

@@ -19,6 +19,8 @@ import type { AppRole } from "@/types.supabase";
 export const INBOX_CHANGED_EVENT = "lg:inbox-changed";
 
 export function announceInboxChanged(): void {
+  // Whatever was loading started before the change: later readers must not join it.
+  inboxInFlight = null;
   if (typeof window !== "undefined") window.dispatchEvent(new Event(INBOX_CHANGED_EVENT));
 }
 
@@ -215,10 +217,29 @@ function fail(error: { message: string } | null): void {
 }
 
 /**
+ * A load already on its way. Callers that ask at the same moment (the rail
+ * badge and the dashboard or Messages page on the same navigation) share it
+ * instead of reading the whole inbox twice. Cleared when it settles and when
+ * the inbox announces a change, so a read after a write is always fresh.
+ */
+let inboxInFlight: Promise<InboxConversation[]> | null = null;
+
+/**
  * Every conversation the signed-in admin can open in Messages, with real read
  * state. RLS returns only the caller's own read rows.
  */
-export async function loadAdminInbox(): Promise<InboxConversation[]> {
+export function loadAdminInbox(): Promise<InboxConversation[]> {
+  if (inboxInFlight) return inboxInFlight;
+  const load = readAdminInbox();
+  inboxInFlight = load;
+  const clear = () => {
+    if (inboxInFlight === load) inboxInFlight = null;
+  };
+  load.then(clear, clear);
+  return load;
+}
+
+async function readAdminInbox(): Promise<InboxConversation[]> {
   const [office, officeReads, comments, requestReads] = await Promise.all([
     supabase
       .from("OfficeMessages")
@@ -276,6 +297,111 @@ export async function markOfficeThreadRead(threadUserId: string, through: string
     .from("OfficeThreadReads")
     .upsert({ thread_user_id: threadUserId, last_read_at: through }, { onConflict: "user_id,thread_user_id" });
   fail(error);
+}
+
+/** Record a conversation of either kind as read up to `through`. */
+export function markConversationRead(conversation: InboxConversation, through: string): Promise<void> {
+  return conversation.kind === "office"
+    ? markOfficeThreadRead(conversation.threadUserId, through)
+    : markRequestThreadRead(conversation.requestId, through);
+}
+
+// ── Recording reads from the Messages page ──────────────────────────
+
+/**
+ * Decides when the Messages page writes a read, so a write that fails can never
+ * turn into a retry loop. Kept free of React so it can be unit tested.
+ *
+ * - `open(key)`: the admin picked the conversation. Marks it read if it is
+ *   unread. This is also how a failed write is retried: by the admin, once per
+ *   click.
+ * - `follow(key)`: the page's URL names this conversation (?thread=…). The page
+ *   re-renders often while a thread is open, so this marks a given id at most
+ *   once, until the URL names another one (or none: `follow(null)`). It never
+ *   retries a write that failed.
+ * - `seen(key, through)`: the open thread's messages loaded and the newest is
+ *   `through`. If that is newer than the inbox knew (someone wrote after the
+ *   page loaded), the read point moves up to it, so the thread does not come
+ *   back as unread after a reload. Best effort, never retried.
+ *
+ * Writes for one conversation run one after another, so an older read point
+ * can never land after a newer one.
+ */
+export interface InboxReadMarker {
+  open(key: string): void;
+  follow(key: string | null): void;
+  seen(key: string, through: string): void;
+}
+
+export function createInboxReadMarker(deps: {
+  /** The conversation as the page has it right now. */
+  getConversation: (key: string) => InboxConversation | undefined;
+  /** Show the conversation as read (false), or as unread again after a failed write (true). */
+  setUnread: (key: string, unread: boolean) => void;
+  write?: (conversation: InboxConversation, through: string) => Promise<void>;
+  /** A read was stored, e.g. so the rail badge can catch up. */
+  onWritten?: () => void;
+}): InboxReadMarker {
+  const write = deps.write ?? markConversationRead;
+  /** Furthest read point written (or being written) per conversation. */
+  const readThrough = new Map<string, number>();
+  /** The tail of each conversation's write queue. */
+  const queue = new Map<string, Promise<void>>();
+  let followed: string | null = null;
+
+  const enqueue = (key: string, task: () => Promise<void>): Promise<void> => {
+    const run = (queue.get(key) ?? Promise.resolve()).then(task);
+    const tail = run.catch(() => undefined);
+    queue.set(key, tail);
+    void tail.then(() => {
+      if (queue.get(key) === tail) queue.delete(key);
+    });
+    return run;
+  };
+
+  const markUnreadAsRead = (key: string) => {
+    const conversation = deps.getConversation(key);
+    // Already read, or a write for it is on its way (it is shown read meanwhile).
+    if (!conversation?.unread) return;
+    const through = conversation.last.at;
+    const previous = readThrough.get(key);
+    readThrough.set(key, Math.max(previous ?? Number.NEGATIVE_INFINITY, ms(through)));
+    deps.setUnread(key, false);
+    enqueue(key, () => write(conversation, through)).then(
+      () => deps.onWritten?.(),
+      () => {
+        // Not stored: show it unread again. `follow` will not try this id
+        // again, so re-rendering cannot start a loop; a click retries.
+        if (previous === undefined) readThrough.delete(key);
+        else readThrough.set(key, previous);
+        deps.setUnread(key, true);
+      },
+    );
+  };
+
+  return {
+    open(key) {
+      markUnreadAsRead(key);
+    },
+    follow(key) {
+      if (key === followed) return;
+      followed = key;
+      if (key) markUnreadAsRead(key);
+    },
+    seen(key, through) {
+      const conversation = deps.getConversation(key);
+      const t = ms(through);
+      if (!conversation || Number.isNaN(t)) return;
+      // Nothing newer than the inbox's own latest message: open() and the inbox cover it.
+      if (t <= ms(conversation.last.at)) return;
+      if (t <= (readThrough.get(key) ?? Number.NEGATIVE_INFINITY)) return;
+      readThrough.set(key, t);
+      enqueue(key, () => write(conversation, through)).then(
+        () => deps.onWritten?.(),
+        () => undefined,
+      );
+    },
+  };
 }
 
 /** Every message in one office thread, oldest first. */

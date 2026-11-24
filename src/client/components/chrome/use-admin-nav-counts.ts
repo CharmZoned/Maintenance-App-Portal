@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import * as data from "@/lib/data";
 import { countAdminUnread, INBOX_CHANGED_EVENT } from "@/lib/inbox";
+import { workOrderStatusToDb } from "@/lib/mappers";
 import { supabase } from "@/lib/supabase";
 
 /** Live counts for the admin rail badges, by nav item id. Absent = no badge. */
@@ -20,13 +21,13 @@ export type AdminNavCounts = {
 /**
  * Head request: the database counts, no rows come back. Mirrors
  * `staffQueueTab(...) === "needs"` (components/maintenance/request-status.ts):
- * status Open (the DB's Title Case label) and no team member assigned.
+ * status open (mapped to the DB label) and no team member assigned.
  */
 export async function countRequestsNeedingAction(): Promise<number | undefined> {
   const { count, error } = await supabase
     .from("MaintenanceRequests")
     .select("id", { count: "exact", head: true })
-    .eq("status", "Open")
+    .eq("status", workOrderStatusToDb("open"))
     .is("assigned_staff_id", null);
   if (error || typeof count !== "number") return undefined;
   return count;
