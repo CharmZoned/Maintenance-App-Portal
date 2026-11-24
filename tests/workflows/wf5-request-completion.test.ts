@@ -230,4 +230,22 @@ describe("[WF5] the work-photo cap counts the current visit only", () => {
     expect(await complete(id, "Resealed the trap.")).toMatchObject({ status: "closed" });
     expect(await photoRows(id)).toHaveLength(6);
   });
+
+  test("a worker cannot back-date a photo out of the current visit", async () => {
+    const id = await startedBySam("Loose hinge");
+    const { data: me } = await sam.auth.getUser();
+    const { data: row, error } = await sam
+      .from("MaintenanceRequestPhotos")
+      .insert({
+        maintenance_request_id: id,
+        storage_path: `${id}/${randomUUID()}.png`,
+        uploaded_by_user_id: me.user!.id,
+        uploaded_by_role: "maintenance",
+        created_at: "2020-01-01T00:00:00Z",
+      })
+      .select("created_at")
+      .single();
+    expect(error).toBeNull();
+    expect(Date.now() - Date.parse(row!.created_at)).toBeLessThan(60_000);
+  });
 });

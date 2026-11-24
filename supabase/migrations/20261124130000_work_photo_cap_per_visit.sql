@@ -53,6 +53,13 @@ DECLARE
   v_since timestamptz;
   v_count integer;
 BEGIN
+  -- The work cap counts by created_at, so a portal user must not back-date a
+  -- photo out of the current visit. Rows written without a signed-in user
+  -- (seed and admin SQL) keep the time they give.
+  IF auth.uid() IS NOT NULL THEN
+    NEW.created_at := now();
+  END IF;
+
   v_is_work := COALESCE(NEW.uploaded_by_role = 'maintenance'::public.app_role, false);
 
   -- Lock the request so two overlapping uploads count one after the other
@@ -87,4 +94,4 @@ END;
 $function$;
 
 COMMENT ON FUNCTION private.enforce_maintenance_photo_cap() IS
-  'At most 5 photos from the reporter side, and at most 5 work photos per visit (since accepted, released or last reopened).';
+  'At most 5 photos from the reporter side, and at most 5 work photos per visit (since accepted, released or last reopened). Stamps created_at with now() for signed-in uploaders.';
