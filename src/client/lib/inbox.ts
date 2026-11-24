@@ -374,7 +374,10 @@ export function createInboxReadMarker(deps: {
         // again, so re-rendering cannot start a loop; a click retries.
         if (previous === undefined) readThrough.delete(key);
         else readThrough.set(key, previous);
-        deps.setUnread(key, true);
+        // Only if nothing happened there since: a reply sent meanwhile (or any
+        // newer message) already settled the conversation's unread state.
+        const current = deps.getConversation(key);
+        if (current && ms(current.last.at) <= ms(through)) deps.setUnread(key, true);
       },
     );
   };

@@ -218,6 +218,34 @@ describe("createInboxReadMarker — when the Messages page writes a read", () =>
     expect(page.renders()).toBeLessThan(10);
   });
 
+  it("a failed write does not mark a conversation unread again once the office has replied", async () => {
+    let rejectWrite: (err: Error) => void = () => {};
+    let inbox: InboxConversation[] = [
+      {
+        key: "wo:7",
+        kind: "request",
+        requestId: 7,
+        last: { at: T(9), body: "Disposal jammed", authorRole: "tenant", authorUserId: "u-tina", authorTenantId: 1, authorStaffId: null },
+        unread: true,
+      },
+    ];
+    const marker = createInboxReadMarker({
+      getConversation: (key) => inbox.find((c) => c.key === key),
+      setUnread: (key, unread) => {
+        inbox = inbox.map((c) => (c.key === key ? { ...c, unread } : c));
+      },
+      write: () => new Promise<void>((_resolve, reject) => (rejectWrite = reject)),
+    });
+    marker.open("wo:7");
+    expect(inbox[0].unread).toBe(false);
+    await flush(); // the write has started
+    // The admin answers before the read write settles (as recordReply does).
+    inbox = [{ ...inbox[0], last: { ...inbox[0].last, at: T(10), body: "On it", authorRole: "admin" }, unread: false }];
+    rejectWrite(new Error("503"));
+    await flush();
+    expect(inbox[0].unread).toBe(false);
+  });
+
   it("a click on a conversation whose write failed is the retry, once per click", async () => {
     const write = vi.fn<Write>().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
     const page = harness(write);

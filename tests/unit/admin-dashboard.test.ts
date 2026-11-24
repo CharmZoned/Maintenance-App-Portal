@@ -434,6 +434,13 @@ describe("KPI tiles", () => {
     expect(tile("homes-live")).toMatchObject({ value: "6", detail: "1 vacant not listed", href: "/listings" });
   });
 
+  test("homes live counts only flags that match a known unit, the same rule as the Website listings page", () => {
+    const sources = world();
+    sources.marketing = [...sources.marketing!, { unit_id: 999, marketed: true }];
+    const live = buildAdminDashboardModel(sources, NOW).kpis.find((k) => k.id === "homes-live")!;
+    expect(live.value).toBe("6");
+  });
+
   test("a failed secondary source shows a dash on its own tile only", () => {
     const degraded = buildAdminDashboardModel(world({ charges: null, accounts: null, inbox: null, marketing: null }), NOW);
     const value = (id: string) => degraded.kpis.find((k) => k.id === id)!.value;

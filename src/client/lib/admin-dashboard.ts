@@ -65,7 +65,7 @@ import type {
 import { staffQueueTab } from "@/components/maintenance/request-status";
 import { countUnreadConversations, officeKey, type InboxConversation } from "@/lib/inbox";
 import { displayNameFromEmail } from "@/lib/portal-nav";
-import { vacantUnlistedUnits } from "@/lib/listings-overview";
+import { liveUnits, vacantUnlistedUnits } from "@/lib/listings-overview";
 import { isOpenRequest, toRequestStatus } from "@/lib/request-status";
 import { formatMoney } from "@/lib/utils";
 import {
@@ -508,6 +508,8 @@ interface Ctx {
   marketedUnitIds: Set<number> | null;
   /** Vacant units with no lease on the way that are not on the website (or, when marketing is unknown, simply vacant). */
   vacantUnlisted: Unit[];
+  /** Homes live on the website — the same rule as the Website listings page (null = flags unknown). */
+  liveCount: number | null;
 }
 
 function isEmergency(wo: WorkOrder): boolean {
@@ -622,6 +624,9 @@ function createCtx(sources: AdminDashboardSources, now: Date): Ctx {
     awaiting: sources.paymentsAwaitingVerification,
     marketedUnitIds,
     vacantUnlisted,
+    liveCount: marketedUnitIds
+      ? liveUnits({ units: sources.units, marketedUnitIds, propertyById }).length
+      : null,
   };
 }
 
@@ -733,7 +738,7 @@ function buildKpis(ctx: Ctx): KpiTile[] {
   // Same count as the Messages page header and the Messages rail badge.
   const unread = sources.inbox ? countUnreadConversations(sources.inbox) : null;
 
-  const live = ctx.marketedUnitIds ? ctx.marketedUnitIds.size : null;
+  const live = ctx.liveCount;
   const notListed = ctx.vacantUnlisted.length;
 
   return [
@@ -1801,7 +1806,7 @@ function buildListings(ctx: Ctx): ListingsModel {
     };
   }
 
-  const live = ctx.marketedUnitIds.size;
+  const live = ctx.liveCount ?? 0;
   const unlisted = ctx.vacantUnlisted;
   const firstUnlisted = unlisted[0];
   const noteLines: string[] = [];

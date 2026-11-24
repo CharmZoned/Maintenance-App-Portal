@@ -133,6 +133,17 @@ describe("adminInboxThreads — who the office is talking to", () => {
     expect(threads.find((t) => t.id === "wo:6")?.updatedAt).toBe("2026-11-09T12:00:00.000Z");
   });
 
+  it("lists a request conversation whose request is not in the loaded list, so every unread one can be opened", () => {
+    const threads = adminInboxThreads({
+      workOrders: [],
+      inbox: [{ key: "wo:42", kind: "request", requestId: 42, last: last("2026-11-14T10:00:00.000Z", "Still dripping.", "tenant"), unread: true }],
+      people,
+    });
+    expect(threads).toEqual([
+      expect.objectContaining({ id: "wo:42", kind: "request", requestId: 42, title: "Request 42", preview: "Still dripping.", unread: true }),
+    ]);
+  });
+
   it("names a tenant's office thread by their unit", () => {
     expect(personLabelForUser("u-tina", people)).toBe("Tina Renter · Unit 1A");
     expect(personLabelForUser("u-unknown", people)).toBeNull();

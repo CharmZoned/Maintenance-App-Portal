@@ -427,6 +427,26 @@ export function adminInboxThreads(input: {
     });
   }
 
+  // A request conversation whose request is not in the loaded list (e.g. an old
+  // request past the list's row cap) still counts as unread in the shared
+  // inbox, so it gets a row too: otherwise the header, rail badge and dashboard
+  // KPI would disagree and the admin could not open it to clear the badge.
+  const listed = new Set(input.workOrders.map((wo) => wo.id));
+  for (const conversation of input.inbox) {
+    if (conversation.kind !== "request" || listed.has(conversation.requestId)) continue;
+    const role = conversation.last.authorRole;
+    threads.push({
+      id: conversation.key,
+      kind: "request",
+      requestId: conversation.requestId,
+      counterpart: "Office request",
+      title: `Request ${conversation.requestId}`,
+      preview: role === "admin" ? `Office: ${conversation.last.body}` : conversation.last.body,
+      updatedAt: conversation.last.at,
+      unread: conversation.unread,
+    });
+  }
+
   return threads.sort(
     (a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || a.id.localeCompare(b.id),

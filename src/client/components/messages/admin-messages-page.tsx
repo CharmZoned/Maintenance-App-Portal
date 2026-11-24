@@ -125,7 +125,8 @@ export function AdminMessagesPage({
     () => adminInboxThreads({ workOrders, inbox: inbox ?? [], people: { ...people, landlords } }),
     [workOrders, inbox, people, landlords],
   );
-  const unreadCount = inbox ? countUnreadConversations(threads) : 0;
+  // The shared inbox count — the same number as the rail badge and the dashboard KPI.
+  const unreadCount = inbox ? countUnreadConversations(inbox) : 0;
 
   const inboxRef = useRef(inbox);
   inboxRef.current = inbox;
