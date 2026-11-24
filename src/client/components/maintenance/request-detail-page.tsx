@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "@/context";
+import { LandlordPageIntro, LandlordPropertyHeading } from "@/components/landlord";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,10 @@ import {
   PriorityChip,
   SkeletonRow,
   StatusChip,
+  type RequestStatus,
 } from "@/components/patterns";
+import { formatDocumentDate } from "@/lib/landlord-documents";
+import { workOrderStatusFromDb } from "@/lib/mappers";
 import {
   formatActivityStamp,
   priorityLevel,
@@ -26,13 +30,14 @@ import {
   toRequestStatus,
   unitPropertyLabel,
 } from "@/lib/request-status";
-import { formatDate, toIsoDate } from "@/lib/utils";
+import { cn, formatDate, toIsoDate } from "@/lib/utils";
 import type {
   CommentVisibility,
   MaintenanceComment,
   MaintenancePhoto,
   MaintenanceStatusEvent,
   WorkOrder,
+  WorkOrderStatus,
 } from "@/types";
 import { WorkOrderDialog } from "./work-order-dialog";
 import { TenantRequestDetailPanel } from "./tenant-request-detail-panel";
@@ -43,7 +48,7 @@ type CompanionKind = "complete" | "hold" | null;
 /**
  * N3 Request detail — full page (Figma 03 Request). Role chrome differs:
  * admin actions panel, worker sticky Start→Complete, tenant message + photos,
- * landlord read-only thread.
+ * landlord read-only detail (Figma LRQ). Landlord comments stay tenant_visible.
  */
 export function RequestDetailPage({
   id,
@@ -297,6 +302,21 @@ export function RequestDetailPage({
     } finally {
       setPhotoBusy(false);
     }
+  }
+
+  if (app.isLandlord) {
+    return (
+      <LandlordRequestDetail
+        loading={loading}
+        loadError={loadError}
+        order={order}
+        photos={photos}
+        comments={comments}
+        history={history}
+        onRetry={() => setReloadKey((k) => k + 1)}
+        navigate={navigate}
+      />
+    );
   }
 
   if (loading) {
@@ -755,6 +775,664 @@ export function RequestDetailPage({
       </Dialog>
     </PageShell>
   );
+}
+
+/**
+ * Landlord request detail (Figma LRQ 2048:4352 desktop, 2048:4464 completed,
+ * 2048:4581 phone, plus loading 2048:7074 and not-available 2048:7148).
+ *
+ * Read-only. The timeline is the public status trail plus tenant_visible
+ * comments. The landlord–staff thread and its composer stay off this screen.
+ */
+export function LandlordRequestDetail({
+  loading,
+  loadError,
+  order,
+  photos,
+  comments,
+  history,
+  onRetry,
+  navigate,
+}: {
+  loading: boolean;
+  loadError: string | null;
+  order: WorkOrder | null;
+  photos: MaintenancePhoto[];
+  comments: MaintenanceComment[];
+  history: MaintenanceStatusEvent[];
+  onRetry: () => void;
+  navigate: (to: string) => void;
+}) {
+  const requestNumber = order ? requestNumberLabel(order) : undefined;
+
+  if (loading) {
+    return (
+      <LandlordRequestShell requestNumber={requestNumber}>
+        <BackToMaintenance navigate={navigate} />
+        <div className="flex flex-col gap-3" aria-busy="true">
+          <Bone className="h-3 w-24" />
+          <Bone className="h-8 w-full max-w-md md:h-9" />
+          <Bone className="h-6 w-28" />
+          <Bone className="h-3 w-full max-w-sm" />
+        </div>
+        <div className="rounded-md border border-border bg-card p-4 md:p-6">
+          <Bone className="h-4 w-28" />
+          <div className="mt-4 space-y-4">
+            {Array.from({ length: 7 }, (_, index) => (
+              <div
+                key={index}
+                className="grid grid-cols-[5.75rem_minmax(0,1fr)] gap-3 md:grid-cols-[9.25rem_minmax(0,1fr)]"
+              >
+                <Bone className="h-2.5 w-16" />
+                <Bone className="h-2.5 max-w-xs" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-md border border-border bg-card p-4 md:p-6">
+          <Bone className="h-4 w-24" />
+          <div className="mt-4 flex gap-3">
+            <Bone className="size-24 md:size-[7.5rem]" />
+            <Bone className="size-24 md:size-[7.5rem]" />
+          </div>
+        </div>
+      </LandlordRequestShell>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <LandlordRequestShell>
+        <BackToMaintenance navigate={navigate} />
+        <section className="rounded-md border border-border bg-card p-5 md:p-8" role="alert">
+          <h2 className="lg-heading text-foreground">Couldn’t load this request</h2>
+          <p className="mt-2 lg-body text-muted-foreground">{loadError}</p>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <Button className="h-11 w-full sm:w-auto" onClick={onRetry}>
+              Retry
+            </Button>
+            <Button
+              variant="secondary"
+              className="h-11 w-full sm:w-auto"
+              onClick={() => navigate("/maintenance")}
+            >
+              Back to Maintenance
+            </Button>
+          </div>
+        </section>
+      </LandlordRequestShell>
+    );
+  }
+
+  if (!order) {
+    return (
+      <LandlordRequestShell>
+        <BackToMaintenance navigate={navigate} />
+        <section className="rounded-md border border-border bg-card p-5 md:p-8">
+          <div
+            className="flex size-12 items-center justify-center rounded-xl bg-muted lg-section text-muted-foreground"
+            aria-hidden
+          >
+            ?
+          </div>
+          <h2 className="mt-4 lg-heading text-foreground">This request isn’t available</h2>
+          <p className="mt-2 max-w-xl lg-body text-muted-foreground">
+            It may have been removed, or it’s no longer linked to one of your properties. If you
+            think this is a mistake, message Landlord Gopher.
+          </p>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <Button className="h-11 w-full sm:w-auto" onClick={() => navigate("/maintenance")}>
+              Back to Maintenance
+            </Button>
+            <Button
+              variant="secondary"
+              className="h-11 w-full sm:w-auto"
+              onClick={() => navigate("/messages")}
+            >
+              Message Landlord Gopher
+            </Button>
+          </div>
+        </section>
+      </LandlordRequestShell>
+    );
+  }
+
+  const status = toRequestStatus(order);
+  const reporter = personName(order.tenant_first_name, order.tenant_last_name);
+  const caption = landlordStatusCaption(order);
+  const priority = priorityLevel(order.priority);
+  const completed = status === "Completed";
+  const priceLine = costLine(order);
+  const showCost = completed && priceLine.length > 0;
+  const completedWhen = order.completed_at ? formatDocumentDate(order.completed_at) : "";
+  const timeline = landlordTimeline(order, history, comments, reporter);
+  const rows = detailRows(order, reporter, completed);
+
+  return (
+    <LandlordRequestShell requestNumber={requestNumber}>
+      <div className="flex flex-col gap-3">
+        <BackToMaintenance navigate={navigate} />
+        <div className="flex flex-col gap-2">
+          <LandlordPageIntro eyebrow={requestNumber ?? "Request"} title={order.title} />
+          <div className="flex flex-col items-start gap-2 md:flex-row md:gap-4">
+            <div className="flex min-w-0 flex-col items-start gap-1">
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium",
+                  HEADER_CHIP[status],
+                )}
+              >
+                {status}
+              </span>
+              {caption ? <p className="lg-caption text-muted-foreground">{caption}</p> : null}
+            </div>
+            {priority ? (
+              <span
+                className={cn(
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+                  priority === "Emergency"
+                    ? "bg-destructive-tint text-destructive"
+                    : "bg-warning-tint text-warning",
+                )}
+              >
+                {priority === "Emergency" ? "Emergency" : "High priority"}
+              </span>
+            ) : null}
+          </div>
+          <p className="lg-body text-muted-foreground">{contextLine(order, reporter)}</p>
+        </div>
+      </div>
+
+      <section className="rounded-md border border-border bg-card p-4 md:p-6">
+        <LandlordPropertyHeading name="Details" />
+        {showCost ? (
+          <div className="mt-4 rounded-sm bg-success-tint px-4 py-3">
+            <p className="lg-label uppercase text-muted-foreground">
+              {completedWhen ? `Cost · Completed ${completedWhen}` : "Cost · Completed"}
+            </p>
+            <p className="lg-section text-foreground">{priceLine}</p>
+          </div>
+        ) : null}
+        <div className="mt-4 space-y-3">
+          {rows.map((row) => (
+            <div
+              key={row.label}
+              className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline gap-x-3 md:grid-cols-[9.25rem_minmax(0,1fr)]"
+            >
+              <p className="lg-caption text-muted-foreground">{row.label}</p>
+              <p className="lg-body min-w-0 text-foreground">{row.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-md border border-border bg-card p-4 md:p-6">
+        <LandlordPropertyHeading name={`Photos · ${photos.length}`} />
+        {photos.length === 0 ? (
+          <p className="mt-4 lg-body text-muted-foreground">No photos yet.</p>
+        ) : (
+          <>
+            <ul className="mt-4 flex flex-wrap gap-3">
+              {photos.map((photo, index) => (
+                <li key={photo.id}>
+                  {photo.url ? (
+                    <a
+                      href={photo.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block size-24 overflow-hidden rounded-sm border border-border bg-muted md:size-[7.5rem]"
+                    >
+                      <img
+                        src={photo.url}
+                        alt={photo.caption?.trim() || `Photo ${index + 1}`}
+                        className="size-full object-cover"
+                      />
+                    </a>
+                  ) : (
+                    <div className="flex size-24 items-center justify-center rounded-sm border border-border bg-muted lg-caption text-muted-foreground md:size-[7.5rem]">
+                      Photo {index + 1}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {photos.some((photo) => photo.url) ? (
+              <p className="mt-3 lg-caption text-muted-foreground">Tap a photo to see it full size.</p>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      <section className="rounded-md border border-border bg-card p-4 md:p-6">
+        <LandlordPropertyHeading name="Status timeline" />
+        {timeline.length === 0 ? (
+          <p className="mt-4 lg-body text-muted-foreground">No updates on this request yet.</p>
+        ) : (
+          <ol className="mt-4">
+            {timeline.map((item, index) => {
+              const last = index === timeline.length - 1;
+              return (
+                <li key={item.key} className="relative flex gap-4">
+                  {last ? null : (
+                    <span className="absolute bottom-0 left-[5px] top-3 w-0.5 bg-border" aria-hidden />
+                  )}
+                  <span
+                    className={cn(
+                      "relative z-10 mt-1.5 size-3 shrink-0 rounded-full",
+                      last ? "bg-brand" : "bg-muted-foreground",
+                    )}
+                    aria-hidden
+                  />
+                  <div className={cn("min-w-0", last ? "" : "pb-4")}>
+                    {item.status ? (
+                      <Badge variant={timelineBadgeVariant(item.status)}>{item.status}</Badge>
+                    ) : null}
+                    <p className={cn("lg-body-medium text-foreground", item.status ? "mt-1.5" : "")}>
+                      {item.body}
+                    </p>
+                    <p className="lg-caption text-muted-foreground">{item.when}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </section>
+    </LandlordRequestShell>
+  );
+}
+
+function LandlordRequestShell({
+  requestNumber,
+  children,
+}: {
+  requestNumber?: string;
+  children: ReactNode;
+}) {
+  const crumb = requestNumber
+    ? `Landlord portal / Maintenance / ${requestNumber}`
+    : "Landlord portal / Maintenance";
+  return (
+    <PageShell
+      title={
+        <>
+          <span className="lg-body font-medium md:hidden">{requestNumber ?? "Maintenance"}</span>
+          <span className="lg-body hidden font-medium md:inline">{crumb}</span>
+        </>
+      }
+      width="max-w-[45rem]"
+    >
+      <div className="flex flex-col gap-5">{children}</div>
+    </PageShell>
+  );
+}
+
+function BackToMaintenance({ navigate }: { navigate: (to: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => navigate("/maintenance")}
+      className="-ml-2 inline-flex h-11 items-center rounded-sm px-2 text-sm font-medium text-brand-text hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/40"
+    >
+      ‹ Maintenance
+    </button>
+  );
+}
+
+function Bone({ className }: { className?: string }) {
+  return <div className={cn("rounded-xs bg-muted motion-safe:animate-pulse", className)} aria-hidden />;
+}
+
+const HEADER_CHIP: Record<RequestStatus, string> = {
+  New: "bg-info-tint text-info",
+  Assigned: "bg-brand-tint text-brand-text",
+  "In progress": "bg-warning-tint text-warning",
+  "On hold": "bg-muted text-muted-foreground shadow-edge",
+  Completed: "bg-success-tint text-success",
+};
+
+function timelineBadgeVariant(
+  status: RequestStatus,
+): "info" | "brand" | "warning" | "success" | "neutral" {
+  switch (status) {
+    case "Assigned":
+      return "brand";
+    case "In progress":
+      return "warning";
+    case "On hold":
+      return "neutral";
+    case "Completed":
+      return "success";
+    default:
+      return "info";
+  }
+}
+
+type LandlordTimelineItem = {
+  key: string;
+  at: string;
+  seq: number;
+  status?: RequestStatus;
+  body: string;
+  when: string;
+};
+
+function landlordTimeline(
+  order: WorkOrder,
+  history: MaintenanceStatusEvent[],
+  comments: MaintenanceComment[],
+  reporter: string,
+): LandlordTimelineItem[] {
+  const items: LandlordTimelineItem[] = [
+    {
+      key: "reported",
+      at: order.created_at,
+      seq: 0,
+      status: "New",
+      body: reporter ? `${reporter} reported this` : "Request reported",
+      when: timelineWhen(order.created_at),
+    },
+  ];
+
+  const latestScheduledId = latestScheduledEventId(history);
+  for (const ev of history) {
+    if (ev.from_status == null || ev.note?.trim().toLowerCase() === "created") continue;
+    const db = workOrderStatusFromDb(ev.to_status);
+    const actor = roleLabel(ev.changed_by_role || "") || "Landlord Gopher";
+    const stamp = timelineWhen(ev.created_at);
+    const note = ev.note?.trim() ?? "";
+    items.push({
+      key: `status-${ev.id}`,
+      at: ev.created_at,
+      seq: 1,
+      status: historyBadge(db),
+      body: historyBody(db, order, actor, {
+        note,
+        attachSchedule: db === "scheduled" && ev.id === latestScheduledId,
+      }),
+      when: db === "scheduled" ? `${actor} · ${stamp}` : stamp,
+    });
+  }
+
+  for (const comment of comments) {
+    if (comment.visibility !== "tenant_visible") continue;
+    items.push({
+      key: `comment-${comment.id}`,
+      at: comment.created_at,
+      seq: 2,
+      body: comment.body,
+      when: `${commentWho(comment, reporter)} · ${timelineWhen(comment.created_at)}`,
+    });
+  }
+
+  return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.seq - b.seq));
+}
+
+/** Latest scheduled transition wins when timestamps tie. */
+function latestScheduledEventId(history: MaintenanceStatusEvent[]): number | null {
+  let latest: MaintenanceStatusEvent | null = null;
+  for (const ev of history) {
+    if (ev.from_status == null || ev.note?.trim().toLowerCase() === "created") continue;
+    if (workOrderStatusFromDb(ev.to_status) !== "scheduled") continue;
+    if (
+      !latest ||
+      ev.created_at > latest.created_at ||
+      (ev.created_at === latest.created_at && ev.id > latest.id)
+    ) {
+      latest = ev;
+    }
+  }
+  return latest?.id ?? null;
+}
+
+function historyBadge(db: WorkOrderStatus): RequestStatus {
+  switch (db) {
+    case "closed":
+      return "Completed";
+    case "on_hold":
+      return "On hold";
+    case "in_progress":
+      return "In progress";
+    case "scheduled":
+      return "Assigned";
+    default:
+      return "New";
+  }
+}
+
+function historyBody(
+  db: WorkOrderStatus,
+  order: WorkOrder,
+  actor: string,
+  event: { note: string; attachSchedule: boolean },
+): string {
+  // A stored note is the row. Live order fields must not rewrite earlier visits.
+  if (event.note) return event.note;
+  const vendor = order.vendor_name?.trim() ?? "";
+  switch (db) {
+    case "scheduled": {
+      if (!event.attachSchedule) return "Scheduled";
+      const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
+      if (when) return `Visit scheduled for ${when}`;
+      return vendor ? `${actor} assigned ${vendor}` : "Scheduled";
+    }
+    case "in_progress":
+      return vendor ? `${vendor} started work` : "Work started";
+    case "on_hold":
+      return order.hold_reason?.trim() || "Put on hold";
+    case "closed": {
+      const parts = [
+        order.resolution_notes?.trim(),
+        order.landlord_price != null ? formatLandlordPrice(order.landlord_price) : "",
+        vendor,
+      ].filter(Boolean);
+      return parts.length ? parts.join(" · ") : "Completed";
+    }
+    default:
+      if (vendor) return `${actor} assigned ${vendor}`;
+      if (order.assigned_staff_id) return `${actor} assigned this request`;
+      return "Opened again";
+  }
+}
+
+function detailRows(
+  order: WorkOrder,
+  reporter: string,
+  completed: boolean,
+): { label: string; value: string }[] {
+  const where = placeLine(order) || "—";
+  const rows: { label: string; value: string }[] = [
+    { label: "Category", value: order.category?.trim() || "—" },
+    { label: "Where", value: where },
+    { label: "Description", value: order.description?.trim() || "—" },
+    { label: "Priority", value: priorityWord(order.priority) },
+  ];
+  if (!completed) rows.push({ label: "Entry", value: entryValue(order) });
+  rows.push({ label: "Assigned to", value: assignedValue(order) });
+  if (completed) {
+    rows.push({
+      label: "Completed",
+      value: order.completed_at ? formatDocumentDate(order.completed_at) || "—" : "—",
+    });
+    const price = costLine(order);
+    if (price) rows.push({ label: "Cost", value: price });
+  } else {
+    rows.push({
+      label: "Scheduled",
+      value: order.scheduled_at ? stableDocumentDate(order.scheduled_at) || "—" : "—",
+    });
+  }
+  rows.push({ label: "Reported by", value: reportedValue(reporter, order.created_at) });
+  return rows;
+}
+
+function landlordStatusCaption(order: WorkOrder): string | undefined {
+  const status = toRequestStatus(order);
+  const vendor = order.vendor_name?.trim() ?? "";
+  if (status === "New") return "Needs assignment";
+  if (status === "Assigned") {
+    const when = order.scheduled_at ? stableDocumentDate(order.scheduled_at) : "";
+    if (vendor && when) return `${vendor} · visit ${when}`;
+    if (vendor) return vendor;
+    if (when) return `Visit ${when}`;
+    if (order.assigned_staff_id) return "Assigned to maintenance";
+    return "Assigned";
+  }
+  if (status === "In progress") return "Work in progress";
+  if (status === "On hold") return requestNextStep(order);
+  const when = order.completed_at ? formatDocumentDate(order.completed_at) : "";
+  const tail = costLine(order);
+  if (when && tail) return `Completed ${when} · ${tail}`;
+  if (when) return `Completed ${when}`;
+  if (tail) return tail;
+  return "Completed";
+}
+
+function requestNumberLabel(order: WorkOrder): string {
+  const raw = order.request_number?.trim();
+  if (!raw) return `#${order.id}`;
+  return raw.startsWith("#") ? raw : `#${raw}`;
+}
+
+function personName(first?: string | null, last?: string | null): string {
+  return [first, last].filter(Boolean).join(" ").trim();
+}
+
+/** Vendor name when the request has one. Staff display names are not on the work order. */
+function assigneeLabel(order: WorkOrder): string {
+  const vendor = order.vendor_name?.trim();
+  if (vendor) return vendor;
+  if (order.assigned_staff_id) return "Maintenance";
+  return "";
+}
+
+function assignedValue(order: WorkOrder): string {
+  return assigneeLabel(order) || "Not yet assigned";
+}
+
+function entryValue(order: WorkOrder): string {
+  if (!order.permission_to_enter) return "Please schedule first";
+  const first = order.tenant_first_name?.trim();
+  if (first) return `OK to enter if ${first} isn’t home`;
+  return "OK to enter if no one is home";
+}
+
+function placeLine(order: WorkOrder): string {
+  if (!order.unit_name?.trim() && !order.property_name?.trim()) return "";
+  const place = unitPropertyLabel(order.unit_name, order.property_name);
+  return place === "Your home" ? "" : place;
+}
+
+function contextLine(order: WorkOrder, reporter: string): string {
+  const place = placeLine(order);
+  const when = formatDocumentDate(order.created_at);
+  const reported = reporter
+    ? when
+      ? `Reported by ${reporter}, ${when}`
+      : `Reported by ${reporter}`
+    : "";
+  return [place, reported].filter(Boolean).join(" · ") || "—";
+}
+
+function reportedValue(reporter: string, iso: string): string {
+  const when = detailWhen(iso);
+  if (reporter && when) return `${reporter} · ${when}`;
+  return reporter || when || "—";
+}
+
+function costLine(order: WorkOrder): string {
+  const price = order.landlord_price != null ? formatLandlordPrice(order.landlord_price) : "";
+  const vendor = order.vendor_name?.trim() ?? "";
+  return [price, vendor].filter(Boolean).join(" · ");
+}
+
+function priorityWord(priority: WorkOrder["priority"]): string {
+  switch (priority) {
+    case "low":
+      return "Low";
+    case "high":
+      return "High";
+    case "urgent":
+      return "Urgent";
+    default:
+      return "Normal";
+  }
+}
+
+function formatLandlordPrice(amount: number): string {
+  const cents = Math.round(Math.abs(amount) * 100) % 100;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cents === 0 ? 0 : 2,
+    maximumFractionDigits: cents === 0 ? 0 : 2,
+  }).format(amount);
+}
+
+const NOON_UTC_DATE = /^\d{4}-\d{2}-\d{2}T12:00:00(?:\.\d+)?(?:Z|\+00:00)$/;
+
+/**
+ * Date-only writes are stored as noon UTC. Keep the calendar day from the
+ * ISO prefix, same as formatActivityStamp, so the day does not shift by zone.
+ */
+function dateOnlyKey(iso: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso) || NOON_UTC_DATE.test(iso)) return iso.slice(0, 10);
+  return null;
+}
+
+function stableDocumentDate(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const day = dateOnlyKey(iso);
+  return formatDocumentDate(day ?? iso);
+}
+
+function hasClock(iso: string): boolean {
+  return dateOnlyKey(iso) == null;
+}
+
+function clockLabel(iso: string): string {
+  if (!hasClock(iso)) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d
+    .toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    .replace(" AM", " am")
+    .replace(" PM", " pm");
+}
+
+function isTodayIso(iso: string): boolean {
+  const day = dateOnlyKey(iso);
+  const d = day ? new Date(`${day}T00:00:00`) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
+function timelineWhen(iso: string): string {
+  const time = clockLabel(iso);
+  if (isTodayIso(iso)) return time ? `Today ${time}` : "Today";
+  const day = dateOnlyKey(iso);
+  const date = formatDocumentDate(day ?? iso);
+  if (time && date) return `${date} · ${time}`;
+  return date || time;
+}
+
+function detailWhen(iso: string): string {
+  const day = dateOnlyKey(iso);
+  const date = formatDocumentDate(day ?? iso);
+  const time = clockLabel(iso);
+  if (date && time) return `${date}, ${time}`;
+  return date || time;
+}
+
+function commentWho(comment: MaintenanceComment, reporter: string): string {
+  if (comment.author_role === "tenant") return reporter || "Tenant";
+  if (comment.author_role === "landlord") return "You";
+  return roleLabel(comment.author_role || "") || "Landlord Gopher";
 }
 
 function Field({ label, value }: { label: string; value: string }) {
