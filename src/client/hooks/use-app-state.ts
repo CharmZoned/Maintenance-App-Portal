@@ -416,6 +416,12 @@ export function useAppState(
       if (isLandlord) throw new Error("Landlord portal is read-only.");
       return data.addMaintenanceComment(...args);
     },
+    listOfficeThreads: data.listOfficeThreads,
+    listOfficeMessages: data.listOfficeMessages,
+    sendOfficeMessage: data.sendOfficeMessage,
+    markOfficeThreadRead: data.markOfficeThreadRead,
+    countUnreadOfficeThreads: data.countUnreadOfficeThreads,
+    listUserAccounts: data.listUserAccounts,
     listMaintenanceStatusHistory: data.listMaintenanceStatusHistory,
     listStaff: data.listStaff,
     getTenantHomeContext: data.getTenantHomeContext,

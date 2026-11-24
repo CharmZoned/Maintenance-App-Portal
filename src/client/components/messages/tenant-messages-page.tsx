@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Wrench } from "lucide-react";
+import { useApp } from "@/context";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorRetry, SkeletonRow } from "@/components/patterns";
@@ -7,32 +8,32 @@ import { MessageBubble } from "./message-bubble";
 import { MessageComposer } from "./message-composer";
 import { cn } from "@/lib/utils";
 import {
-  createSyntheticRequestThread,
-  loadTenantMessagesMock,
-  messagesLoadScenarioFromSearch,
-  MOCK_THREAD_IDS,
-  resolveMessagesDeepLink,
-  unreadCount,
-  type MockConversation,
-  type MockMessage,
-  type TenantMessagesMockBundle,
-} from "@/lib/tenant-messages-mock";
+  commentSenderLabel,
+  formatMessageTime,
+  mergeMessageThreads,
+  officeMessageSenderLabel,
+  parseOfficeThreadId,
+  parseWorkOrderThreadId,
+  resolveStaffMessagesDeepLink,
+  threadsFromOfficeSummaries,
+  threadsFromWorkOrders,
+  workOrderThreadId,
+  type MessageThread,
+} from "@/lib/messages";
+import type { OfficeMessage } from "@/lib/data";
+import { messagesLoadScenarioFromSearch } from "@/lib/tenant-messages-mock";
+import { supabase } from "@/lib/supabase";
+import type { MaintenanceComment, WorkOrder } from "@/types";
 
 type LoadState = "loading" | "ready" | "error";
 
 /**
- * Tenant Messages — Figma M/T/D inbox + conversation (fully mocked).
- * Phone: list vs thread as separate screens. Tablet: stacked. Desktop: split.
+ * Tenant Messages — Figma M/T/D inbox + conversation, backed by:
+ * - OfficeMessages (one direct thread with the Landlord Gopher office)
+ * - MaintenanceRequestComments on the tenant's work orders
  *
- * Deep-link contract (Requests → Messages):
- * - `/messages?request=<workOrderId>` — `workOrderId` is MaintenanceRequests
- *   **primary key** (`order.id`). Match demo `linkedRequestIds` / WO number soft
- *   keys when possible; otherwise open a synthetic request thread for that id
- *   so phone never lands on a silent unselected inbox.
- * - `/messages?thread=<mockThreadId>` — in-page selection / phone thread.
- *   Unknown thread → not-found empty on mobile + desktop.
- *
- * // TODO(data-gap): messages backend not available
+ * Deep links: `?thread=wo:<id>` / `?thread=office:<uuid>` / `?request=<pk>`
+ * Demo: `?demo=empty|error` still exercises empty/error UI without a backend miss.
  */
 export function TenantMessagesPage({
   search = "",
@@ -43,16 +44,36 @@ export function TenantMessagesPage({
   navigate: (to: string) => void;
   replace?: (to: string) => void;
 }) {
-  const [bundle, setBundle] = useState<TenantMessagesMockBundle | null>(null);
+  const {
+    listWorkOrders,
+    listMaintenanceComments,
+    addMaintenanceComment,
+    listOfficeThreads,
+    listOfficeMessages,
+    sendOfficeMessage,
+    markOfficeThreadRead,
+    setError,
+    setNotice,
+  } = useApp();
+
+  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
+  const [officeSummaries, setOfficeSummaries] = useState<
+    Awaited<ReturnType<typeof listOfficeThreads>>
+  >([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [state, setState] = useState<LoadState>("loading");
   const [error, setLocalError] = useState<string | null>(null);
+  const [openedIds, setOpenedIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Soft-open rows for `?thread=wo:` / own `office:` not yet in the loaded inbox. */
+  const [extraThreads, setExtraThreads] = useState<MessageThread[]>([]);
   const [mobileThread, setMobileThread] = useState(false);
-  /** Unknown `?thread=` (or empty `?request=`) — show empty on phone + desktop. */
   const [deepLinkMiss, setDeepLinkMiss] = useState<string | null>(null);
-  const [localMessages, setLocalMessages] = useState<Record<string, MockMessage[]>>(
-    {},
-  );
+  const [comments, setComments] = useState<MaintenanceComment[]>([]);
+  const [officeMessages, setOfficeMessages] = useState<OfficeMessage[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState<string | null>(null);
+  const [threadReloadKey, setThreadReloadKey] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
 
   const loadScenario = useMemo(() => messagesLoadScenarioFromSearch(search), [search]);
@@ -61,56 +82,129 @@ export function TenantMessagesPage({
     setState("loading");
     setLocalError(null);
     try {
-      // TODO(data-gap): messages backend not available
-      // Reachable empty/error via ?demo=empty|error (see messagesLoadScenarioFromSearch).
-      const data = await loadTenantMessagesMock({ scenario: loadScenario });
-      setBundle(data);
-      setLocalMessages(
-        Object.fromEntries(data.conversations.map((c) => [c.id, [...c.messages]])),
-      );
+      if (loadScenario === "error") {
+        throw new Error("Couldn’t load messages right now. Try again.");
+      }
+      if (loadScenario === "empty") {
+        const { data: auth } = await supabase.auth.getUser();
+        setCurrentUserId(auth.user?.id ?? null);
+        setWorkOrders([]);
+        setOfficeSummaries([]);
+        setState("ready");
+        return;
+      }
+      const [{ data: auth }, list, office] = await Promise.all([
+        supabase.auth.getUser(),
+        listWorkOrders(),
+        listOfficeThreads(),
+      ]);
+      setCurrentUserId(auth.user?.id ?? null);
+      setWorkOrders(list);
+      setOfficeSummaries(office);
       setState("ready");
     } catch (err) {
       setLocalError((err as Error).message);
       setState("error");
+      setError((err as Error).message);
     }
-  }, [loadScenario]);
+  }, [listWorkOrders, listOfficeThreads, setError, loadScenario]);
 
   useEffect(() => {
     void load();
   }, [load, reloadKey]);
 
-  const conversations = bundle?.conversations ?? [];
+  const conversations = useMemo(() => {
+    if (loadScenario === "empty") return [];
+    const requestThreads = threadsFromWorkOrders(workOrders, { openedIds });
+    const direct = threadsFromOfficeSummaries(officeSummaries, {
+      ensureOwnThread: currentUserId
+        ? { userId: currentUserId, title: "Landlord Gopher office" }
+        : undefined,
+    });
+    // Prefer office title for the tenant's own thread.
+    const merged = mergeMessageThreads(
+      direct.map((t) =>
+        t.threadUserId === currentUserId
+          ? { ...t, title: "Landlord Gopher office" }
+          : t,
+      ),
+      requestThreads,
+    );
+    const known = new Set(merged.map((t) => t.id));
+    const extras = extraThreads.filter((t) => !known.has(t.id));
+    return extras.length === 0 ? merged : mergeMessageThreads(merged, extras);
+  }, [workOrders, officeSummaries, openedIds, currentUserId, loadScenario, extraThreads]);
 
-  // Resolve ?request= (Requests PK) and ?thread= (inbox) per deep-link contract.
+  const unread = useMemo(
+    () => conversations.filter((c) => c.unread).length,
+    [conversations],
+  );
+
   useEffect(() => {
     if (state !== "ready") return;
-    const link = resolveMessagesDeepLink(search, conversations);
+    const link = resolveStaffMessagesDeepLink(search, conversations, {
+      currentUserId,
+      isAdmin: false,
+    });
 
     if (link.kind === "thread") {
+      const officeUser = parseOfficeThreadId(link.threadId);
+      if (
+        officeUser &&
+        currentUserId &&
+        officeUser === currentUserId &&
+        !conversations.some((t) => t.id === link.threadId)
+      ) {
+        setExtraThreads((prev) => {
+          if (prev.some((t) => t.id === link.threadId)) return prev;
+          return [
+            ...prev,
+            {
+              id: link.threadId,
+              kind: "direct",
+              title: "Landlord Gopher office",
+              preview: "Message the office — no messages yet.",
+              updatedAt: new Date().toISOString(),
+              unread: false,
+              threadUserId: officeUser,
+            },
+          ];
+        });
+      }
       setSelectedId(link.threadId);
+      setOpenedIds((prev) => {
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
+      });
       setMobileThread(true);
       setDeepLinkMiss(null);
       return;
     }
 
     if (link.kind === "request") {
-      if (link.synthetic) {
-        // Ensure a conversation exists for this real order.id / uuid.
-        // TODO(data-gap): messages backend not available
-        setBundle((prev) => {
-          if (!prev) return prev;
-          if (prev.conversations.some((c) => c.id === link.threadId)) return prev;
-          const synthetic = createSyntheticRequestThread(link.requestId);
-          return {
+      if (!link.known) {
+        const id = workOrderThreadId(link.requestId);
+        setExtraThreads((prev) => {
+          if (prev.some((t) => t.id === id)) return prev;
+          return [
             ...prev,
-            conversations: [synthetic, ...prev.conversations],
-          };
+            {
+              id,
+              kind: "request",
+              title: `Request ${link.requestId}`,
+              preview: "No messages yet.",
+              updatedAt: new Date().toISOString(),
+              unread: false,
+              requestId: link.requestId,
+            },
+          ];
         });
-        setLocalMessages((prev) =>
-          prev[link.threadId] ? prev : { ...prev, [link.threadId]: [] },
-        );
       }
       setSelectedId(link.threadId);
+      setOpenedIds((prev) => {
+        if (prev.has(link.threadId)) return prev;
+        return new Set(prev).add(link.threadId);
+      });
       setMobileThread(true);
       setDeepLinkMiss(null);
       return;
@@ -119,38 +213,121 @@ export function TenantMessagesPage({
     if (link.kind === "not-found") {
       setSelectedId(null);
       setMobileThread(true);
-      setDeepLinkMiss(link.requestId || "unknown");
+      setDeepLinkMiss(link.raw || "unknown");
       return;
     }
 
-    // No deep-link — desktop/tablet Figma shows WO-1842 selected by default.
     setDeepLinkMiss(null);
-    setSelectedId((prev) => prev ?? MOCK_THREAD_IDS.leakingTap);
+    setSelectedId((prev) => prev ?? conversations[0]?.id ?? null);
     setMobileThread(false);
-  }, [search, conversations, state]);
+  }, [search, conversations, state, currentUserId]);
 
-  const selected: MockConversation | undefined = conversations.find(
-    (c) => c.id === selectedId,
-  );
-  const threadMessages = selectedId ? (localMessages[selectedId] ?? []) : [];
-  const unread = useMemo(() => unreadCount(conversations), [conversations]);
+  const selected: MessageThread | undefined =
+    conversations.find((c) => c.id === selectedId) ??
+    extraThreads.find((c) => c.id === selectedId);
+  const selectedRequestId =
+    selected?.kind === "request"
+      ? (selected.requestId ?? null)
+      : selectedId
+        ? parseWorkOrderThreadId(selectedId)
+        : null;
+  const selectedThreadUserId =
+    selected?.kind === "direct"
+      ? (selected.threadUserId ?? parseOfficeThreadId(selected.id))
+      : selectedId
+        ? (() => {
+            const uid = parseOfficeThreadId(selectedId);
+            return uid && currentUserId && uid === currentUserId ? uid : null;
+          })()
+        : null;
+
+  const selectedRequestIdRef = useRef(selectedRequestId);
+  selectedRequestIdRef.current = selectedRequestId;
+  const selectedThreadUserIdRef = useRef(selectedThreadUserId);
+  selectedThreadUserIdRef.current = selectedThreadUserId;
+
+  useEffect(() => {
+    setComments([]);
+    setOfficeMessages([]);
+    setThreadError(null);
+
+    if (selectedRequestId != null) {
+      let cancelled = false;
+      setThreadLoading(true);
+      void listMaintenanceComments(selectedRequestId)
+        .then((rows) => {
+          if (cancelled) return;
+          setComments(rows.filter((r) => r.visibility === "tenant_visible"));
+          setThreadError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setComments([]);
+          setThreadError((err as Error).message);
+          setError((err as Error).message);
+        })
+        .finally(() => {
+          if (!cancelled) setThreadLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (selectedThreadUserId) {
+      let cancelled = false;
+      setThreadLoading(true);
+      void listOfficeMessages(selectedThreadUserId)
+        .then(async (rows) => {
+          if (cancelled) return;
+          setOfficeMessages(rows);
+          setThreadError(null);
+          try {
+            await markOfficeThreadRead(selectedThreadUserId);
+            setOfficeSummaries((prev) =>
+              prev.map((t) =>
+                t.thread_user_id === selectedThreadUserId ? { ...t, unread: false } : t,
+              ),
+            );
+          } catch (err) {
+            setNotice(
+              `Opened the conversation, but couldn’t mark it read: ${(err as Error).message}`,
+            );
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setOfficeMessages([]);
+          setThreadError((err as Error).message);
+          setError((err as Error).message);
+        })
+        .finally(() => {
+          if (!cancelled) setThreadLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setThreadLoading(false);
+  }, [
+    selectedRequestId,
+    selectedThreadUserId,
+    threadReloadKey,
+    listMaintenanceComments,
+    listOfficeMessages,
+    markOfficeThreadRead,
+    setError,
+    setNotice,
+  ]);
+
   const showMobileConversation = Boolean(mobileThread && (selected || deepLinkMiss));
 
-  function openThread(conversation: MockConversation) {
+  function openThread(conversation: MessageThread) {
     setSelectedId(conversation.id);
+    setOpenedIds((prev) => new Set(prev).add(conversation.id));
     setMobileThread(true);
     setDeepLinkMiss(null);
-    // Mark read locally only — no read-state API.
-    // TODO(data-gap): messages backend not available
-    setBundle((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        conversations: prev.conversations.map((c) =>
-          c.id === conversation.id ? { ...c, unread: false } : c,
-        ),
-      };
-    });
     if (replace) {
       replace(`/messages?thread=${encodeURIComponent(conversation.id)}`);
     }
@@ -162,43 +339,45 @@ export function TenantMessagesPage({
     if (replace) replace("/messages");
   }
 
-  async function sendMockMessage(body: string) {
-    if (!selectedId) return;
-    // TODO(data-gap): messages backend not available — local append only
-    const now = new Date();
-    const timeLabel = `Today ${now.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    })}`;
-    const next: MockMessage = {
-      id: `local-${Date.now()}`,
-      sender: "You",
-      body,
-      timeLabel,
-      side: "outgoing",
-    };
-    setLocalMessages((prev) => ({
-      ...prev,
-      [selectedId]: [...(prev[selectedId] ?? []), next],
-    }));
-    setBundle((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        conversations: prev.conversations.map((c) =>
-          c.id === selectedId
-            ? { ...c, preview: body, timeLabel, unread: false }
-            : c,
-        ),
-      };
-    });
+  async function sendOnRequest(body: string) {
+    if (selectedRequestId == null) return;
+    const requestId = selectedRequestId;
+    try {
+      const created = await addMaintenanceComment(requestId, body, "tenant_visible");
+      if (selectedRequestIdRef.current !== requestId) return;
+      setComments((prev) => [...prev, created]);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    }
   }
 
-  function openLinkedRequest(path: string | undefined) {
-    if (!path) return;
-    // Thin affordance — does not load a chat-linked work order.
-    // TODO(data-gap): messages backend not available
-    navigate(path);
+  async function sendOnOffice(body: string) {
+    if (!selectedThreadUserId) return;
+    const threadUserId = selectedThreadUserId;
+    try {
+      const created = await sendOfficeMessage(threadUserId, body);
+      if (selectedThreadUserIdRef.current !== threadUserId) return;
+      setOfficeMessages((prev) => [...prev, created]);
+      setOfficeSummaries((prev) => {
+        const rest = prev.filter((t) => t.thread_user_id !== threadUserId);
+        return [
+          {
+            thread_user_id: threadUserId,
+            last_message_at: created.created_at,
+            last_message_body: created.body,
+            last_author_role: created.author_role,
+            last_author_user_id: created.author_user_id,
+            unread: false,
+          },
+          ...rest,
+        ];
+      });
+      void markOfficeThreadRead(threadUserId).catch(() => undefined);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    }
   }
 
   const hero = (
@@ -234,9 +413,8 @@ export function TenantMessagesPage({
   const notFoundEmpty = (
     <EmptyState
       message={
-        // TODO(data-gap): messages backend not available
         deepLinkMiss
-          ? `No conversation for “${deepLinkMiss}” yet. Messaging isn’t connected — pick a thread from your inbox, or open the request from Requests.`
+          ? `No conversation for “${deepLinkMiss}”. Pick a thread from your inbox, or open the request from Requests.`
           : "Select a conversation to read and reply."
       }
       actionLabel={deepLinkMiss ? "Back to requests" : undefined}
@@ -256,57 +434,112 @@ export function TenantMessagesPage({
         </p>
       </div>
       <ul className="border-t border-border">
-        {conversations.map((c) => (
-          <li key={c.id}>
-            <button
-              type="button"
-              onClick={() => openThread(c)}
-              className={cn(
-                "flex min-h-[7.375rem] w-full items-center gap-3 border-b border-border px-4 py-3.5 text-left transition-colors",
-                c.id === selectedId ? "bg-brand-tint" : "bg-card hover:bg-muted/50",
-              )}
-              aria-current={c.id === selectedId ? "true" : undefined}
-              aria-label={
-                c.unread
-                  ? `${c.title}, unread. ${c.preview}. ${c.timeLabel}`
-                  : `${c.title}. ${c.preview}. ${c.timeLabel}`
-              }
-            >
-              <div className="flex h-full w-2 shrink-0 items-center justify-center">
-                {c.unread ? (
-                  <span className="size-2 rounded-full bg-brand" aria-hidden />
-                ) : null}
-              </div>
-              <div className="min-w-0 flex-1" aria-hidden>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    {c.kind === "request" ? (
-                      <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                    ) : null}
-                    <span className="truncate text-sm font-semibold text-foreground">
-                      {c.title}
-                    </span>
-                  </div>
-                  <span className="shrink-0 text-xs text-muted-foreground">{c.timeLabel}</span>
+        {conversations.map((c) => {
+          const time = formatMessageTime(c.updatedAt);
+          return (
+            <li key={c.id}>
+              <button
+                type="button"
+                onClick={() => openThread(c)}
+                className={cn(
+                  "flex min-h-[7.375rem] w-full items-center gap-3 border-b border-border px-4 py-3.5 text-left transition-colors",
+                  c.id === selectedId ? "bg-brand-tint" : "bg-card hover:bg-muted/50",
+                )}
+                aria-current={c.id === selectedId ? "true" : undefined}
+                aria-label={
+                  c.unread
+                    ? `${c.title}, unread. ${c.preview}. ${time}`
+                    : `${c.title}. ${c.preview}. ${time}`
+                }
+              >
+                <div className="flex h-full w-2 shrink-0 items-center justify-center">
+                  {c.unread ? (
+                    <span className="size-2 rounded-full bg-brand" aria-hidden />
+                  ) : null}
                 </div>
-                <p className="mt-1 truncate text-[13px] text-muted-foreground">{c.preview}</p>
-              </div>
-            </button>
-          </li>
-        ))}
+                <div className="min-w-0 flex-1" aria-hidden>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {c.kind === "request" ? (
+                        <Wrench className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                      ) : null}
+                      <span className="truncate text-sm font-semibold text-foreground">
+                        {c.title}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-xs text-muted-foreground">{time}</span>
+                  </div>
+                  <p className="mt-1 truncate text-[13px] text-muted-foreground">{c.preview}</p>
+                </div>
+              </button>
+            </li>
+          );
+        })}
       </ul>
-      {bundle ? (
-        <div className="space-y-1 px-5 py-5">
-          <p className="text-sm font-medium text-foreground">{bundle.propertyManagerTitle}</p>
-          <p className="text-sm text-muted-foreground">{bundle.propertyManagerDetail}</p>
-        </div>
-      ) : null}
+      <div className="space-y-1 px-5 py-5">
+        <p className="text-sm font-medium text-foreground">Property office</p>
+        <p className="text-sm text-muted-foreground">
+          Message Landlord Gopher directly, or open a request thread.
+        </p>
+      </div>
     </section>
   );
 
-  // Cap pane to viewport so Send stays above the fold on laptop (messages scroll).
   const conversationPaneClass =
     "flex h-[min(32rem,calc(100dvh-12rem))] max-h-[calc(100dvh-12rem)] flex-col overflow-hidden rounded-lg border border-border bg-card";
+
+  const isDirect = selected?.kind === "direct";
+  const threadBody = threadLoading ? (
+    <>
+      <SkeletonRow />
+      <SkeletonRow />
+    </>
+  ) : threadError ? (
+    <ErrorRetry message={threadError} onRetry={() => setThreadReloadKey((k) => k + 1)} />
+  ) : isDirect ? (
+    officeMessages.length === 0 ? (
+      <EmptyState message="No messages yet. Say hello to the office." />
+    ) : (
+      officeMessages.map((m) => {
+        const { label, outgoing } = officeMessageSenderLabel(m, {
+          currentUserId,
+          currentRole: "tenant",
+        });
+        return (
+          <div
+            key={m.id}
+            className={outgoing ? "flex justify-end" : "flex justify-start"}
+          >
+            <MessageBubble
+              sender={label}
+              body={m.body}
+              time={formatMessageTime(m.created_at)}
+              side={outgoing ? "outgoing" : "incoming"}
+            />
+          </div>
+        );
+      })
+    )
+  ) : comments.length === 0 ? (
+    <EmptyState message="No messages on this request yet. Send the first update." />
+  ) : (
+    comments.map((c) => {
+      const { label, outgoing } = commentSenderLabel(c, { currentRole: "tenant" });
+      return (
+        <div
+          key={c.id}
+          className={outgoing ? "flex justify-end" : "flex justify-start"}
+        >
+          <MessageBubble
+            sender={label}
+            body={c.body}
+            time={formatMessageTime(c.created_at)}
+            side={outgoing ? "outgoing" : "incoming"}
+          />
+        </div>
+      );
+    })
+  );
 
   const conversationCard = selected ? (
     <section
@@ -318,62 +551,39 @@ export function TenantMessagesPage({
           <h3 className="text-lg font-semibold leading-[1.625rem] text-foreground">
             {selected.title}
           </h3>
-          {selected.openRequestPath ? (
+          {selectedRequestId != null ? (
             <Button
               type="button"
               variant="secondary"
               size="lg"
               className="min-h-11 w-full sm:w-auto sm:min-w-[10rem]"
-              onClick={() => openLinkedRequest(selected.openRequestPath)}
+              onClick={() => navigate(`/maintenance?wo=${selectedRequestId}`)}
             >
               Open request
             </Button>
           ) : null}
         </div>
         <div className="space-y-0.5">
-          {selected.participants.map((line) => (
-            <p key={line} className="text-xs text-muted-foreground">
-              {line}
-            </p>
-          ))}
+          <p className="text-xs text-muted-foreground">
+            {isDirect
+              ? "You · Landlord Gopher office"
+              : "You · assigned request members"}
+          </p>
         </div>
       </div>
       <div className="min-h-0 flex-1 space-y-3 overflow-auto p-5">
-        {threadMessages.length === 0 ? (
-          <EmptyState
-            message={
-              // TODO(data-gap): messages backend not available
-              selected.id.startsWith("mock:request:")
-                ? "No messages for this request yet. Chat isn’t connected — you can still open the request, or write a local demo reply."
-                : "No messages in this conversation yet."
-            }
-          />
-        ) : (
-          threadMessages.map((m) => (
-            <div
-              key={m.id}
-              className={m.side === "outgoing" ? "flex justify-end" : "flex justify-start"}
-            >
-              <MessageBubble
-                sender={m.sender}
-                body={m.body}
-                time={m.timeLabel}
-                side={m.side}
-              />
-            </div>
-          ))
-        )}
+        {threadBody}
         <p className="pt-2 text-xs text-muted-foreground">
           Only members of this conversation can view or reply.
         </p>
       </div>
       <div className="shrink-0">
         <MessageComposer
-          // TODO(data-gap): messages backend not available — send stays local
           resetKey={selected.id}
           placeholder="Write a message…"
           onSend={async (body) => {
-            await sendMockMessage(body);
+            if (isDirect) await sendOnOffice(body);
+            else await sendOnRequest(body);
           }}
         />
       </div>
@@ -385,7 +595,11 @@ export function TenantMessagesPage({
   );
 
   return (
-    <PageShell title="Messages" meta={state === "ready" && unread > 0 ? `${unread} unread` : "Inbox"} width="max-w-none">
+    <PageShell
+      title="Messages"
+      meta={state === "ready" && unread > 0 ? `${unread} unread` : "Inbox"}
+      width="max-w-none"
+    >
       {state === "loading" ? (
         <div className="space-y-3" aria-busy="true" aria-label="Loading messages">
           {hero}
@@ -404,14 +618,13 @@ export function TenantMessagesPage({
       ) : conversations.length === 0 && !deepLinkMiss ? (
         <div className="space-y-6">
           {hero}
-          <EmptyState message="No conversations yet. When messaging is connected, threads for your home and requests will show up here." />
+          <EmptyState message="No conversations yet. When you message the office or open a request, threads show up here." />
           <p className="text-center text-xs text-muted-foreground">
             Private by membership. Request threads are limited to authorized participants.
           </p>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Phone conversation / not-found is a separate screen. */}
           <div className={cn(showMobileConversation ? "block md:hidden" : "hidden")}>
             {mobileConversationHero}
             <div className="mt-4">{conversationCard}</div>
@@ -421,11 +634,9 @@ export function TenantMessagesPage({
             {hero}
             <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-stretch">
               <div className="w-full lg:w-[360px] lg:shrink-0">{inboxCard}</div>
-              {/* Tablet stacks conversation under inbox; desktop sits beside. */}
               <div
                 className={cn(
                   "min-w-0 flex-1",
-                  // Always show pane on md+; on phone only when inbox layout (rare).
                   deepLinkMiss && !selected ? "flex md:flex" : "hidden md:block",
                 )}
               >

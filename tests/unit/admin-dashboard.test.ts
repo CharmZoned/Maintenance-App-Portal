@@ -876,7 +876,11 @@ describe("messages", () => {
       ["user", "Lena Owner · Landlord", "Boiler follow-up — can we confirm the part?", "Today · 16 Nov", true],
       ["user", "Raj Patel · Tenant · 1B", "Sent the rest by Zelle. Please verify.", "Fri · 13 Nov", true],
     ]);
-    expect(messages.threads.every((t) => t.href === "/messages")).toBe(true);
+    expect(messages.threads.map((t) => t.href)).toEqual([
+      "/messages?thread=office:u-sam",
+      "/messages?thread=office:u-lena",
+      "/messages?thread=office:u-raj",
+    ]);
   });
 
   test("request comments appear as conversations but are never claimed unread", () => {
@@ -976,7 +980,7 @@ describe("every link is a route the portal has", () => {
       model.listings.href,
     ].filter((href): href is string => Boolean(href));
     const route =
-      /^\/(maintenance(\/\d+)?|rent(\?period=\d{4}-\d{2})?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=wo:\d+)?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
+      /^\/(maintenance(\/\d+)?|rent(\?period=\d{4}-\d{2})?|properties(\/\d+)?|people\?tab=approvals|messages(\?thread=(wo:\d+|office:[^&]+))?|listings|leases(\?lease=\d+)?|applications\?app=\d+|calendar|documents)$/;
     for (const href of hrefs) expect(href).toMatch(route);
   });
 });

@@ -282,15 +282,11 @@ export function TenantRequestDetailPanel({
       )}
 
       <div className="mt-auto pt-6">
-        {/*
-          TODO(data-gap): full messages↔WO join still needs the messages backend.
-          Messages accepts `?request=` (demo WO id map / soft-open for unknowns).
-        */}
         <Button
           type="button"
           variant="secondary"
           className="h-11 w-full min-h-11 text-sm text-brand-text"
-          onClick={() => navigate(`/messages?request=${order.id}`)}
+          onClick={() => navigate(`/messages?thread=wo:${order.id}`)}
         >
           Open request conversation
         </Button>
