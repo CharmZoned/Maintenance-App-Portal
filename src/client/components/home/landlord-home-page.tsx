@@ -16,6 +16,7 @@ import { useShellChrome } from "@/components/chrome/shell-chrome-context";
 import {
   LandlordDocumentRow,
   LandlordPageIntro,
+  LandlordPortalTitle,
   LandlordPropertyHeading,
   LandlordScopeHeading,
 } from "@/components/landlord";
@@ -458,7 +459,7 @@ export function LandlordHomePage({ navigate }: { navigate: (to: string) => void 
   }
 
   return (
-    <PageShell title="Home" width="max-w-none">
+    <PageShell title={<LandlordPortalTitle crumb="Landlord portal / Home" />} width="max-w-none">
       <div className="pb-24 md:pb-0">{body}</div>
       <PhoneActions onMessage={onMessage} />
     </PageShell>

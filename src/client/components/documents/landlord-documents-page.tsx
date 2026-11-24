@@ -12,6 +12,7 @@ import { ErrorRetry, SkeletonRow } from "@/components/patterns";
 import {
   LandlordDocumentRow,
   LandlordPageIntro,
+  LandlordPortalTitle,
   LandlordPropertyHeading,
   LandlordScopeHeading,
 } from "@/components/landlord";
@@ -164,7 +165,7 @@ export function LandlordDocumentsPage() {
   }
 
   return (
-    <PageShell title={TITLE} width="max-w-6xl">
+    <PageShell title={<LandlordPortalTitle crumb="Landlord portal / Documents" />} width="max-w-6xl">
       <div className="flex flex-col gap-9">
         <div className="flex flex-col gap-7">
           <LandlordPageIntro eyebrow={EYEBROW} title={TITLE} description={DESCRIPTION} />
