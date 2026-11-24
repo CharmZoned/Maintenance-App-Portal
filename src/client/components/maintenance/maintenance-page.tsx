@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { WorkOrderDialog } from "./work-order-dialog";
+import { LandlordSubmitDialog } from "./landlord-submit-dialog";
 import { TenantRequestsPage } from "./tenant-requests-page";
 import { formatStaffMember } from "./work-order-assignee-date-fields";
 import type { WorkOrder } from "@/types";
@@ -98,6 +99,8 @@ function StaffLandlordMaintenancePage({
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<WorkOrder | undefined>(undefined);
+  /** Landlord "New request" (LG-C). */
+  const [landlordSubmitOpen, setLandlordSubmitOpen] = useState(false);
 
   const listWorkOrders = app.listWorkOrders;
   const setError = app.setError;
@@ -309,6 +312,14 @@ function StaffLandlordMaintenancePage({
           >
             <Plus className="h-4 w-4" /> New request
           </Button>
+        ) : app.isLandlord && app.canSubmitRequest ? (
+          <Button
+            variant="brand"
+            size="header"
+            onClick={() => setLandlordSubmitOpen(true)}
+          >
+            <Plus className="h-4 w-4" /> New request
+          </Button>
         ) : null
       }
     >
@@ -418,14 +429,16 @@ function StaffLandlordMaintenancePage({
             message={
               orders.length === 0
                 ? app.isLandlord
-                  ? "Maintenance on your properties will show up here (read-only)."
+                  ? "Maintenance on your properties will show up here."
                   : "Nothing needs action right now."
                 : "No requests match this filter."
             }
             filtered={orders.length > 0 && filtersActive}
             onClear={clearFilters}
             actionLabel={
-              orders.length === 0 && app.canCreateWorkOrders ? "New request" : undefined
+              orders.length === 0 && (app.canCreateWorkOrders || app.isLandlord)
+                ? "New request"
+                : undefined
             }
             onAction={
               app.canCreateWorkOrders
@@ -433,7 +446,9 @@ function StaffLandlordMaintenancePage({
                     setEditing(undefined);
                     setDialogOpen(true);
                   }
-                : undefined
+                : app.isLandlord
+                  ? () => setLandlordSubmitOpen(true)
+                  : undefined
             }
           />
         </div>
@@ -491,6 +506,14 @@ function StaffLandlordMaintenancePage({
         }}
         workOrder={editing}
       />
+
+      {app.isLandlord ? (
+        <LandlordSubmitDialog
+          open={landlordSubmitOpen}
+          onOpenChange={setLandlordSubmitOpen}
+          onCreated={() => void load()}
+        />
+      ) : null}
     </PageShell>
   );
 }
