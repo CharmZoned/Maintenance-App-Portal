@@ -369,7 +369,10 @@
  * The token NAMES are unchanged, so every existing utility (bg-card,
  * text-muted-foreground, bg-sidebar…) keeps working inside the scope; only the
  * values differ. Put `lg-admin` on the admin rail, drawer, page shell, and on
- * any portalled surface (menus, sheets) that belongs to them.
+ * any portalled surface (menus, sheets) that belongs to them. While the admin
+ * workspace is mounted `<body>` carries it too (admin-workspace.tsx), so
+ * dialogs opened from admin pages match. `--primary` and `--brand` are the
+ * same navy here: the admin workspace has one primary button colour.
  *
  * Light only: in dark the scope falls through to the app's dark ramp.
  */
