@@ -1,34 +1,50 @@
+import type { ReactNode } from "react";
+import { Check, ChevronDown, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { statusOptions, type RequestStatus } from "@/lib/request-status";
+import { cn } from "@/lib/utils";
 import type { WorkOrderStatus } from "@/types";
 import type { RequestSectionVisibility, RequestViewerRole } from "./role-visibility";
 
 /**
- * Actions panel (Figma "UPGRADED — Request" admin frame; brief N3 actions table).
+ * Actions card (Figma "UPGRADED — Request" admin frame 25:1219, worker frames
+ * 28:26141 / 28:26677; spec §2.5).
  *
- * Admin: "Assign and schedule" when New, ONE main "Change status" control,
- *   Vendor and Cost as tappable values, Edit and Delete underneath.
- * Worker: one primary button that advances (Start work → Mark completed),
- *   plus Put on hold / Resume. Cannot reassign or reschedule.
- * Tenant / landlord: no panel (sectionsForRole(role).actionsPanel === false).
+ * Admin, top to bottom: the ONE main status control (New: primary "Assign and
+ *   schedule" with a secondary "Change status ▾" under it; Assigned / In progress
+ *   / On hold: primary "Change status ▾"; Completed: secondary "Change status ▾"),
+ *   a divider, Vendor and Cost as values with a tap-to-edit link, a divider,
+ *   then "Edit details" and "Delete".
+ * Worker: one primary that advances the job (Start work → Mark completed, or
+ *   Resume work when on hold), "Put on hold" under it, then the worker price
+ *   (read-only: only an admin sets prices). No reassign, reschedule, vendor,
+ *   edit or delete.
+ * Tenant / landlord: no card (sectionsForRole(role).actionsPanel === false).
  *
- * Status changes that need input (On hold → reason + follow-up date;
- * Completed → "What fixed it?") open a small dialog owned by the page; this
- * panel only reports the requested target status.
+ * This card only reports intent. The page opens the small dialogs:
+ *   - onChangeStatus("on_hold")  → Put on hold (reason + follow-up date)
+ *   - onChangeStatus("closed")   → Mark completed ("What fixed it?")
+ *   - onChangeStatus("scheduled") with no assignee / date → Assign and schedule
+ *   - onDelete                    → the "Delete this request?" confirm
+ *
+ * Phone (< 768px): the page shows the primary in a sticky bottom bar, so this
+ * card is titled "More actions" and hides its own primary there.
  */
 export type WorkerAction = "start" | "complete" | "resume";
 
-/** The single advancing worker button for a status, or null. */
+/**
+ * The single advancing worker button for a status, or null.
+ * "New" is a job still in the worker pool (not assigned to anyone): the worker
+ * cannot start it (RLS only lets the assigned worker change status).
+ */
 export function workerPrimaryAction(status: RequestStatus): WorkerAction | null {
   switch (status) {
-    case "New":
     case "Assigned":
       return "start";
     case "In progress":
@@ -40,24 +56,36 @@ export function workerPrimaryAction(status: RequestStatus): WorkerAction | null 
   }
 }
 
-const WORKER_ACTION_LABEL: Record<WorkerAction, string> = {
+export const WORKER_ACTION_LABEL: Record<WorkerAction, string> = {
   start: "Start work",
   complete: "Mark completed",
   resume: "Resume work",
 };
 
+/** Stored status each worker action asks for ("closed" opens the Mark completed dialog). */
+export const WORKER_ACTION_TARGET: Record<WorkerAction, WorkOrderStatus> = {
+  start: "in_progress",
+  complete: "closed",
+  resume: "in_progress",
+};
+
+/** Worker "Put on hold" is offered while the job is assigned or under way. */
+export function workerCanHold(status: RequestStatus): boolean {
+  return status === "Assigned" || status === "In progress";
+}
+
 export interface RequestActionsPanelProps {
   role: RequestViewerRole;
   visibility: RequestSectionVisibility;
   status: RequestStatus;
-  /** Stored status, for the admin Change status control value. */
+  /** Stored status (kept for callers; the menu marks the current label). */
   dbStatus: WorkOrderStatus;
   busy?: boolean;
-  /** Admin: vendor name or null ("Add vendor"). Shown only when visibility.vendor. */
+  /** Admin: vendor name, or null for "None" / "Add vendor". Shown only when visibility.vendor. */
   vendorLabel?: string | null;
-  /** Formatted price for this viewer (worker price / landlord price), or null ("Add cost"). */
+  /** Price text for this viewer ("Worker $42.00 · Landlord $55.00" / "$42.00"), or null. */
   costLabel?: string | null;
-  /** Admin: open assign-and-schedule (person + date). */
+  /** Admin: open Assign and schedule (person + date). */
   onAssign?: () => void;
   /** Admin Change status OR worker buttons: target stored status. */
   onChangeStatus?: (next: WorkOrderStatus) => void;
@@ -71,41 +99,68 @@ export function RequestActionsPanel(props: RequestActionsPanelProps) {
   const { visibility } = props;
   if (!visibility.actionsPanel) return null;
   return (
-    <aside className="w-full shrink-0 space-y-3 rounded-md border border-border bg-card p-4 lg:w-[280px]">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</h2>
+    <aside
+      aria-label="Actions"
+      className="flex w-full shrink-0 flex-col gap-3 rounded-md border border-border bg-card p-4 md:p-5 lg:w-80"
+    >
+      <h2 className="text-[17px] font-semibold leading-[22px] text-foreground">
+        <span className="md:hidden">More actions</span>
+        <span className="hidden md:inline">Actions</span>
+      </h2>
       {visibility.workerStatusActions ? <WorkerActions {...props} /> : null}
       {visibility.changeStatus ? <AdminActions {...props} /> : null}
     </aside>
   );
 }
 
+// ── Worker ─────────────────────────────────────────────────────────
+
 function WorkerActions({ status, busy, onChangeStatus, costLabel, visibility }: RequestActionsPanelProps) {
   const primary = workerPrimaryAction(status);
-  const target: Record<WorkerAction, WorkOrderStatus> = {
-    start: "in_progress",
-    complete: "closed",
-    resume: "in_progress",
-  };
+  const canHold = workerCanHold(status);
+  const note =
+    status === "New"
+      ? "This job isn't assigned to you yet."
+      : status === "Completed"
+        ? "This job is completed."
+        : null;
   return (
-    <div className="space-y-2">
+    <>
       {primary ? (
-        <Button className="w-full" size="touch" variant="brand" disabled={busy} onClick={() => onChangeStatus?.(target[primary])}>
+        // Phone: the sticky bar carries the primary.
+        <Button
+          className="hidden w-full md:inline-flex"
+          disabled={busy || !onChangeStatus}
+          onClick={() => onChangeStatus?.(WORKER_ACTION_TARGET[primary])}
+        >
           {WORKER_ACTION_LABEL[primary]}
         </Button>
       ) : null}
-      {status !== "On hold" && status !== "Completed" ? (
-        <Button className="w-full" size="touch" variant="secondary" disabled={busy} onClick={() => onChangeStatus?.("on_hold")}>
+      {canHold ? (
+        <Button
+          variant="secondary"
+          className="h-11 w-full md:h-7"
+          disabled={busy || !onChangeStatus}
+          onClick={() => onChangeStatus?.("on_hold")}
+        >
           Put on hold
         </Button>
       ) : null}
-      {visibility.cost ? <ValueRow label="Your price" value={costLabel ?? "—"} /> : null}
-    </div>
+      {note ? <p className="text-sm leading-5 text-muted-foreground">{note}</p> : null}
+      {visibility.cost ? (
+        <>
+          <Divider />
+          <ValueRow label="Cost" value={costLabel || "Not recorded"} />
+        </>
+      ) : null}
+    </>
   );
 }
 
+// ── Admin ──────────────────────────────────────────────────────────
+
 function AdminActions({
   status,
-  dbStatus,
   busy,
   visibility,
   vendorLabel,
@@ -117,67 +172,174 @@ function AdminActions({
   onEdit,
   onDelete,
 }: RequestActionsPanelProps) {
+  const isNew = status === "New";
+  const assignFirst = isNew && Boolean(onAssign);
+  // Primary (solid) Change status except when Assign leads (New) or the job is done.
+  const changeIsPrimary = !assignFirst && status !== "Completed";
+  const vendorEditable = visibility.costVendorEditable && onEditVendor;
+  const costEditable = visibility.costVendorEditable && onEditCost;
+  const hasValues = visibility.vendor || Boolean(visibility.cost);
+  const hasEditDelete = visibility.editAndDelete && (onEdit || onDelete);
+
   return (
-    <div className="space-y-3">
-      {status === "New" && onAssign ? (
-        <Button className="w-full" size="touch" variant="brand" disabled={busy} onClick={onAssign}>
+    <>
+      {assignFirst ? (
+        // Phone: the sticky bar carries "Assign and schedule".
+        <Button className="hidden w-full md:inline-flex" disabled={busy} onClick={onAssign}>
           Assign and schedule
         </Button>
       ) : null}
-      <div className="space-y-1">
-        <p className="text-xs text-muted-foreground">Change status</p>
-        <Select
-          value={dbStatus}
-          disabled={busy}
-          onValueChange={(v) => onChangeStatus?.(v as WorkOrderStatus)}
-        >
-          <SelectTrigger className="h-11 w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {statusOptions().map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {visibility.vendor ? (
-        <ValueRow label="Vendor" value={vendorLabel || "Add vendor"} onClick={visibility.costVendorEditable ? onEditVendor : undefined} />
-      ) : null}
-      {visibility.cost ? (
-        <ValueRow label="Cost" value={costLabel || "Add cost"} onClick={visibility.costVendorEditable ? onEditCost : undefined} />
-      ) : null}
-      {visibility.editAndDelete ? (
-        <div className="flex gap-2 border-t border-border pt-3">
-          <Button variant="ghost" size="touch" disabled={busy} onClick={onEdit}>
-            Edit details
+      {onChangeStatus ? (
+        <RequestStatusMenu current={status} disabled={busy} onChangeStatus={onChangeStatus}>
+          <Button
+            variant={changeIsPrimary ? "default" : "secondary"}
+            // Phone: the sticky bar already is "Change status" unless Assign leads there.
+            className={cn("w-full justify-between", assignFirst ? "h-11 md:h-7" : "hidden md:inline-flex")}
+            disabled={busy}
+          >
+            Change status
+            <ChevronDown aria-hidden />
           </Button>
-          <Button variant="destructive" size="touch" disabled={busy} onClick={onDelete}>
-            Delete
-          </Button>
-        </div>
+        </RequestStatusMenu>
       ) : null}
-    </div>
+
+      {hasValues ? (
+        <>
+          <Divider className={cn(!assignFirst && "md:block hidden")} />
+          {visibility.vendor ? (
+            <ValueRow
+              label="Vendor"
+              value={vendorLabel?.trim() || "None"}
+              actionLabel={vendorEditable ? (vendorLabel?.trim() ? "Change" : "Add vendor") : undefined}
+              actionAria={vendorLabel?.trim() ? "Change vendor" : undefined}
+              onAction={vendorEditable ? onEditVendor : undefined}
+              disabled={busy}
+            />
+          ) : null}
+          {visibility.cost ? (
+            <ValueRow
+              label="Cost"
+              value={costLabel || "Not recorded"}
+              actionLabel={costEditable ? (costLabel ? "Edit" : "Add cost") : undefined}
+              actionAria={costLabel ? "Edit cost" : undefined}
+              onAction={costEditable ? onEditCost : undefined}
+              disabled={busy}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      {hasEditDelete ? (
+        <>
+          <Divider />
+          <div className="flex flex-col gap-2">
+            {onEdit ? (
+              <Button variant="secondary" className="h-11 w-full md:h-7" disabled={busy} onClick={onEdit}>
+                <Pencil aria-hidden />
+                Edit details
+              </Button>
+            ) : null}
+            {onDelete ? (
+              <Button variant="destructive" className="h-11 w-full md:h-7" disabled={busy} onClick={onDelete}>
+                <Trash2 aria-hidden />
+                Delete
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </>
   );
 }
 
-function ValueRow({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
-  const body = (
-    <>
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium text-foreground">{value}</span>
-    </>
-  );
-  if (!onClick) return <div className="flex min-h-11 items-center justify-between gap-2">{body}</div>;
+const STATUS_MENU_ORDER: WorkOrderStatus[] = ["open", "scheduled", "in_progress", "on_hold", "closed"];
+
+/**
+ * Admin "Change status ▾" menu (spec §2.5): New, Assigned, In progress,
+ * On hold…, Completed…. The current status is ticked and not selectable; the
+ * "…" items open a small dialog on the page before anything is saved.
+ * Exported so the phone sticky bar uses the same menu.
+ */
+export function RequestStatusMenu({
+  current,
+  disabled,
+  onChangeStatus,
+  children,
+}: {
+  current: RequestStatus;
+  disabled?: boolean;
+  onChangeStatus?: (next: WorkOrderStatus) => void;
+  /** The trigger (a Button). */
+  children: ReactNode;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex min-h-11 w-full items-center justify-between gap-2 rounded-sm px-1 text-left hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring/40"
-    >
-      {body}
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild disabled={disabled}>
+        {children}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[12rem]">
+        {statusOptions(STATUS_MENU_ORDER).map((option) => {
+          const isCurrent = option.label === current;
+          const needsInput = option.value === "on_hold" || option.value === "closed";
+          return (
+            <DropdownMenuItem
+              key={option.value}
+              disabled={isCurrent}
+              onSelect={() => onChangeStatus?.(option.value)}
+              className="min-h-11 md:min-h-8"
+            >
+              <span className="flex size-4 items-center justify-center" aria-hidden>
+                {isCurrent ? <Check /> : null}
+              </span>
+              {option.label}
+              {needsInput ? "…" : ""}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ── Bits ───────────────────────────────────────────────────────────
+
+function Divider({ className }: { className?: string }) {
+  return <div role="presentation" className={cn("h-px bg-border", className)} />;
+}
+
+/** Read-only field (label over value) with an optional right-aligned edit link. */
+function ValueRow({
+  label,
+  value,
+  actionLabel,
+  actionAria,
+  onAction,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  actionLabel?: string;
+  actionAria?: string;
+  onAction?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <p className="text-[13px] font-medium leading-[18px] text-muted-foreground">{label}</p>
+        <p className="break-words text-[15px] leading-[22px] text-foreground">{value}</p>
+      </div>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          disabled={disabled}
+          aria-label={actionAria}
+          className="inline-flex min-h-11 shrink-0 items-center rounded-sm px-1 text-sm font-medium leading-5 text-brand-text outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:pointer-events-none disabled:opacity-50 md:min-h-7"
+        >
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }
