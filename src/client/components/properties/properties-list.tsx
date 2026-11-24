@@ -16,6 +16,7 @@ import {
   landlordIndex,
   ownerIdentity,
   parseOwnerParam,
+  plural,
   portfolioSummary,
   withOwnerParam,
 } from "./property-owners";
@@ -40,12 +41,12 @@ function AdminPropertiesList({ navigate }: { navigate: Navigate }) {
   const { properties, landlords, canMutatePortfolio } = useApp();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Property | undefined>(undefined);
-  // The owner filter lives in the URL (?owner=<landlord id>), so coming back
-  // from a property restores it. The router doesn't hand this page `search`,
-  // so the initial value comes straight from the location.
-  const [ownerFilter, setOwnerFilter] = useState<number | null>(() =>
-    parseOwnerParam(window.location.search),
-  );
+  // The owner filter lives only in the URL (?owner=<landlord id>), so coming
+  // back from a property restores it and the rail's plain /properties link
+  // clears it. The router doesn't hand this page `search`, but App re-renders
+  // whenever the router's search changes (navigate, back/forward), so reading
+  // the location on every render keeps the grid in step with the URL.
+  const ownerFilter = parseOwnerParam(window.location.search);
 
   const byId = useMemo(() => landlordIndex(landlords), [landlords]);
   const owners = useMemo(() => buildPropertyOwners(properties, byId), [properties, byId]);
@@ -64,7 +65,6 @@ function AdminPropertiesList({ navigate }: { navigate: Navigate }) {
     : properties;
 
   const selectOwner = (ownerId: number | null) => {
-    setOwnerFilter(ownerId);
     navigate(window.location.pathname, {
       replace: true,
       search: withOwnerParam(window.location.search, ownerId),
@@ -100,6 +100,25 @@ function AdminPropertiesList({ navigate }: { navigate: Navigate }) {
               selected={activeOwner?.id ?? null}
               onSelect={selectOwner}
             />
+          ) : null}
+          {activeOwner ? (
+            <p
+              aria-live="polite"
+              className="lg-body flex min-w-0 flex-col items-start gap-x-2 gap-y-1 text-muted-foreground md:flex-row md:flex-wrap md:items-center"
+            >
+              <span className="min-w-0 break-words">
+                Showing {plural(visible.length, "property", "properties")} owned by{" "}
+                <span className="font-medium text-foreground">{activeOwner.name}</span>
+              </span>
+              <span aria-hidden className="hidden md:inline">·</span>
+              <button
+                type="button"
+                onClick={() => selectOwner(null)}
+                className="-my-3 rounded-sm py-3 font-medium text-foreground underline decoration-border underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              >
+                Show all owners
+              </button>
+            </p>
           ) : null}
           <ul
             aria-label={activeOwner ? `Properties owned by ${activeOwner.name}` : "Properties"}

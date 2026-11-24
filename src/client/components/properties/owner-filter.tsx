@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { portfolioSummary, type PropertyOwner } from "./property-owners";
 
@@ -7,7 +8,9 @@ import { portfolioSummary, type PropertyOwner } from "./property-owners";
  * properties; pressing it again (or "All owners") shows everyone's.
  *
  * A row that scrolls sideways on phones (so the properties stay near the top),
- * a wrapping grid from `md`.
+ * a wrapping grid from `md`. On phones the pressed tile is scrolled into view
+ * (on load and whenever the selection changes), so a filter restored from the
+ * URL is never hidden off to the right.
  */
 export function OwnerFilter({
   owners,
@@ -21,12 +24,32 @@ export function OwnerFilter({
   selected: number | null;
   onSelect: (ownerId: number | null) => void;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const row = rowRef.current;
+    const tile = row?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    // Only the phone layout scrolls; from `md` the tiles wrap and fit.
+    if (!row || !tile || row.scrollWidth <= row.clientWidth) return;
+    // Scroll the row only (never the page): bring the tile fully into view,
+    // keeping the row's side padding as a margin.
+    const rowBox = row.getBoundingClientRect();
+    const tileBox = tile.getBoundingClientRect();
+    const pad = parseFloat(getComputedStyle(row).paddingLeft) || 0;
+    if (tileBox.left < rowBox.left + pad) {
+      row.scrollLeft += tileBox.left - rowBox.left - pad;
+    } else if (tileBox.right > rowBox.right - pad) {
+      row.scrollLeft += tileBox.right - rowBox.right + pad;
+    }
+  }, [selected, owners.length]);
+
   return (
     <section aria-labelledby="owner-filter-heading" className="flex min-w-0 flex-col gap-3">
       <h2 id="owner-filter-heading" className="lg-label text-muted-foreground">
         Owners · {owners.length}
       </h2>
       <div
+        ref={rowRef}
         role="group"
         aria-label="Filter properties by owner"
         className={cn(
@@ -81,9 +104,13 @@ function OwnerTile({
           : "border-border hover:border-ring",
       )}
     >
-      <span className="lg-body-medium w-full truncate text-foreground">{name}</span>
+      <span className="lg-body-medium w-full truncate text-foreground" title={name}>
+        {name}
+      </span>
       {company ? (
-        <span className="lg-caption w-full truncate text-muted-foreground">{company}</span>
+        <span className="lg-caption w-full truncate text-muted-foreground" title={company}>
+          {company}
+        </span>
       ) : null}
       <span className="lg-caption w-full text-muted-foreground">{detail}</span>
     </button>

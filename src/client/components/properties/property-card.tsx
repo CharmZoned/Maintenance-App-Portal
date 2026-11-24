@@ -29,7 +29,8 @@ export function PropertyCard({
   const palette = colorClasses(p.color);
   const units = p.unit_count ?? 0;
   const occupied = p.occupied_count ?? 0;
-  const occupancy = units ? Math.round((occupied / units) * 100) : 0;
+  // No units yet: there's no occupancy to speak of, so a dash rather than 0%.
+  const occupancy = units ? `${Math.round((occupied / units) * 100)}%` : "—";
   const address = [p.address, p.city, p.state].filter(Boolean).join(", ");
   const href = `/properties/${p.id}`;
 
@@ -59,6 +60,7 @@ export function PropertyCard({
                 <a
                   {...navProps(href, onNavigate)}
                   data-card-link
+                  title={p.name}
                   className="outline-none after:absolute after:inset-0 after:rounded-md after:content-[''] group-hover:underline group-hover:decoration-border group-hover:underline-offset-4"
                 >
                   {p.name}
@@ -69,13 +71,17 @@ export function PropertyCard({
             {address ? (
               <p className="lg-body mt-1 flex min-w-0 items-center gap-1.5 text-muted-foreground">
                 <MapPin aria-hidden size={14} strokeWidth={2} absoluteStrokeWidth className="shrink-0" />
-                <span className="truncate">{address}</span>
+                <span className="truncate" title={address}>
+                  {address}
+                </span>
               </p>
             ) : null}
             <p className="lg-body mt-0.5 flex min-w-0 items-center gap-1.5 text-muted-foreground">
               <UserRound aria-hidden size={14} strokeWidth={2} absoluteStrokeWidth className="shrink-0" />
               <span className="sr-only">Owner: </span>
-              <span className="truncate text-foreground">{owner}</span>
+              <span className="truncate text-foreground" title={owner}>
+                {owner}
+              </span>
             </p>
             {p.year_built ? (
               <p className="lg-caption mt-1 text-muted-foreground">Built {p.year_built}</p>
@@ -87,7 +93,7 @@ export function PropertyCard({
           <dl className="grid min-w-60 flex-1 grid-cols-3 gap-2 @[40rem]:w-64 @[40rem]:flex-none">
             <Figure label="Units" value={units} />
             <Figure label="Occupied" value={`${occupied}/${units}`} />
-            <Figure label="Occupancy" value={`${occupancy}%`} />
+            <Figure label="Occupancy" value={occupancy} />
           </dl>
           {onEdit ? (
             <AdminButton
