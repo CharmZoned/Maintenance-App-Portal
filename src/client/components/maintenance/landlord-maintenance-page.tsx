@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { LandlordPageIntro, LandlordPropertyHeading } from "@/components/landlord";
+import { LandlordPageIntro, LandlordPortalTitle, LandlordPropertyHeading } from "@/components/landlord";
 import { StatusChip } from "@/components/patterns";
 import { PageShell } from "@/components/page-shell";
 import { Badge } from "@/components/ui/badge";
@@ -138,7 +138,7 @@ export function LandlordMaintenancePage({
   }
 
   return (
-    <PageShell title="Maintenance">
+    <PageShell title={<LandlordPortalTitle crumb="Landlord portal / Maintenance" />}>
       <LandlordMaintenanceView
         model={model}
         phase={phase}

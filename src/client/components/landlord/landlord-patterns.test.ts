@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { LandlordPortalTitle } from "@/components/landlord/chrome";
 import { LandlordDocumentMenuButton, LandlordDocumentRow } from "@/components/landlord/document-row";
 import { LandlordPageIntro } from "@/components/landlord/page-intro";
 import { LandlordPropertyHeading, LandlordScopeHeading } from "@/components/landlord/section-heading";
@@ -16,6 +17,29 @@ const house: LandlordDocumentRowModel = {
 };
 
 describe("landlord pattern components", () => {
+  it("uses the frame breadcrumb on desktop and the brand on phone", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandlordPortalTitle, { crumb: "Landlord portal / Properties / Maple Court" }),
+    );
+    expect(html).toContain("Landlord Gopher");
+    expect(html).toContain("md:hidden");
+    expect(html).toContain("Landlord portal / Properties / Maple Court");
+    expect(html).toContain("hidden");
+    expect(html).toContain("md:inline");
+  });
+
+  it("lets a screen replace the phone label without changing the breadcrumb", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandlordPortalTitle, {
+        crumb: "Landlord portal / Maintenance / #MR-001000",
+        mobileLabel: "#MR-001000",
+      }),
+    );
+    expect(html).toContain("#MR-001000");
+    expect(html).toContain("Landlord portal / Maintenance / #MR-001000");
+    expect(html).not.toContain("Landlord Gopher");
+  });
+
   it("renders the document row copy for both layouts", () => {
     const html = renderToStaticMarkup(
       createElement(LandlordDocumentRow, {

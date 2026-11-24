@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Building2, Search } from "lucide-react";
 import { useApp } from "@/context";
-import { LandlordPageIntro, StatusBanner, ToneBadge } from "@/components/landlord";
+import { LandlordPageIntro, LandlordPortalTitle, StatusBanner, ToneBadge } from "@/components/landlord";
 import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -124,7 +124,7 @@ export function LandlordPropertiesPage({ navigate }: { navigate: (to: string) =>
   const failed = !loading && Boolean(error) && properties.length === 0;
 
   return (
-    <PageShell title="Properties" width="max-w-6xl">
+    <PageShell title={<LandlordPortalTitle crumb="Landlord portal / Properties" />} width="max-w-6xl">
       <LandlordPageIntro
         eyebrow="Your portfolio"
         title="Properties"

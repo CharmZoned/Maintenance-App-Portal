@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useApp } from "@/context";
-import { LandlordPageIntro, LandlordPropertyHeading } from "@/components/landlord";
+import { LandlordPageIntro, LandlordPortalTitle, LandlordPropertyHeading } from "@/components/landlord";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1054,12 +1054,7 @@ function LandlordRequestShell({
     : "Landlord portal / Maintenance";
   return (
     <PageShell
-      title={
-        <>
-          <span className="lg-body font-medium md:hidden">{requestNumber ?? "Maintenance"}</span>
-          <span className="lg-body hidden font-medium md:inline">{crumb}</span>
-        </>
-      }
+      title={<LandlordPortalTitle crumb={crumb} mobileLabel={requestNumber ?? "Maintenance"} />}
       width="max-w-[45rem]"
       titleIsPageHeading={false}
     >
