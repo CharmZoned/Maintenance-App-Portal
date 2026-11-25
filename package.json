@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck:tests": "tsc --noEmit -p tests/tsconfig.json",
     "test:browser": "playwright test --trace off",
+    "test:smoke": "playwright test -c playwright.smoke.config.ts --trace off",
     "test:all": "tsx tests/dashboard/run.ts all",
     "test:ui": "tsx tests/dashboard/server.ts",
     "dev:local": "tsx tests/emulator/dev-local.ts",

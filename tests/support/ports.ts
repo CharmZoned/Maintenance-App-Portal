@@ -5,6 +5,8 @@
  *   54332  emulator for browser tests (Playwright)
  *   54330  emulator for `pnpm dev:local` (manual poking around)
  *   5199   Vite dev server for browser tests
+ *   54333  emulator for the smoke tests (Playwright, staging tools on)
+ *   5197   Vite dev server for the smoke tests
  *   5198   Vite dev server for `pnpm dev:local`
  *   4600   test dashboard
  */
@@ -17,6 +19,11 @@ export const E2E_EMULATOR_PORT = num("E2E_EMULATOR_PORT", 54332);
 export const E2E_EMULATOR_URL = `http://127.0.0.1:${E2E_EMULATOR_PORT}`;
 export const E2E_APP_PORT = num("E2E_APP_PORT", 5199);
 export const E2E_APP_URL = `http://127.0.0.1:${E2E_APP_PORT}`;
+
+export const SMOKE_EMULATOR_PORT = num("SMOKE_EMULATOR_PORT", 54333);
+export const SMOKE_EMULATOR_URL = `http://127.0.0.1:${SMOKE_EMULATOR_PORT}`;
+export const SMOKE_APP_PORT = num("SMOKE_APP_PORT", 5197);
+export const SMOKE_APP_URL = `http://127.0.0.1:${SMOKE_APP_PORT}`;
 
 export const DEV_EMULATOR_PORT = num("DEV_EMULATOR_PORT", 54330);
 export const DEV_APP_PORT = num("DEV_APP_PORT", 5198);

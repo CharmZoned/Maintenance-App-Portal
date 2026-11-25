@@ -3,6 +3,7 @@
  *
  *   tsx tests/emulator/cli.ts --port 54332          (used by the browser tests)
  *   tsx tests/emulator/cli.ts --port 54330 --seed   (used by `pnpm dev:local`)
+ *   tsx tests/emulator/cli.ts --port 54333 --seed --demo   (the demo world; used by the smoke tests)
  */
 import { PASSWORD, PERSONAS } from "./seed";
 import { startEmulator } from "./server";
@@ -15,7 +16,7 @@ const value = (name: string) => {
 };
 
 const emulator = await startEmulator({ port: Number(value("port") ?? 54330) });
-if (flag("seed")) await emulator.reset({ seed: true });
+if (flag("seed")) await emulator.reset({ seed: true, demo: flag("demo") });
 
 console.log(`\nSupabase emulator ready at ${emulator.url}`);
 console.log(`  ${emulator.db.migrations.length} migrations applied (baseline + supabase/migrations)`);

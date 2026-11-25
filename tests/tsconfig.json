@@ -11,6 +11,7 @@
     "../scripts/**/*.ts",
     "../vitest.config.ts",
     "../playwright.config.ts",
+    "../playwright.smoke.config.ts",
     "../src/client/vite-env.d.ts",
     "../archive/legacy-d1-hono/index.ts"
   ]
