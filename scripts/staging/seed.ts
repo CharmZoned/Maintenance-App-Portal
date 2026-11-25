@@ -21,6 +21,7 @@
  * connection is opened. None of the values above is ever printed.
  */
 import { pathToFileURL } from "node:url";
+import { demoStorageFiles } from "../../tests/emulator/demo-files";
 import { seedWorld } from "../../tests/emulator/seed";
 import { countRows, openDatabase, resetDatabase, seedDbOver } from "./database";
 import { checkStagingTarget, createRedactor, describeDbTarget, PRODUCTION_PROJECT_REF, STAGING_PROJECT_REF, type StagingEnv } from "./guard";
@@ -29,8 +30,7 @@ import {
   emptyStorageBuckets,
   seedAuthOver,
   statelessClient,
-  uploadDemoDocuments,
-  uploadDemoPhotos,
+  uploadDemoFiles,
   verifySignIns,
 } from "./supabase";
 
@@ -116,16 +116,22 @@ export async function main(env: StagingEnv): Promise<number> {
     state = "seeded";
     say(`  created ${Object.keys(world.users).length} logins`);
 
-    // 5. Sample files for the seeded document and photo rows, so Download and
-    //    the photo strips work.
-    stage = "upload the sample files";
-    const documentUploads = await uploadDemoDocuments(admin, world.demo?.documents ?? []);
-    const photoUploads = await uploadDemoPhotos(admin, world.demo?.photos ?? []);
-    for (const [label, uploads] of [["sample document(s)", documentUploads], ["sample photo(s)", photoUploads]] as const) {
-      const notUploaded = uploads.filter((u) => !u.ok);
-      say(`  uploaded ${uploads.length - notUploaded.length} of ${uploads.length} ${label}`);
-      for (const upload of notUploaded) say(`  NOT uploaded ${upload.path}: ${upload.detail}`);
-      if (notUploaded.length > 0) failed = true;
+    // 5. The committed demo files behind every seeded storage row (photos and
+    //    documents; tests/emulator/demo-files.ts), so the photo strips and
+    //    Download work. Each is read back after upload; any file that is not
+    //    stored exactly fails the reset.
+    stage = "upload the demo files";
+    if (!world.demo) throw new Error("the seed returned no demo extras, so there is nothing to upload.");
+    const files = demoStorageFiles(world.demo);
+    const uploads = await uploadDemoFiles(admin, files);
+    for (const bucket of [...new Set(uploads.map((u) => u.bucket))]) {
+      const inBucket = uploads.filter((u) => u.bucket === bucket);
+      say(`  storage ${bucket}: ${inBucket.filter((u) => u.ok).length} of ${inBucket.length} file(s) uploaded and verified`);
+    }
+    const notStored = uploads.filter((u) => !u.ok);
+    for (const upload of notStored) say(`  NOT stored ${upload.bucket}/${upload.path}: ${upload.detail}`);
+    if (notStored.length > 0) {
+      throw new Error(`${notStored.length} of ${uploads.length} demo file(s) were not stored (listed above).`);
     }
 
     // 6. Report.
@@ -156,7 +162,9 @@ export async function main(env: StagingEnv): Promise<number> {
     if (state === "wiped") {
       say("Staging has been wiped and is only partly seeded. Fix the cause and run this again - it is safe to repeat.");
     }
-    if (state === "seeded") say("The data was seeded; only the checks afterwards did not complete.");
+    if (state === "seeded") {
+      say("The data was seeded, but the steps after it did not all complete (see above). Fix the cause and run this again - it is safe to repeat.");
+    }
   } finally {
     await db?.end().catch(() => undefined);
   }
