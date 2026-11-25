@@ -12,7 +12,7 @@ import { ANON_KEY, SERVICE_ROLE_KEY, verifyJwt, type JwtClaims } from "./jwt";
 import { RestApi } from "./rest";
 import { seedWorld, type World } from "./seed";
 import { StorageApi } from "./storage";
-import { demoPhotoBytes } from "./demo-photos";
+import { demoStorageFiles } from "./demo-files";
 
 export interface Emulator {
   url: string;
@@ -89,15 +89,16 @@ export async function startEmulator(opts: { port?: number; quiet?: boolean } = {
     storage.reset();
     if (!o.seed) return null;
     const world = await seedWorld(db, auth, { demo: o.demo === true });
-    // The demo photo rows get their committed sample images, so thumbnails load locally.
-    for (const photo of world.demo?.photos ?? []) {
-      const bytes = demoPhotoBytes(photo.storage_path);
-      if (!bytes) continue;
-      const [row] = await db.admin<{ owner: string | null }>(
-        `select uploaded_by_user_id::text as owner from public."MaintenanceRequestPhotos" where id = $1`,
-        [photo.id],
-      );
-      await storage.putObject("maintenance-photos", photo.storage_path, bytes, photo.content_type, row?.owner ?? null);
+    // The demo photo and document rows get their committed files - the same
+    // mapping the staging reset uploads - so thumbnails and Download work locally.
+    if (world.demo) {
+      for (const file of demoStorageFiles(world.demo)) {
+        const [row] = await db.admin<{ owner: string | null }>(
+          `select uploaded_by_user_id::text as owner from public."${file.table}" where id = $1`,
+          [file.rowId],
+        );
+        await storage.putObject(file.bucket, file.path, file.bytes, file.contentType, row?.owner ?? null);
+      }
     }
     return world;
   };

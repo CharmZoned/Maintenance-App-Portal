@@ -75,9 +75,10 @@ export interface DemoWorld {
   leases: { tenant: { id: number }; tenant2: { id: number }; ended: { id: number } };
   requests: Record<DemoRequestKey, { id: number }>;
   /**
-   * PropertyDocuments rows. Only the rows are seeded: nothing is stored at
-   * `storage_path` (bucket `property-documents`) until a caller uploads a file
-   * there. Lists work without the file; Download does not.
+   * PropertyDocuments rows. Only the rows are seeded; the file at
+   * `storage_path` (bucket `property-documents`) is uploaded by the caller (the
+   * staging reset and `pnpm dev:local` do). The PDFs are committed under
+   * tests/emulator/demo-documents/ (see ./demo-files.ts).
    */
   documents: Array<{
     id: number;
@@ -93,7 +94,7 @@ export interface DemoWorld {
    * rows are seeded; the file at `storage_path` (bucket `maintenance-photos`)
    * is uploaded by the caller (the staging reset and `pnpm dev:local` do). The
    * images are committed under tests/emulator/demo-photos/, named like the last
-   * segment of `storage_path` (see ./demo-photos.ts).
+   * segment of `storage_path` (see ./demo-files.ts).
    */
   photos: Array<{
     id: number;
